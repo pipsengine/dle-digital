@@ -1,0 +1,6 @@
+{
+  "name": "DLE Smart HRIS",
+  "description": "AI-Powered Industrial Enterprise Command Center for Dorman Long Engineering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

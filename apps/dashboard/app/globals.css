@@ -1,0 +1,40 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-dle-blue: #11A0E6;
+  --color-dle-blue-deep: #0A6EA8;
+  --color-dle-blue-light: #5FC6F5;
+  --color-dle-cyan: #0FC3D9;
+  
+  --color-dle-green: #10B981;
+  --color-dle-yellow: #F59E0B;
+  --color-dle-red: #EF4444;
+  --color-dle-purple: #8B5CF6;
+  --color-dle-teal: #14B8A6;
+  --color-dle-slate: #64748B;
+  --color-background: #ffffff;
+  --color-surface-dim: #f8fafc;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-surface-dim);
+    color: var(--color-slate-900);
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full;
+  }
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    @apply bg-slate-300;
+  }
+}
