@@ -77,6 +77,8 @@ type HistoryRow = {
   referenceNo: string;
   employeeId: string;
   employeeName: string;
+  businessUnit?: string | null;
+  location?: string | null;
   eventType: EmploymentEventType;
   eventDate: string;
   effectiveDate: string;
@@ -88,6 +90,8 @@ type HistoryRow = {
   newGrade?: string | null;
   previousManager?: string | null;
   newManager?: string | null;
+  previousLocation?: string | null;
+  newLocation?: string | null;
   previousStatus?: string | null;
   newStatus?: string | null;
   reason: string;
@@ -197,12 +201,24 @@ async function apiFetch<T>(path: string, init: RequestInit & { role: Role; viewe
     },
   });
   const ct = res.headers.get('content-type') || '';
+  if (!res.ok) {
+    if (ct.includes('application/json')) {
+      const json = (await res.json()) as { status: string; data?: T; error?: string };
+      throw new Error(json.error || 'Request failed');
+    }
+    const text = await res.text().catch(() => '');
+    throw new Error(text || 'Request failed');
+  }
   if (ct.includes('text/csv')) {
     const text = await res.text();
     return text as unknown as T;
   }
+  if (!ct.includes('application/json')) {
+    const buf = await res.arrayBuffer();
+    return buf as unknown as T;
+  }
   const json = (await res.json()) as { status: string; data?: T; error?: string };
-  if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Request failed');
+  if (json.status !== 'success') throw new Error(json.error || 'Request failed');
   return json.data as T;
 }
 
@@ -232,6 +248,27 @@ type ProfileSnapshot = {
   employmentType: string;
   reportingManager: string;
   jobDetails?: Record<string, string | null>;
+};
+
+type FormOptions = {
+  departments: string[];
+  businessUnits: string[];
+  locations: string[];
+  jobTitles: string[];
+  jobGrades: string[];
+};
+
+type ExportFormat = 'csv' | 'xls' | 'pdf';
+
+type SavedView = {
+  id: string;
+  name: string;
+  query: string;
+  dateFrom: string;
+  dateTo: string;
+  filters: Record<string, string[]>;
+  exportFormat: ExportFormat;
+  savedAt: string;
 };
 
 const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => (
@@ -302,6 +339,53 @@ const Select = ({
   </div>
 );
 
+const MultiSelectChips = ({
+  label,
+  options,
+  values,
+  onChange,
+  hint,
+}: {
+  label: string;
+  options: string[];
+  values: Set<string>;
+  onChange: (next: Set<string>) => void;
+  hint?: string;
+}) => {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs font-extrabold text-slate-700">{label}</div>
+        {hint ? <div className="text-[11px] text-slate-500 font-semibold">{hint}</div> : null}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.length ? (
+          options.map((t) => {
+            const on = values.has(t);
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => {
+                  const next = new Set(values);
+                  if (next.has(t)) next.delete(t);
+                  else next.add(t);
+                  onChange(next);
+                }}
+                className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition-colors ${on ? 'border-dle-blue bg-dle-blue/5 text-dle-blue' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                {t}
+              </button>
+            );
+          })
+        ) : (
+          <div className="text-sm text-slate-600 font-semibold">No options.</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function EmploymentHistoryClient({ initialNow, employeeId }: { initialNow: string; employeeId?: string }) {
   const router = useRouter();
   const [role, setRole] = useState<Role>('HR Manager');
@@ -313,6 +397,16 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
   const [activeFilters, setActiveFilters] = useState<Record<string, Set<string>>>({
     eventType: new Set(),
     department: new Set(),
+    businessUnit: new Set(),
+    location: new Set(),
+    employeeStatus: new Set(),
+    previousJobGrade: new Set(),
+    newJobGrade: new Set(),
+    previousDepartment: new Set(),
+    newDepartment: new Set(),
+    jobTitle: new Set(),
+    manager: new Set(),
+    createdBy: new Set(),
     approvalStatus: new Set(),
   });
   const [dateFrom, setDateFrom] = useState('');
@@ -322,6 +416,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
   const [summary, setSummary] = useState<ApiState<Summary>>({ status: 'idle' });
   const [analytics, setAnalytics] = useState<ApiState<Analytics>>({ status: 'idle' });
   const [insights, setInsights] = useState<ApiState<AIInsight[]>>({ status: 'idle' });
+  const [formOptions, setFormOptions] = useState<ApiState<FormOptions>>({ status: 'idle' });
 
   const [selected, setSelected] = useState<DetailItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -335,8 +430,77 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
     notes: '',
   });
   const [toast, setToast] = useState<{ title: string; detail: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('csv');
+
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const [saveViewName, setSaveViewName] = useState('');
+  const [viewsMenuOpen, setViewsMenuOpen] = useState(false);
 
   const nowStamp = useMemo(() => formatDateTimeUtc(initialNow), [initialNow]);
+  const filterCount = useMemo(() => {
+    const base = Object.values(activeFilters).reduce((acc, s) => acc + s.size, 0);
+    return base + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
+  }, [activeFilters, dateFrom, dateTo]);
+
+  const viewsStorageKey = 'dle.hris.employmentHistory.savedViews.v1';
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(viewsStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SavedView[];
+      if (Array.isArray(parsed)) setSavedViews(parsed.filter((v) => v && typeof v === 'object' && typeof (v as any).name === 'string'));
+    } catch {
+      return;
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(viewsStorageKey, JSON.stringify(savedViews.slice(0, 50)));
+    } catch {
+      return;
+    }
+  }, [savedViews]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setFormOptions({ status: 'loading' });
+      try {
+        const raw = await apiFetch<any>(`/api/hris/employees/form-options`, { method: 'GET', role, viewerEmployeeId });
+        const payload: FormOptions = {
+          departments: Array.isArray(raw?.departments) ? raw.departments : [],
+          businessUnits: Array.isArray(raw?.businessUnits) ? raw.businessUnits : [],
+          locations: Array.isArray(raw?.locations) ? raw.locations : [],
+          jobTitles: Array.isArray(raw?.jobTitles) ? raw.jobTitles : [],
+          jobGrades: Array.isArray(raw?.jobGrades) ? raw.jobGrades : [],
+        };
+        if (!cancelled) setFormOptions({ status: 'ready', data: payload });
+      } catch (e) {
+        if (!cancelled) setFormOptions({ status: 'error', error: e instanceof Error ? e.message : 'Unable to load form options' });
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [role, viewerEmployeeId]);
+
+  const derivedOptions = useMemo(() => {
+    const items = list.status === 'ready' && list.data ? list.data.items : [];
+    const uniq = (vals: (string | null | undefined)[]) => Array.from(new Set(vals.map((v) => (v || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    return {
+      managers: uniq(items.flatMap((i) => [i.previousManager, i.newManager])),
+      createdBys: uniq(items.map((i) => i.createdBy)),
+      employeeStatuses: uniq(items.flatMap((i) => [i.previousStatus, i.newStatus])),
+      departments: uniq(items.flatMap((i) => [i.previousDepartment, i.newDepartment])),
+      jobTitles: uniq(items.flatMap((i) => [i.previousJobTitle, i.newJobTitle])),
+      jobGrades: uniq(items.flatMap((i) => [i.previousGrade, i.newGrade])),
+      locations: uniq(items.flatMap((i) => [i.location, i.previousLocation, i.newLocation])),
+      businessUnits: uniq(items.map((i) => i.businessUnit || null)),
+    };
+  }, [list]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -348,9 +512,9 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
     if (debouncedQuery) params.set('q', debouncedQuery);
     if (employeeId) params.set('employeeId', employeeId);
     const csv = (s: Set<string>) => Array.from(s).join(',');
-    if (activeFilters.eventType.size) params.set('eventType', csv(activeFilters.eventType));
-    if (activeFilters.department.size) params.set('department', csv(activeFilters.department));
-    if (activeFilters.approvalStatus.size) params.set('approvalStatus', csv(activeFilters.approvalStatus));
+    for (const [k, v] of Object.entries(activeFilters)) {
+      if (v.size) params.set(k, csv(v));
+    }
     if (dateFrom) params.set('from', dateFrom);
     if (dateTo) params.set('to', dateTo);
     params.set('limit', '200');
@@ -385,7 +549,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
 
   useEffect(() => {
     void loadAll();
-  }, [debouncedQuery, employeeId, role, viewerEmployeeId, dateFrom, dateTo, activeFilters.eventType, activeFilters.department, activeFilters.approvalStatus]);
+  }, [debouncedQuery, employeeId, role, viewerEmployeeId, dateFrom, dateTo, activeFilters]);
 
   const openDetails = async (id: string) => {
     setDrawerOpen(true);
@@ -502,20 +666,49 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
         return;
       }
       const qs = serializeFilters();
-      const csv = await apiFetch<string>(`/api/hris/employment-history/export?${qs}`, { method: 'GET', role, viewerEmployeeId });
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const urlWithFmt = `/api/hris/employment-history/export?format=${encodeURIComponent(exportFormat)}&${qs}`;
+      const data = await apiFetch<string | ArrayBuffer>(urlWithFmt, { method: 'GET', role, viewerEmployeeId });
+      const blob =
+        typeof data === 'string'
+          ? new Blob([data], { type: 'text/csv;charset=utf-8' })
+          : new Blob([data], { type: exportFormat === 'pdf' ? 'application/pdf' : 'application/vnd.ms-excel' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = employeeId ? `employment-history_${employeeId}.csv` : 'employment-history.csv';
+      const ext = exportFormat === 'csv' ? 'csv' : exportFormat === 'xls' ? 'xls' : 'pdf';
+      a.download = employeeId ? `employment-history_${employeeId}.${ext}` : `employment-history.${ext}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setToast({ title: 'Exported', detail: 'CSV export generated.', tone: 'ok' });
+      setToast({ title: 'Exported', detail: `${exportFormat.toUpperCase()} export generated.`, tone: 'ok' });
     } catch (e) {
       setToast({ title: 'Export failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' });
     }
+  };
+
+  const persistCurrentView = () => {
+    const name = saveViewName.trim();
+    if (!name) {
+      setToast({ title: 'Name required', detail: 'Enter a name for this saved view.', tone: 'warn' });
+      return;
+    }
+    const filters: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(activeFilters)) filters[k] = Array.from(v);
+    const entry: SavedView = {
+      id: `view-${Math.random().toString(16).slice(2)}`,
+      name,
+      query,
+      dateFrom,
+      dateTo,
+      filters,
+      exportFormat,
+      savedAt: new Date().toISOString(),
+    };
+    setSavedViews((prev) => [entry, ...prev].slice(0, 50));
+    setSaveViewOpen(false);
+    setSaveViewName('');
+    setToast({ title: 'View saved', detail: name, tone: 'ok' });
   };
 
   const breadcrumb = (
@@ -581,6 +774,14 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
             <Plus className="w-4 h-4" />
             Add History Event
           </button>
+          <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
+            <span className="text-xs font-extrabold text-slate-700">Export</span>
+            <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value as ExportFormat)} className="text-xs font-extrabold text-slate-800 bg-white focus:outline-none">
+              <option value="csv">CSV</option>
+              <option value="xls">Excel</option>
+              <option value="pdf">PDF</option>
+            </select>
+          </span>
           <button type="button" onClick={exportCurrent} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">
             <Download className="w-4 h-4" />
             Export History
@@ -669,13 +870,27 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
               <Filter className="w-4 h-4" />
               Filters
               <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-slate-100 text-slate-700">
-                {formatNumber(activeFilters.eventType.size + activeFilters.department.size + activeFilters.approvalStatus.size + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0))}
+                {formatNumber(filterCount)}
               </span>
             </button>
             <button
               type="button"
               onClick={() => {
-                setActiveFilters({ eventType: new Set(), department: new Set(), approvalStatus: new Set() });
+                setActiveFilters({
+                  eventType: new Set(),
+                  department: new Set(),
+                  businessUnit: new Set(),
+                  location: new Set(),
+                  employeeStatus: new Set(),
+                  previousJobGrade: new Set(),
+                  newJobGrade: new Set(),
+                  previousDepartment: new Set(),
+                  newDepartment: new Set(),
+                  jobTitle: new Set(),
+                  manager: new Set(),
+                  createdBy: new Set(),
+                  approvalStatus: new Set(),
+                });
                 setDateFrom('');
                 setDateTo('');
               }}
@@ -684,13 +899,79 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
               <X className="w-4 h-4" />
               Reset
             </button>
-            <button type="button" onClick={() => setToast({ title: 'Saved view', detail: 'Saved filter views are stubbed in this build.', tone: 'warn' })} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-extrabold text-slate-700 transition-colors">
-              <ChevronDown className="w-4 h-4" />
-              Save View
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setViewsMenuOpen((v) => !v)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-extrabold text-slate-700 transition-colors"
+              >
+                <ChevronDown className="w-4 h-4" />
+                Saved Views
+                <span className="text-[11px] font-extrabold px-2 py-1 rounded-full bg-slate-100 text-slate-700">{formatNumber(savedViews.length)}</span>
+              </button>
+              {viewsMenuOpen ? (
+                <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-[320px] rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-100">
+                    <div className="text-xs font-extrabold text-slate-900">Saved filter views</div>
+                    <div className="text-[11px] text-slate-500 font-semibold mt-0.5">Apply a saved view or save the current one.</div>
+                  </div>
+                  <div className="max-h-[300px] overflow-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSaveViewOpen(true);
+                        setSaveViewName('');
+                        setViewsMenuOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-slate-50"
+                    >
+                      <div className="text-xs font-extrabold text-slate-900">Save current view</div>
+                      <div className="text-[11px] text-slate-500 font-semibold mt-0.5">Persist filters + date range + search</div>
+                    </button>
+                    {savedViews.length ? (
+                      savedViews.map((v) => (
+                        <div key={v.id} className="px-4 py-3 border-t border-slate-100 flex items-start justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuery(v.query || '');
+                              setDateFrom(v.dateFrom || '');
+                              setDateTo(v.dateTo || '');
+                              setExportFormat(v.exportFormat || 'csv');
+                              const next: Record<string, Set<string>> = { ...activeFilters };
+                              for (const k of Object.keys(next)) next[k] = new Set(v.filters?.[k] || []);
+                              setActiveFilters(next);
+                              setViewsMenuOpen(false);
+                              setToast({ title: 'View applied', detail: v.name, tone: 'ok' });
+                            }}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <div className="text-xs font-extrabold text-slate-900 truncate">{v.name}</div>
+                            <div className="text-[11px] text-slate-500 font-semibold mt-0.5">Saved: {formatDateUtc(v.savedAt)}</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSavedViews((p) => p.filter((x) => x.id !== v.id));
+                              setToast({ title: 'View removed', detail: v.name, tone: 'ok' });
+                            }}
+                            className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50"
+                            aria-label="Delete saved view"
+                          >
+                            <X className="w-4 h-4 text-slate-600" />
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="px-4 py-6 text-sm text-slate-600 font-semibold">No saved views yet.</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
             <button type="button" onClick={exportCurrent} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 transition-colors">
               <Download className="w-4 h-4" />
-              Export Current View
+              Export ({exportFormat.toUpperCase()})
             </button>
           </div>
         </div>
@@ -1016,7 +1297,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
                 </span>
                 <div>
                   <div className="text-sm font-extrabold text-slate-900">Filters</div>
-                  <div className="text-xs text-slate-500 font-semibold mt-0.5">Event type, department, approval status, date range.</div>
+                  <div className="text-xs text-slate-500 font-semibold mt-0.5">Search-grade filtering across lifecycle movements and workflow.</div>
                 </div>
               </div>
               <button type="button" onClick={() => setFilterPanelOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
@@ -1035,63 +1316,134 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-extrabold text-slate-700">Event Type</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {eventTypes.map((t) => {
-                    const on = activeFilters.eventType.has(t);
-                    return (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() =>
-                          setActiveFilters((p) => {
-                            const next = new Set(p.eventType);
-                            if (next.has(t)) next.delete(t);
-                            else next.add(t);
-                            return { ...p, eventType: next };
-                          })
-                        }
-                        className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition-colors ${on ? 'border-dle-blue bg-dle-blue/5 text-dle-blue' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
-                      >
-                        {t}
-                      </button>
-                    );
-                  })}
-                </div>
+              <MultiSelectChips
+                label="Event Type"
+                hint="Primary event categories"
+                options={eventTypes}
+                values={activeFilters.eventType}
+                onChange={(next) => setActiveFilters((p) => ({ ...p, eventType: next }))}
+              />
+
+              <MultiSelectChips
+                label="Department"
+                hint="Prev/New department scope"
+                options={formOptions.status === 'ready' && formOptions.data?.departments.length ? formOptions.data.departments : derivedOptions.departments}
+                values={activeFilters.department}
+                onChange={(next) => setActiveFilters((p) => ({ ...p, department: next }))}
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <MultiSelectChips
+                  label="Business Unit"
+                  hint="Org unit"
+                  options={formOptions.status === 'ready' && formOptions.data?.businessUnits.length ? formOptions.data.businessUnits : derivedOptions.businessUnits}
+                  values={activeFilters.businessUnit}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, businessUnit: next }))}
+                />
+                <MultiSelectChips
+                  label="Location"
+                  hint="Work location"
+                  options={formOptions.status === 'ready' && formOptions.data?.locations.length ? formOptions.data.locations : derivedOptions.locations}
+                  values={activeFilters.location}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, location: next }))}
+                />
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-extrabold text-slate-700">Approval Status</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {approvalStatuses.map((s) => {
-                    const on = activeFilters.approvalStatus.has(s);
-                    return (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={() =>
-                          setActiveFilters((p) => {
-                            const next = new Set(p.approvalStatus);
-                            if (next.has(s)) next.delete(s);
-                            else next.add(s);
-                            return { ...p, approvalStatus: next };
-                          })
-                        }
-                        className={`px-3 py-2 rounded-xl border text-xs font-extrabold transition-colors ${on ? 'border-dle-blue bg-dle-blue/5 text-dle-blue' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
-                      >
-                        {s}
-                      </button>
-                    );
-                  })}
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <MultiSelectChips
+                  label="Employee Status"
+                  hint="Current/target status"
+                  options={derivedOptions.employeeStatuses.length ? derivedOptions.employeeStatuses : ['Active', 'Probation', 'Confirmed', 'Suspended', 'Resigned', 'Terminated', 'Retired', 'Contract']}
+                  values={activeFilters.employeeStatus}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, employeeStatus: next }))}
+                />
+                <MultiSelectChips
+                  label="Created By"
+                  hint="Actor"
+                  options={derivedOptions.createdBys.length ? derivedOptions.createdBys : ['HR Officer', 'HR Manager', 'System']}
+                  values={activeFilters.createdBy}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, createdBy: next }))}
+                />
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <MultiSelectChips
+                  label="Job Title"
+                  hint="Prev/New"
+                  options={formOptions.status === 'ready' && formOptions.data?.jobTitles.length ? formOptions.data.jobTitles : derivedOptions.jobTitles}
+                  values={activeFilters.jobTitle}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, jobTitle: next }))}
+                />
+                <MultiSelectChips
+                  label="Manager"
+                  hint="Prev/New"
+                  options={derivedOptions.managers}
+                  values={activeFilters.manager}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, manager: next }))}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <MultiSelectChips
+                  label="Previous Job Grade"
+                  hint="Prev"
+                  options={formOptions.status === 'ready' && formOptions.data?.jobGrades.length ? formOptions.data.jobGrades : derivedOptions.jobGrades}
+                  values={activeFilters.previousJobGrade}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, previousJobGrade: next }))}
+                />
+                <MultiSelectChips
+                  label="New Job Grade"
+                  hint="New"
+                  options={formOptions.status === 'ready' && formOptions.data?.jobGrades.length ? formOptions.data.jobGrades : derivedOptions.jobGrades}
+                  values={activeFilters.newJobGrade}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, newJobGrade: next }))}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <MultiSelectChips
+                  label="Previous Department"
+                  hint="Prev"
+                  options={formOptions.status === 'ready' && formOptions.data?.departments.length ? formOptions.data.departments : derivedOptions.departments}
+                  values={activeFilters.previousDepartment}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, previousDepartment: next }))}
+                />
+                <MultiSelectChips
+                  label="New Department"
+                  hint="New"
+                  options={formOptions.status === 'ready' && formOptions.data?.departments.length ? formOptions.data.departments : derivedOptions.departments}
+                  values={activeFilters.newDepartment}
+                  onChange={(next) => setActiveFilters((p) => ({ ...p, newDepartment: next }))}
+                />
+              </div>
+
+              <MultiSelectChips
+                label="Approval Status"
+                hint="Workflow stage"
+                options={approvalStatuses}
+                values={activeFilters.approvalStatus}
+                onChange={(next) => setActiveFilters((p) => ({ ...p, approvalStatus: next }))}
+              />
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveFilters({ eventType: new Set(), department: new Set(), approvalStatus: new Set() });
+                    setActiveFilters({
+                      eventType: new Set(),
+                      department: new Set(),
+                      businessUnit: new Set(),
+                      location: new Set(),
+                      employeeStatus: new Set(),
+                      previousJobGrade: new Set(),
+                      newJobGrade: new Set(),
+                      previousDepartment: new Set(),
+                      newDepartment: new Set(),
+                      jobTitle: new Set(),
+                      manager: new Set(),
+                      createdBy: new Set(),
+                      approvalStatus: new Set(),
+                    });
                     setDateFrom('');
                     setDateTo('');
                     setFilterPanelOpen(false);
@@ -1110,6 +1462,56 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
         </motion.div>
       )}
     </AnimatePresence>
+  );
+
+  const saveViewModal = (
+    <Modal
+      open={saveViewOpen}
+      onClose={() => {
+        setSaveViewOpen(false);
+        setSaveViewName('');
+      }}
+    >
+      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
+            <Filter className="w-5 h-5" />
+          </span>
+          <div>
+            <div className="text-sm font-extrabold text-slate-900">Save Filter View</div>
+            <div className="text-xs text-slate-500 font-semibold mt-0.5">Stores search, filters, date range, and export format.</div>
+          </div>
+        </div>
+        <button type="button" onClick={() => setSaveViewOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
+          <X className="w-4 h-4 text-slate-600" />
+        </button>
+      </div>
+      <div className="p-6 space-y-4">
+        <Field label="View Name" value={saveViewName} onChange={setSaveViewName} placeholder="e.g., Pending approvals — Operations" required />
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-xs font-extrabold text-slate-700">Current selection</div>
+          <div className="mt-2 text-xs text-slate-600 font-semibold">
+            Filters: {formatNumber(filterCount)} <span className="mx-2">•</span> Export: {exportFormat.toUpperCase()}
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSaveViewOpen(false);
+              setSaveViewName('');
+            }}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button type="button" onClick={persistCurrentView} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 transition-colors">
+            <CheckCircle2 className="w-4 h-4" />
+            Save View
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 
   const addModal = (
@@ -1353,4 +1755,3 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
     </div>
   );
 }
-

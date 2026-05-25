@@ -51,6 +51,8 @@ type EmploymentHistoryItem = {
   referenceNo: string;
   employeeId: string;
   employeeName: string;
+  businessUnit?: string | null;
+  location?: string | null;
   eventType: EmploymentEventType;
   eventDate: string;
   effectiveDate: string;
@@ -171,7 +173,7 @@ const assertNonEmpty = (val: string, msg: string) => {
   if (!val) throw new Error(msg);
 };
 
-const validateEvent = (evt: Partial<EmploymentHistoryItem>) => {
+const validateEvent = (evt: Partial<EmploymentHistoryItem>, ctx: { role: Role }) => {
   assertNonEmpty(normalize(evt.employeeId), 'Employee is required');
   assertNonEmpty(normalize(evt.employeeName), 'Employee name is required');
   assertNonEmpty(normalize(evt.eventType), 'Event type is required');
@@ -180,6 +182,10 @@ const validateEvent = (evt: Partial<EmploymentHistoryItem>) => {
 
   const eff = new Date(normalize(evt.effectiveDate)).getTime();
   if (!Number.isFinite(eff)) throw new Error('Effective date is invalid');
+
+  const allowBackdate = ctx.role === 'Super Admin' || ctx.role === 'HR Director';
+  const backDays = Math.floor((Date.now() - eff) / (24 * 3600 * 1000));
+  if (backDays > 30 && !allowBackdate) throw new Error('Backdated events (>30 days) require HR Director or Super Admin permission');
 
   if (evt.eventType === 'Transfer' || evt.eventType === 'Department Change') {
     const prev = normalize(evt.previousDepartment);
@@ -202,7 +208,33 @@ const validateEvent = (evt: Partial<EmploymentHistoryItem>) => {
     const next = normalize(evt.newManager);
     assertNonEmpty(prev, 'Previous manager is required');
     assertNonEmpty(next, 'New manager is required');
+    if (normalize(evt.employeeName) && next && normalize(evt.employeeName).toLowerCase() === next.toLowerCase()) throw new Error('Manager cannot be the same as employee');
   }
+
+  const prevStatus = normalize(evt.previousStatus);
+  if (prevStatus && prevStatus.toLowerCase() === 'suspended' && (evt.eventType === 'Transfer' || evt.eventType === 'Department Change' || evt.eventType === 'Promotion' || evt.eventType === 'Grade Change')) {
+    throw new Error('Suspended employee cannot be moved or promoted without reactivation');
+  }
+  if (prevStatus && ['resigned', 'terminated', 'retired'].includes(prevStatus.toLowerCase()) && (evt.eventType === 'Promotion' || evt.eventType === 'Grade Change' || evt.eventType === 'Transfer' || evt.eventType === 'Department Change')) {
+    throw new Error('Exited employee cannot receive movement or promotion events');
+  }
+  if (evt.eventType === 'Reactivation' && prevStatus && ['active', 'confirmed', 'probation', 'on leave', 'contract'].includes(prevStatus.toLowerCase())) {
+    throw new Error('Reactivation requires an inactive previous status');
+  }
+};
+
+type OverrideLedgerEntry = {
+  historyId: string;
+  at: string;
+  patch: Record<string, string | null>;
+  previous: Record<string, string | null | undefined>;
+};
+
+const businessUnitForDepartment = (dep: string) => {
+  if (['Civil Engineering', 'Mechanical Engineering', 'Electrical & Instrumentation', 'Project Controls', 'HSE', 'Quality Assurance'].includes(dep)) return 'Projects';
+  if (['Procurement', 'Finance', 'Human Capital', 'IT & Support', 'Legal & Compliance'].includes(dep)) return 'Corporate Services';
+  if (dep === 'Executive Office') return 'Commercial';
+  return 'Operations';
 };
 
 const updateOverrideFromApprovedEvent = (evt: EmploymentHistoryItem) => {
@@ -213,36 +245,71 @@ const updateOverrideFromApprovedEvent = (evt: EmploymentHistoryItem) => {
   next.profile.jobDetails = next.profile.jobDetails && typeof next.profile.jobDetails === 'object' ? { ...next.profile.jobDetails } : {};
   next.profile.employmentDetails = next.profile.employmentDetails && typeof next.profile.employmentDetails === 'object' ? { ...next.profile.employmentDetails } : {};
 
+  const currentDepartment = (next.profile.department ?? next.profile.jobDetails.department) as string | undefined;
+  const currentJobTitle = (next.profile.jobTitle ?? next.profile.jobDetails.jobTitle) as string | undefined;
+  const currentJobGrade = next.profile.jobDetails.jobGrade as string | undefined;
+  const currentManager = (next.profile.reportingManager ?? next.profile.jobDetails.reportingManager) as string | undefined;
+  const currentStatus = (next.profile.employmentStatus ?? next.profile.employmentDetails.employmentStatus) as string | undefined;
+
+  const patch: Record<string, string | null> = {};
+  const previous: Record<string, string | null | undefined> = {};
+
   if (evt.eventType === 'Transfer' || evt.eventType === 'Department Change') {
     if (evt.newDepartment) {
+      previous.department = currentDepartment;
+      patch.department = evt.newDepartment;
       next.profile.department = evt.newDepartment;
       next.profile.jobDetails.department = evt.newDepartment;
+      const bu = businessUnitForDepartment(evt.newDepartment);
+      previous.businessUnit = (next.profile.businessUnit ?? next.profile.jobDetails.businessUnit) as string | undefined;
+      patch.businessUnit = bu;
+      next.profile.businessUnit = bu;
+      next.profile.jobDetails.businessUnit = bu;
     }
   }
   if (evt.eventType === 'Job Title Change' || evt.eventType === 'Promotion') {
     if (evt.newJobTitle) {
+      previous.jobTitle = currentJobTitle;
+      patch.jobTitle = evt.newJobTitle;
       next.profile.jobTitle = evt.newJobTitle;
       next.profile.jobDetails.jobTitle = evt.newJobTitle;
     }
   }
   if (evt.eventType === 'Promotion' || evt.eventType === 'Grade Change') {
-    if (evt.newGrade) next.profile.jobDetails.jobGrade = evt.newGrade;
+    if (evt.newGrade) {
+      previous.jobGrade = currentJobGrade;
+      patch.jobGrade = evt.newGrade;
+      next.profile.jobDetails.jobGrade = evt.newGrade;
+    }
   }
   if (evt.eventType === 'Manager Change') {
     if (evt.newManager) {
+      previous.reportingManager = currentManager;
+      patch.reportingManager = evt.newManager;
       next.profile.reportingManager = evt.newManager;
       next.profile.jobDetails.reportingManager = evt.newManager;
     }
   }
   if (evt.eventType === 'Suspension' || evt.eventType === 'Reactivation' || evt.eventType === 'Resignation' || evt.eventType === 'Termination' || evt.eventType === 'Retirement') {
     if (evt.newStatus) {
+      previous.employmentStatus = currentStatus;
+      patch.employmentStatus = evt.newStatus;
       next.profile.employmentStatus = evt.newStatus;
       next.profile.employmentDetails.employmentStatus = evt.newStatus;
+    }
+  }
+  if (evt.eventType === 'Transfer') {
+    if (evt.newLocation) {
+      previous.location = (next.profile.location ?? next.profile.jobDetails.location) as string | undefined;
+      patch.location = evt.newLocation;
+      next.profile.location = evt.newLocation;
+      next.profile.jobDetails.location = evt.newLocation;
     }
   }
 
   const histEvent = {
     id: `h-${employeeId}-${Math.random().toString(16).slice(2)}`,
+    sourceHistoryId: evt.id,
     at: evt.effectiveDate,
     type: evt.eventType,
     detail: evt.reason,
@@ -250,15 +317,112 @@ const updateOverrideFromApprovedEvent = (evt: EmploymentHistoryItem) => {
   };
   next.history = Array.isArray(next.history) ? [histEvent, ...next.history] : [histEvent];
 
+  const ledgerEntry: OverrideLedgerEntry = { historyId: evt.id, at: nowIso(), patch, previous };
+  next.ledger = Array.isArray(next.ledger) ? [ledgerEntry, ...next.ledger] : [ledgerEntry];
+
+  overridesStore.set(employeeId, next);
+};
+
+const reverseOverrideForEvent = (employeeId: string, historyId: string) => {
+  const ov = overridesStore.get(employeeId);
+  if (!ov || typeof ov !== 'object') return;
+  const ledger: OverrideLedgerEntry[] = Array.isArray((ov as any).ledger) ? (ov as any).ledger : [];
+  const entry = ledger.find((l) => l && l.historyId === historyId);
+  if (!entry) return;
+
+  const next = { ...(ov as any) };
+  next.profile = next.profile && typeof next.profile === 'object' ? { ...next.profile } : {};
+  next.profile.jobDetails = next.profile.jobDetails && typeof next.profile.jobDetails === 'object' ? { ...next.profile.jobDetails } : {};
+  next.profile.employmentDetails = next.profile.employmentDetails && typeof next.profile.employmentDetails === 'object' ? { ...next.profile.employmentDetails } : {};
+
+  const restore = (k: string, v: string | null | undefined) => {
+    const del = v === undefined;
+    if (k === 'department') {
+      if (del) {
+        delete next.profile.department;
+        delete next.profile.jobDetails.department;
+      } else {
+        next.profile.department = v;
+        next.profile.jobDetails.department = v;
+      }
+      return;
+    }
+    if (k === 'businessUnit') {
+      if (del) {
+        delete next.profile.businessUnit;
+        delete next.profile.jobDetails.businessUnit;
+      } else {
+        next.profile.businessUnit = v;
+        next.profile.jobDetails.businessUnit = v;
+      }
+      return;
+    }
+    if (k === 'jobTitle') {
+      if (del) {
+        delete next.profile.jobTitle;
+        delete next.profile.jobDetails.jobTitle;
+      } else {
+        next.profile.jobTitle = v;
+        next.profile.jobDetails.jobTitle = v;
+      }
+      return;
+    }
+    if (k === 'jobGrade') {
+      if (del) delete next.profile.jobDetails.jobGrade;
+      else next.profile.jobDetails.jobGrade = v;
+      return;
+    }
+    if (k === 'reportingManager') {
+      if (del) {
+        delete next.profile.reportingManager;
+        delete next.profile.jobDetails.reportingManager;
+      } else {
+        next.profile.reportingManager = v;
+        next.profile.jobDetails.reportingManager = v;
+      }
+      return;
+    }
+    if (k === 'employmentStatus') {
+      if (del) {
+        delete next.profile.employmentStatus;
+        delete next.profile.employmentDetails.employmentStatus;
+      } else {
+        next.profile.employmentStatus = v;
+        next.profile.employmentDetails.employmentStatus = v;
+      }
+      return;
+    }
+    if (k === 'location') {
+      if (del) {
+        delete next.profile.location;
+        delete next.profile.jobDetails.location;
+      } else {
+        next.profile.location = v;
+        next.profile.jobDetails.location = v;
+      }
+    }
+  };
+
+  for (const [k] of Object.entries(entry.patch || {})) {
+    restore(k, entry.previous ? entry.previous[k] : undefined);
+  }
+
+  next.ledger = ledger.filter((l) => l && l.historyId !== historyId);
+  if (Array.isArray(next.history)) next.history = next.history.filter((h: any) => h && h.sourceHistoryId !== historyId);
   overridesStore.set(employeeId, next);
 };
 
 const toListItem = (evt: EmploymentHistoryItem) => {
+  const dep = (evt.newDepartment || evt.previousDepartment || '') as string;
+  const businessUnit = dep ? businessUnitForDepartment(dep) : null;
+  const location = (evt.newLocation || evt.previousLocation || evt.location || null) as string | null;
   return {
     id: evt.id,
     referenceNo: evt.referenceNo,
     employeeId: evt.employeeId,
     employeeName: evt.employeeName,
+    businessUnit: evt.businessUnit ?? businessUnit,
+    location: evt.location ?? location,
     eventType: evt.eventType,
     eventDate: evt.eventDate,
     effectiveDate: evt.effectiveDate,
@@ -270,6 +434,8 @@ const toListItem = (evt: EmploymentHistoryItem) => {
     newGrade: evt.newGrade ?? null,
     previousManager: evt.previousManager ?? null,
     newManager: evt.newManager ?? null,
+    previousLocation: evt.previousLocation ?? null,
+    newLocation: evt.newLocation ?? null,
     previousStatus: evt.previousStatus ?? null,
     newStatus: evt.newStatus ?? null,
     reason: evt.reason,
@@ -346,6 +512,8 @@ const aiInsights = (items: EmploymentHistoryItem[], canSeePayrollSignals: boolea
   return base;
 };
 
+const parseCsv = (v: string | null) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
+
 const exportCsv = (items: EmploymentHistoryItem[]) => {
   const header = [
     'reference_no',
@@ -396,6 +564,83 @@ const exportCsv = (items: EmploymentHistoryItem[]) => {
   return lines.join('\n');
 };
 
+const exportXls = (items: EmploymentHistoryItem[]) => {
+  const esc = (v: unknown) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  const rows = [
+    ['Reference No.', 'Employee ID', 'Employee Name', 'Event Type', 'Prev Dept', 'New Dept', 'Prev Title', 'New Title', 'Prev Grade', 'New Grade', 'Effective Date', 'Approval Status', 'Approved By', 'Created By', 'Created At'],
+    ...items.map((i) => [
+      i.referenceNo,
+      i.employeeId,
+      i.employeeName,
+      i.eventType,
+      i.previousDepartment || '',
+      i.newDepartment || '',
+      i.previousJobTitle || '',
+      i.newJobTitle || '',
+      i.previousGrade || '',
+      i.newGrade || '',
+      i.effectiveDate,
+      i.approvalStatus,
+      i.approvedBy || '',
+      i.createdBy,
+      i.createdAt,
+    ]),
+  ];
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body><table border="1">${rows
+    .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
+    .join('')}</table></body></html>`;
+};
+
+const buildPdf = (title: string, lines: string[]) => {
+  const escapePdf = (s: string) => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  const clean = (s: string) => escapePdf(s.replace(/\r?\n/g, ' ').slice(0, 160));
+  const fontSize = 10;
+  const lineHeight = 12;
+  const startY = 760;
+  const x = 40;
+
+  const all = [title, ...lines].slice(0, 55);
+  const streamParts: string[] = [];
+  streamParts.push(`BT /F1 ${fontSize} Tf ${x} ${startY} Td`);
+  for (let i = 0; i < all.length; i++) {
+    const line = clean(all[i] || '');
+    streamParts.push(`(${line}) Tj`);
+    if (i !== all.length - 1) streamParts.push(`0 -${lineHeight} Td`);
+  }
+  streamParts.push('ET');
+  const stream = streamParts.join('\n');
+
+  const encoder = new TextEncoder();
+  const objs: string[] = [];
+  objs.push('%PDF-1.4\n');
+  const xref: number[] = [0];
+  const pushObj = (s: string) => {
+    xref.push(objs.join('').length);
+    objs.push(s);
+  };
+
+  pushObj('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  pushObj('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+  pushObj('3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n');
+  pushObj('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
+
+  const streamBytes = encoder.encode(stream);
+  pushObj(`5 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n${stream}\nendstream\nendobj\n`);
+
+  const startXref = objs.join('').length;
+  const count = xref.length;
+  let xrefTable = `xref\n0 ${count}\n0000000000 65535 f \n`;
+  for (let i = 1; i < count; i++) {
+    xrefTable += `${String(xref[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
+  const full = objs.join('') + xrefTable + trailer;
+  return encoder.encode(full);
+};
+
 const findVisibleItems = (role: Role, viewerEmployeeId: string | undefined) => {
   ensureSeedFromListStore();
   const perms = permissions(role, viewerEmployeeId);
@@ -436,10 +681,89 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
     if (seg0 === 'export') {
       if (!perms.canExport) return jsonErr(403, 'Permission denied');
       const url = new URL(request.url);
+      const fmt = normalize(url.searchParams.get('format')) || 'csv';
+      const q = normalize(url.searchParams.get('q')).toLowerCase();
       const employeeId = normalize(url.searchParams.get('employeeId'));
+      const eventTypes = parseCsv(url.searchParams.get('eventType'));
+      const departments = parseCsv(url.searchParams.get('department'));
+      const businessUnits = parseCsv(url.searchParams.get('businessUnit'));
+      const locations = parseCsv(url.searchParams.get('location'));
+      const employeeStatuses = parseCsv(url.searchParams.get('employeeStatus'));
+      const createdBys = parseCsv(url.searchParams.get('createdBy'));
+      const managers = parseCsv(url.searchParams.get('manager'));
+      const jobTitles = parseCsv(url.searchParams.get('jobTitle'));
+      const prevGrades = parseCsv(url.searchParams.get('previousJobGrade'));
+      const newGrades = parseCsv(url.searchParams.get('newJobGrade'));
+      const prevDepts = parseCsv(url.searchParams.get('previousDepartment'));
+      const newDepts = parseCsv(url.searchParams.get('newDepartment'));
+      const approvalStatuses = parseCsv(url.searchParams.get('approvalStatus'));
+      const from = normalize(url.searchParams.get('from'));
+      const to = normalize(url.searchParams.get('to'));
       let items = findVisibleItems(role, viewerEmployeeId);
       if (employeeId) items = items.filter((i) => i.employeeId === employeeId);
-      const csv = exportCsv(items.slice(0, 2000));
+
+      const fromMs = from ? new Date(`${from}T00:00:00.000Z`).getTime() : null;
+      const toMs = to ? new Date(`${to}T23:59:59.999Z`).getTime() : null;
+
+      if (eventTypes.length) items = items.filter((i) => eventTypes.includes(i.eventType));
+      if (approvalStatuses.length) items = items.filter((i) => approvalStatuses.includes(i.approvalStatus));
+      if (departments.length) items = items.filter((i) => departments.includes((i.newDepartment || i.previousDepartment || '').toString()));
+      if (businessUnits.length) items = items.filter((i) => businessUnits.includes((i.businessUnit || '').toString()));
+      if (locations.length) items = items.filter((i) => locations.includes((i.location || i.newLocation || i.previousLocation || '').toString()));
+      if (employeeStatuses.length) items = items.filter((i) => employeeStatuses.includes((i.newStatus || i.previousStatus || 'Active').toString()));
+      if (createdBys.length) items = items.filter((i) => createdBys.includes((i.createdBy || '').toString()));
+      if (managers.length) items = items.filter((i) => managers.includes((i.newManager || i.previousManager || '').toString()));
+      if (jobTitles.length) items = items.filter((i) => jobTitles.includes((i.newJobTitle || i.previousJobTitle || '').toString()));
+      if (prevGrades.length) items = items.filter((i) => prevGrades.includes((i.previousGrade || '').toString()));
+      if (newGrades.length) items = items.filter((i) => newGrades.includes((i.newGrade || '').toString()));
+      if (prevDepts.length) items = items.filter((i) => prevDepts.includes((i.previousDepartment || '').toString()));
+      if (newDepts.length) items = items.filter((i) => newDepts.includes((i.newDepartment || '').toString()));
+      if (fromMs !== null) items = items.filter((i) => new Date(i.effectiveDate).getTime() >= fromMs);
+      if (toMs !== null) items = items.filter((i) => new Date(i.effectiveDate).getTime() <= toMs);
+      if (q) {
+        items = items.filter((i) => {
+          return (
+            i.employeeId.toLowerCase().includes(q) ||
+            i.employeeName.toLowerCase().includes(q) ||
+            i.eventType.toLowerCase().includes(q) ||
+            i.referenceNo.toLowerCase().includes(q) ||
+            (i.approvalId || '').toLowerCase().includes(q) ||
+            (i.createdBy || '').toLowerCase().includes(q) ||
+            (i.businessUnit || '').toLowerCase().includes(q) ||
+            (i.location || '').toLowerCase().includes(q) ||
+            (i.previousDepartment || '').toLowerCase().includes(q) ||
+            (i.newDepartment || '').toLowerCase().includes(q) ||
+            (i.previousJobTitle || '').toLowerCase().includes(q) ||
+            (i.newJobTitle || '').toLowerCase().includes(q) ||
+            (i.previousGrade || '').toLowerCase().includes(q) ||
+            (i.newGrade || '').toLowerCase().includes(q) ||
+            (i.previousManager || '').toLowerCase().includes(q) ||
+            (i.newManager || '').toLowerCase().includes(q)
+          );
+        });
+      }
+
+      const safeItems = items.slice(0, 5000);
+      if (fmt === 'xls') {
+        const xls = exportXls(safeItems);
+        return new NextResponse(xls, {
+          headers: {
+            'content-type': 'application/vnd.ms-excel; charset=utf-8',
+            'content-disposition': `attachment; filename="employment-history.xls"`,
+          },
+        });
+      }
+      if (fmt === 'pdf') {
+        const lines = safeItems.slice(0, 40).map((i) => `${i.referenceNo} | ${i.employeeId} | ${i.employeeName} | ${i.eventType} | ${i.approvalStatus} | ${i.effectiveDate.slice(0, 10)}`);
+        const pdf = buildPdf('DLE HRIS — Employment History Export', lines);
+        return new NextResponse(pdf, {
+          headers: {
+            'content-type': 'application/pdf',
+            'content-disposition': `attachment; filename="employment-history.pdf"`,
+          },
+        });
+      }
+      const csv = exportCsv(safeItems);
       return new NextResponse(csv, {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
@@ -486,6 +810,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
         referenceNo: `HIST-${String(100000 + historyStore.size)}`,
         employeeId,
         employeeName,
+        businessUnit: normalize(body.businessUnit) || null,
+        location: normalize(body.location) || null,
         eventType,
         eventDate: nowIso(),
         effectiveDate,
@@ -515,7 +841,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
         reverseOf: null,
       };
 
-      validateEvent(item);
+      validateEvent(item, { role });
       audit(item, role, 'History event created');
       historyStore.set(item.id, item);
       listStore.set(item.id, toListItem(item));
@@ -571,10 +897,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
       item.approvalStatus = 'Reversed';
       item.updatedAt = nowIso();
       audit(item, role, 'History event reversed');
-      const employeeId = item.employeeId;
-      const ov = overridesStore.get(employeeId);
-      if (ov && typeof ov === 'object' && Array.isArray(ov.history)) ov.history = ov.history.filter((h: any) => h && h.detail !== item.reason);
-      overridesStore.set(employeeId, ov);
+      reverseOverrideForEvent(item.employeeId, item.id);
       listStore.set(item.id, toListItem(item));
       return jsonOk(item);
     }
@@ -621,10 +944,11 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ action: s
   item.previousStatus = normalize(body.previousStatus) || null;
   item.newStatus = normalize(body.newStatus) || null;
   item.supportingDocument = body.supportingDocument && typeof body.supportingDocument === 'object' ? { id: normalize(body.supportingDocument.id), name: normalize(body.supportingDocument.name) } : item.supportingDocument;
+  item.businessUnit = normalize(body.businessUnit) || item.businessUnit || null;
+  item.location = normalize(body.location) || item.location || null;
   item.updatedAt = nowIso();
-  validateEvent(item);
+  validateEvent(item, { role });
   audit(item, role, 'History event edited', { oldValue: before, newValue: JSON.stringify(toListItem(item)) });
   listStore.set(item.id, toListItem(item));
   return jsonOk(item);
 }
-
