@@ -3,12 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev apps/dashboard",
-    "dev:all": "npm run dev",
-    "build": "next build apps/dashboard",
-    "start": "next start apps/dashboard",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "lint": "eslint .",
-    "clean": "next clean apps/dashboard"
+    "clean": "next clean"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

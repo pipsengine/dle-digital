@@ -1,0 +1,131 @@
+-- DLE Smart HRIS - PostgreSQL Database Schema Representation
+
+-- 1. ROLES & PERMISSIONS
+CREATE TABLE IF NOT EXISTS roles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) UNIQUE NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS permissions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key VARCHAR(100) UNIQUE NOT NULL, -- e.g., 'view_dashboard', 'manage_payroll'
+  module VARCHAR(100) NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+  permission_id UUID REFERENCES permissions(id) ON DELETE CASCADE,
+  PRIMARY KEY (role_id, permission_id)
+);
+
+-- 2. USERS
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(100) NOT NULL,
+  last_name VARCHAR(100) NOT NULL,
+  employee_id VARCHAR(50) UNIQUE,
+  is_active BOOLEAN DEFAULT TRUE,
+  must_change_password BOOLEAN DEFAULT TRUE,
+  last_login TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, role_id)
+);
+
+-- 3. AUDIT & LOGGING
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  event_type VARCHAR(100) NOT NULL, -- e.g., 'USER_LOGIN', 'PAYROLL_APPROVED'
+  module VARCHAR(100) NOT NULL,
+  table_name VARCHAR(100),
+  record_id UUID,
+  old_data JSONB,
+  new_data JSONB,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 4. ORGANIZATION STRUCTURE
+CREATE TABLE IF NOT EXISTS locations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  type VARCHAR(50), -- e.g., 'HEAD_OFFICE', 'FABRICATION_YARD', 'OFFSHORE'
+  address TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS departments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  location_id UUID REFERENCES locations(id) ON DELETE SET NULL,
+  parent_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. EMPLOYEE CORE
+CREATE TABLE IF NOT EXISTS employees (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  employee_number VARCHAR(50) UNIQUE NOT NULL,
+  department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+  job_title VARCHAR(100),
+  hire_date DATE NOT NULL,
+  status VARCHAR(50) DEFAULT 'ACTIVE', -- ACTIVE, ON_LEAVE, TERMINATED
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. LEAVE & ATTENDANCE
+CREATE TABLE IF NOT EXISTS leaves (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+  leave_type VARCHAR(50) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  status VARCHAR(50) DEFAULT 'PENDING', -- PENDING, APPROVED, REJECTED
+  approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. APPROVAL WORKFLOWS
+CREATE TABLE IF NOT EXISTS approval_workflows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  module VARCHAR(100) NOT NULL,
+  record_id UUID NOT NULL,
+  current_step INT DEFAULT 1,
+  status VARCHAR(50) DEFAULT 'IN_PROGRESS',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id UUID REFERENCES approval_workflows(id) ON DELETE CASCADE,
+  step_order INT NOT NULL,
+  approver_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  status VARCHAR(50) DEFAULT 'PENDING',
+  comments TEXT,
+  acted_at TIMESTAMP WITH TIME ZONE
+);
+
+-- 8. SYSTEM & INTEGRATIONS
+CREATE TABLE IF NOT EXISTS ai_automation_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_type VARCHAR(100) NOT NULL, -- e.g., 'FATIGUE_PREDICTION', 'ATTRITION_RISK'
+  details JSONB NOT NULL,
+  confidence_score DECIMAL(5,2),
+  acted_upon BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

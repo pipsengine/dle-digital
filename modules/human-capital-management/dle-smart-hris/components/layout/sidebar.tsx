@@ -1,7 +1,6 @@
 'use client';
 
-import type * as React from 'react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
@@ -16,20 +15,6 @@ import { navigationConfig, NavItem } from '@/lib/config/navigation';
 export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    const activeGroup = navigationConfig.find((item) => {
-      if (!item.subItems?.length) return false;
-      return item.subItems.some((sub) => sub.route === pathname);
-    });
-
-    if (!activeGroup) return;
-
-    setExpandedGroups((prev) => {
-      if (prev[activeGroup.id]) return prev;
-      return { ...prev, [activeGroup.id]: true };
-    });
-  }, [pathname]);
 
   const toggleGroup = (id: string) => {
     setExpandedGroups(prev => ({
@@ -59,49 +44,36 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
             return (
               <div key={item.id}>
                 {hasSubMenu ? (
-                  <div
+                  <button
+                    onClick={() => {
+                      if (!isOpen) toggle(); // Auto-expand sidebar if closed
+                      toggleGroup(item.id);
+                    }}
                     className={`flex items-center justify-between px-3 py-2.5 rounded-lg transition-all duration-200 w-full group whitespace-nowrap ${
-                      isActivePrimary
-                        ? 'bg-dle-blue/5 text-dle-blue font-medium'
+                      isActivePrimary && !isExpanded
+                        ? 'bg-dle-blue/5 text-dle-blue font-medium' 
                         : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                     }`}
                   >
-                    <Link
-                      href={item.route || '#'}
-                      className="flex items-center gap-3 flex-1 min-w-0"
-                      onClick={() => {
-                        if (!isOpen) toggle();
-                      }}
-                    >
-                      <item.icon className={`w-5 h-5 shrink-0 ${isActivePrimary ? 'text-dle-blue' : 'text-slate-400 group-hover:text-slate-600'}`} />
+                    <div className="flex items-center gap-3">
+                      <item.icon className={`w-5 h-5 shrink-0 ${isActivePrimary && !isExpanded ? 'text-dle-blue' : 'text-slate-400 group-hover:text-slate-600'}`} />
                       {isOpen && (
-                        <span className="text-sm font-medium truncate">
+                        <span className="text-sm font-medium">
                           {item.label}
                         </span>
                       )}
-                    </Link>
+                    </div>
                     {isOpen && (
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-2">
                         {item.badgeCount && (
                           <span className="bg-dle-blue/10 text-dle-blue text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
                             {item.badgeCount}
                           </span>
                         )}
-                        <button
-                          type="button"
-                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            toggleGroup(item.id);
-                          }}
-                          className="p-1 rounded-md hover:bg-white/60 transition-colors"
-                          aria-label={isExpanded ? `Collapse ${item.label}` : `Expand ${item.label}`}
-                        >
-                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-dle-blue' : 'text-slate-400'}`} />
-                        </button>
+                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-dle-blue' : 'text-slate-400'}`} />
                       </div>
                     )}
-                  </div>
+                  </button>
                 ) : (
                   <Link
                     href={item.route || '#'}
@@ -178,7 +150,7 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
               <Box className="w-5 h-5 text-white" />
             </div>
             <span className="font-bold text-slate-900 tracking-tight text-lg overflow-hidden text-ellipsis">
-              DLE <span className="font-medium text-slate-500 pb-1">Digital</span>
+              DLE <span className="font-medium text-slate-500 pb-1">Smart</span>
             </span>
           </div>
         ) : (
@@ -196,9 +168,9 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
       </button>
 
       <div className="flex-1 py-6 px-4 flex flex-col overflow-y-auto overflow-x-hidden custom-scrollbar">
-        {renderNavGroup(mainItems, 'Main')}
-        {renderNavGroup(supportItems, 'IT & Support')}
+        {renderNavGroup(mainItems, 'Enterprise Operations')}
         {renderNavGroup(adminItems, 'Administration')}
+        {renderNavGroup(supportItems, 'Support')}
       </div>
     </motion.aside>
   );
