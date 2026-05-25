@@ -500,5 +500,6 @@ export default function ExecutiveHRDashboard() {
         </div>
       </section>
     </div>
+    </div>
   );
 }
