@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { 
   ChevronLeft,
   ChevronRight,
@@ -167,11 +168,7 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
       <div className="h-16 flex items-center justify-between px-4 border-b border-slate-100 whitespace-nowrap overflow-hidden">
         <Link href="/dashboard/executive-hr-dashboard" className="flex items-center w-full px-3">
           <div className="relative overflow-hidden h-14 w-full max-w-[220px]">
-            <img
-              src="/brand/dorman-long-logo.jpg"
-              alt="Dorman Long Engineering Limited"
-              className="h-full w-full object-contain"
-            />
+            <Image src="/brand/dorman-long-logo.jpg" alt="Dorman Long Engineering Limited" fill sizes="220px" className="object-contain" priority />
           </div>
         </Link>
       </div>

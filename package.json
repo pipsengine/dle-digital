@@ -8,7 +8,7 @@
     "build": "next build apps/dashboard",
     "start": "next start apps/dashboard",
     "lint": "eslint apps/dashboard --ignore-pattern **/.next --ignore-pattern **/node_modules",
-    "clean": "next clean apps/dashboard"
+    "clean": "node -e \"require('fs').rmSync('apps/dashboard/.next',{recursive:true,force:true}); console.log('Cleaned apps/dashboard/.next');\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

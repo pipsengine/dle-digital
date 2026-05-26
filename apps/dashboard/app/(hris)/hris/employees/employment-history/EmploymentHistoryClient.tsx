@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
@@ -109,7 +109,17 @@ type DetailItem = HistoryRow & {
   newLocation?: string | null;
   supportingDocument?: { id: string; name: string } | null;
   updatedAt?: string | null;
-  audit?: { id: string; at: string; action: string; performedBy: string; reason?: string | null; oldValue?: string | null; newValue?: string | null }[];
+  audit?: {
+    id: string;
+    at: string;
+    action: string;
+    performedBy: string;
+    ipAddress?: string | null;
+    device?: string | null;
+    reason?: string | null;
+    oldValue?: string | null;
+    newValue?: string | null;
+  }[];
 };
 
 type Summary = {
@@ -520,7 +530,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
     return () => clearTimeout(t);
   }, [query]);
 
-  const serializeFilters = () => {
+  const serializeFilters = useCallback(() => {
     const params = new URLSearchParams();
     if (debouncedQuery) params.set('q', debouncedQuery);
     if (employeeId) params.set('employeeId', employeeId);
@@ -532,9 +542,9 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
     if (dateTo) params.set('to', dateTo);
     params.set('limit', '200');
     return params.toString();
-  };
+  }, [activeFilters, dateFrom, dateTo, debouncedQuery, employeeId]);
 
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     setList({ status: 'loading' });
     setSummary({ status: 'loading' });
     setInsights({ status: 'loading' });
@@ -558,12 +568,12 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
       setInsights({ status: 'error', error: msg });
       setAnalytics({ status: 'error', error: msg });
     }
-  };
+  }, [role, serializeFilters, viewerEmployeeId]);
 
   useEffect(() => {
     const t = setTimeout(() => void loadAll(), 0);
     return () => clearTimeout(t);
-  }, [debouncedQuery, employeeId, role, viewerEmployeeId, dateFrom, dateTo, activeFilters]);
+  }, [loadAll]);
 
   const openDetails = async (id: string) => {
     setDrawerOpen(true);

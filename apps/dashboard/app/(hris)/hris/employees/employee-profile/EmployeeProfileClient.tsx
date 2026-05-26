@@ -1042,8 +1042,12 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
 
   const loading = profile.status === 'loading' || overview.status === 'loading' || insights.status === 'loading' || audit.status === 'loading';
   const hasError = profile.status === 'error' || overview.status === 'error' || insights.status === 'error' || audit.status === 'error';
+  const profileData = profile.data;
+  const overviewData = overview.data;
+  const insightsData = insights.data;
+  const auditData = audit.data;
 
-  if (loading && (profile.status !== 'ready' || !profile.data)) {
+  if (loading && (profile.status !== 'ready' || !profileData)) {
     return (
       <div className="bg-white space-y-6">
         {breadcrumb}
@@ -1064,15 +1068,15 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
     );
   }
 
-  if (!profile.data || !overview.data || !insights.data || !audit.data) return <EmptyState title="No employee profile found" detail="The requested employee record could not be retrieved." />;
+  if (!profileData || !overviewData || !insightsData || !auditData) return <EmptyState title="No employee profile found" detail="The requested employee record could not be retrieved." />;
 
   return (
     <div className="bg-white space-y-6">
       {breadcrumb}
       {roleBar}
 
-      <ProfileHeader profile={profile.data} role={role} onAction={onAction} permissions={perms} />
-      <InsightBanner insights={insights.data} onAction={onAction} />
+      <ProfileHeader profile={profileData} role={role} onAction={onAction} permissions={perms} />
+      <InsightBanner insights={insightsData} onAction={onAction} />
 
       <Card className="p-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1082,7 +1086,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">ID: {profile.data.employeeId}</span>
+            <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">ID: {profileData.employeeId}</span>
             <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">Loaded: {nowStamp}</span>
           </div>
         </div>
@@ -1093,7 +1097,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
           <AnimatePresence mode="wait">
             {tab === 'overview' && (
               <motion.div key="overview" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }}>
-                <OverviewTab overview={overview.data} permissions={perms} />
+                <OverviewTab overview={overviewData} permissions={perms} />
               </motion.div>
             )}
 
@@ -1111,7 +1115,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                             <button
                               type="button"
                               onClick={() => {
-                                setPersonalDraft(profile.data.personalInfo);
+                                setPersonalDraft(profileData.personalInfo);
                                 setPersonalEdit(true);
                               }}
                               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
@@ -1183,7 +1187,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                           ] as const
                         ).map((f) => {
                           const restricted = f.restricted && !perms.canViewSensitivePersonal;
-                          const current = profile.data.personalInfo[f.key] ?? null;
+                          const current = profileData.personalInfo[f.key] ?? null;
                           if (!personalEdit) return <Field key={f.key} label={f.label} value={v(current)} masked={restricted} />;
                           return (
                             <EditField
@@ -1212,7 +1216,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setEmploymentDraft(profile.data.employmentDetails);
+                                  setEmploymentDraft(profileData.employmentDetails);
                                   setEmploymentEdit(true);
                                 }}
                                 className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
@@ -1259,7 +1263,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                               </>
                             )}
                             {perms.canChangeStatus && (
-                              <button type="button" onClick={() => setStatusNext(profile.data.employmentStatus)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-dle-blue bg-dle-blue/5 text-xs font-extrabold text-dle-blue hover:bg-dle-blue/10 transition-colors">
+                              <button type="button" onClick={() => setStatusNext(profileData.employmentStatus)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-dle-blue bg-dle-blue/5 text-xs font-extrabold text-dle-blue hover:bg-dle-blue/10 transition-colors">
                                 <RefreshCcw className="w-4 h-4" />
                                 Status Workflow
                               </button>
@@ -1268,7 +1272,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                         }
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {Object.entries(profile.data.employmentDetails).map(([k, val]) => {
+                        {Object.entries(profileData.employmentDetails).map(([k, val]) => {
                             if (!employmentEdit) return <Field key={k} label={k} value={v(val)} />;
                             return (
                               <EditField
@@ -1340,7 +1344,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                                     employmentStatus: res.employmentStatus,
                                     employmentDetails: { ...p.employmentDetails, employmentStatus: res.employmentStatus },
                                   }));
-                                  pushAudit({ id: `audit-${Math.random().toString(16).slice(2)}`, at: new Date().toISOString(), action: 'Changed status', performedBy: role, oldValue: profile.data.employmentStatus, newValue: res.employmentStatus, reason: statusReason || 'Status change' });
+                                  pushAudit({ id: `audit-${Math.random().toString(16).slice(2)}`, at: new Date().toISOString(), action: 'Changed status', performedBy: role, oldValue: profileData.employmentStatus, newValue: res.employmentStatus, reason: statusReason || 'Status change' });
                                   setToast({ title: 'Status updated', detail: 'Employment status changed and audited.', tone: 'ok' });
                                   setStatusReason('');
                                   setStatusNext('');
@@ -1369,7 +1373,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                             <button
                               type="button"
                               onClick={() => {
-                                setJobDraft(profile.data.jobDetails);
+                                setJobDraft(profileData.jobDetails);
                                 setJobEdit(true);
                               }}
                               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
@@ -1419,7 +1423,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                       }
                     >
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {Object.entries(profile.data.jobDetails).map(([k, val]) => {
+                        {Object.entries(profileData.jobDetails).map(([k, val]) => {
                           if (!jobEdit) return <Field key={k} label={k} value={v(val)} />;
                           return (
                             <EditField
@@ -1444,7 +1448,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                             <button
                               type="button"
                               onClick={() => {
-                                setContactsDraft(profile.data.contacts);
+                                setContactsDraft(profileData.contacts);
                                 setContactsEdit(true);
                               }}
                               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
@@ -1494,7 +1498,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                       }
                     >
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {Object.entries(profile.data.contacts).map(([k, val]) => {
+                        {Object.entries(profileData.contacts).map(([k, val]) => {
                           if (!contactsEdit) return <Field key={k} label={k} value={v(val)} />;
                           return (
                             <EditField
@@ -1518,7 +1522,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                           <button
                             type="button"
                             onClick={() => {
-                              setEmergencyDraft({ isPrimary: profile.data.emergencyContacts.length === 0, isNextOfKin: true, isBeneficiary: false });
+                              setEmergencyDraft({ isPrimary: profileData.emergencyContacts.length === 0, isNextOfKin: true, isBeneficiary: false });
                               setEmergencyModal({ mode: 'add' });
                             }}
                             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 transition-colors"
@@ -1532,7 +1536,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                       }
                     >
                       <div className="space-y-3">
-                        {profile.data.emergencyContacts.map((c) => (
+                        {profileData.emergencyContacts.map((c) => (
                           <div key={c.id} className="rounded-2xl border border-slate-200/60 bg-white p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -1591,7 +1595,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                             </div>
                           </div>
                         ))}
-                        {profile.data.emergencyContacts.length === 0 && <div className="text-sm text-slate-600 font-semibold">No emergency contacts on file.</div>}
+                        {profileData.emergencyContacts.length === 0 && <div className="text-sm text-slate-600 font-semibold">No emergency contacts on file.</div>}
                       </div>
                     </Section>
                   )}
@@ -1692,7 +1696,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                           )}
 
                           <div className="divide-y divide-slate-100 border border-slate-200/60 rounded-2xl overflow-hidden">
-                            {profile.data.documents.slice(0, 24).map((d) => (
+                            {profileData.documents.slice(0, 24).map((d) => (
                               <div key={d.id} className="px-5 py-4 flex items-start justify-between gap-3 bg-white">
                                 <div className="min-w-0">
                                   <div className="text-sm font-extrabold text-slate-900">{d.category}</div>
@@ -1736,7 +1740,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                                 </div>
                               </div>
                             ))}
-                            {profile.data.documents.length === 0 && <div className="px-5 py-6 text-sm text-slate-600 font-semibold bg-white">No documents available.</div>}
+                            {profileData.documents.length === 0 && <div className="px-5 py-6 text-sm text-slate-600 font-semibold bg-white">No documents available.</div>}
                           </div>
                         </div>
                       )}
@@ -1747,7 +1751,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                     <div className="space-y-6">
                       <Section title="Leave Summary" icon={Calendar}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                          {Object.entries(profile.data.leaveSummary.balances).map(([k, val]) => (
+                          {Object.entries(profileData.leaveSummary.balances).map(([k, val]) => (
                             <SummaryCard key={k} label={k} value={`${val} days`} tone={{ bg: 'bg-slate-50', fg: 'text-slate-900' }} />
                           ))}
                         </div>
@@ -1765,7 +1769,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                               </tr>
                             </thead>
                             <tbody>
-                              {profile.data.leaveSummary.history.slice(0, 20).map((h) => (
+                              {profileData.leaveSummary.history.slice(0, 20).map((h) => (
                                 <tr key={h.id} className="border-b border-slate-100">
                                   <td className="px-4 py-3 text-sm font-extrabold text-slate-900">{h.type}</td>
                                   <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateUtc(h.start)}</td>
@@ -1785,17 +1789,17 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                     <div className="space-y-6">
                       <Section title="Attendance Summary" icon={CheckCircle2}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          <Field label="Attendance Score" value={`${profile.data.attendanceSummary.score}/100`} />
-                          <Field label="Present Days" value={`${profile.data.attendanceSummary.presentDays}`} />
-                          <Field label="Absent Days" value={`${profile.data.attendanceSummary.absentDays}`} />
-                          <Field label="Late Coming" value={`${profile.data.attendanceSummary.lateComing}`} />
-                          <Field label="Early Departure" value={`${profile.data.attendanceSummary.earlyDeparture}`} />
-                          <Field label="Overtime (hrs)" value={`${profile.data.attendanceSummary.overtimeHours}`} />
+                          <Field label="Attendance Score" value={`${profileData.attendanceSummary.score}/100`} />
+                          <Field label="Present Days" value={`${profileData.attendanceSummary.presentDays}`} />
+                          <Field label="Absent Days" value={`${profileData.attendanceSummary.absentDays}`} />
+                          <Field label="Late Coming" value={`${profileData.attendanceSummary.lateComing}`} />
+                          <Field label="Early Departure" value={`${profileData.attendanceSummary.earlyDeparture}`} />
+                          <Field label="Overtime (hrs)" value={`${profileData.attendanceSummary.overtimeHours}`} />
                         </div>
                       </Section>
                       <Section title="Biometric / Clock-in Logs" icon={Fingerprint}>
                         <div className="divide-y divide-slate-100 border border-slate-200/60 rounded-2xl overflow-hidden">
-                          {profile.data.attendanceSummary.biometricLogs.slice(0, 18).map((l) => (
+                          {profileData.attendanceSummary.biometricLogs.slice(0, 18).map((l) => (
                             <div key={l.id} className="px-5 py-3 flex items-center justify-between gap-3 bg-white">
                               <div className="min-w-0">
                                 <div className="text-sm font-extrabold text-slate-900">
@@ -1818,21 +1822,21 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                       actions={
                         <div className="flex items-center gap-2">
                           {!perms.canViewPayroll && <LockBadge />}
-                          <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{profile.data.payrollSummary.payrollStatus}</span>
+                          <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{profileData.payrollSummary.payrollStatus}</span>
                         </div>
                       }
                     >
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        <Field label="Salary Grade" value={v(profile.data.payrollSummary.salaryGrade)} />
-                        <Field label="Basic Salary" value={naira(profile.data.payrollSummary.basicSalary)} masked={!perms.canViewPayroll} />
-                        <Field label="Allowances" value={naira(profile.data.payrollSummary.allowances)} masked={!perms.canViewPayroll} />
-                        <Field label="Deductions" value={naira(profile.data.payrollSummary.deductions)} masked={!perms.canViewPayroll} />
-                        <Field label="Bank Name" value={v(profile.data.payrollSummary.bankName)} masked={!perms.canViewPayroll} />
-                        <Field label="Account Number" value={v(profile.data.payrollSummary.accountNumberMasked)} />
-                        <Field label="Pension Provider" value={v(profile.data.payrollSummary.pensionProvider)} masked={!perms.canViewPayroll} />
-                        <Field label="Tax ID" value={v(profile.data.payrollSummary.taxId)} masked={!perms.canViewPayroll} />
-                        <Field label="Payroll Group" value={v(profile.data.payrollSummary.payrollGroup)} masked={!perms.canViewPayroll} />
-                        <Field label="Last Payroll Processed" value={profile.data.payrollSummary.lastPayrollProcessed ? formatDateUtc(profile.data.payrollSummary.lastPayrollProcessed) : '—'} />
+                        <Field label="Salary Grade" value={v(profileData.payrollSummary.salaryGrade)} />
+                        <Field label="Basic Salary" value={naira(profileData.payrollSummary.basicSalary)} masked={!perms.canViewPayroll} />
+                        <Field label="Allowances" value={naira(profileData.payrollSummary.allowances)} masked={!perms.canViewPayroll} />
+                        <Field label="Deductions" value={naira(profileData.payrollSummary.deductions)} masked={!perms.canViewPayroll} />
+                        <Field label="Bank Name" value={v(profileData.payrollSummary.bankName)} masked={!perms.canViewPayroll} />
+                        <Field label="Account Number" value={v(profileData.payrollSummary.accountNumberMasked)} />
+                        <Field label="Pension Provider" value={v(profileData.payrollSummary.pensionProvider)} masked={!perms.canViewPayroll} />
+                        <Field label="Tax ID" value={v(profileData.payrollSummary.taxId)} masked={!perms.canViewPayroll} />
+                        <Field label="Payroll Group" value={v(profileData.payrollSummary.payrollGroup)} masked={!perms.canViewPayroll} />
+                        <Field label="Last Payroll Processed" value={profileData.payrollSummary.lastPayrollProcessed ? formatDateUtc(profileData.payrollSummary.lastPayrollProcessed) : '—'} />
                       </div>
                       {!perms.canViewPayroll && (
                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 font-semibold">
@@ -1846,14 +1850,14 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                     <div className="space-y-6">
                       <Section title="Performance Summary" icon={BadgeCheck}>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          <Field label="Current Rating" value={profile.data.performanceSummary.currentRating === '—' ? 'Not available' : profile.data.performanceSummary.currentRating} />
-                          <Field label="Last Review" value={profile.data.performanceSummary.lastReviewAt ? formatDateUtc(profile.data.performanceSummary.lastReviewAt) : '—'} />
-                          <Field label="Manager Feedback" value={v(profile.data.performanceSummary.managerFeedback)} />
+                          <Field label="Current Rating" value={profileData.performanceSummary.currentRating === '—' ? 'Not available' : profileData.performanceSummary.currentRating} />
+                          <Field label="Last Review" value={profileData.performanceSummary.lastReviewAt ? formatDateUtc(profileData.performanceSummary.lastReviewAt) : '—'} />
+                          <Field label="Manager Feedback" value={v(profileData.performanceSummary.managerFeedback)} />
                         </div>
                       </Section>
                       <Section title="Goals / KPIs" icon={ClipboardList}>
                         <div className="divide-y divide-slate-100 border border-slate-200/60 rounded-2xl overflow-hidden">
-                          {profile.data.performanceSummary.goals.map((g) => (
+                          {profileData.performanceSummary.goals.map((g) => (
                             <div key={g.id} className="px-5 py-4 bg-white flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="text-sm font-extrabold text-slate-900">{g.title}</div>
@@ -1866,7 +1870,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                       </Section>
                       <Section title="AI Signals" icon={Sparkles}>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                          {profile.data.performanceSummary.aiSignals.map((s) => {
+                          {profileData.performanceSummary.aiSignals.map((s) => {
                             const st = severityStyle(s.severity);
                             const Icon = st.icon;
                             return (
@@ -1903,7 +1907,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                             </tr>
                           </thead>
                           <tbody>
-                            {profile.data.training.slice(0, 24).map((t) => (
+                            {profileData.training.slice(0, 24).map((t) => (
                               <tr key={t.id} className="border-b border-slate-100">
                                 <td className="px-4 py-3 text-sm font-extrabold text-slate-900">{t.trainingName}</td>
                                 <td className="px-4 py-3 text-xs font-semibold text-slate-600">{t.provider}</td>
@@ -1922,7 +1926,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                   {tab === 'assets' && (
                     <Section title="Assets Assigned" icon={BriefcaseBusiness}>
                       <div className="divide-y divide-slate-100 border border-slate-200/60 rounded-2xl overflow-hidden">
-                        {profile.data.assets.slice(0, 24).map((a) => (
+                        {profileData.assets.slice(0, 24).map((a) => (
                           <div key={a.id} className="px-5 py-4 bg-white flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="text-sm font-extrabold text-slate-900">
@@ -1943,29 +1947,29 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                             <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 shrink-0">Asset</span>
                           </div>
                         ))}
-                        {profile.data.assets.length === 0 && <div className="px-5 py-6 text-sm text-slate-600 font-semibold bg-white">No assets assigned.</div>}
+                        {profileData.assets.length === 0 && <div className="px-5 py-6 text-sm text-slate-600 font-semibold bg-white">No assets assigned.</div>}
                       </div>
                     </Section>
                   )}
 
                   {tab === 'medical' && (
                     <Section title="Medical / HSE" icon={Stethoscope} actions={!perms.canViewMedical ? <LockBadge /> : undefined}>
-                      {!perms.canViewMedical || !profile.data.medicalHse ? (
+                      {!perms.canViewMedical || !profileData.medicalHse ? (
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 font-semibold">You do not have permission to view medical / HSE information.</div>
                       ) : (
                         <div className="space-y-6">
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                            <Field label="Medical Fitness Status" value={v(profile.data.medicalHse.medicalFitnessStatus)} />
-                            <Field label="Blood Group" value={v(profile.data.medicalHse.bloodGroup)} />
-                            <Field label="Known Allergies" value={v(profile.data.medicalHse.knownAllergies)} />
-                            <Field label="Medical Restrictions" value={v(profile.data.medicalHse.medicalRestrictions)} />
-                            <Field label="Fit-to-Work Status" value={v(profile.data.medicalHse.fitToWorkStatus)} />
+                            <Field label="Medical Fitness Status" value={v(profileData.medicalHse.medicalFitnessStatus)} />
+                            <Field label="Blood Group" value={v(profileData.medicalHse.bloodGroup)} />
+                            <Field label="Known Allergies" value={v(profileData.medicalHse.knownAllergies)} />
+                            <Field label="Medical Restrictions" value={v(profileData.medicalHse.medicalRestrictions)} />
+                            <Field label="Fit-to-Work Status" value={v(profileData.medicalHse.fitToWorkStatus)} />
                           </div>
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <div>
                               <div className="text-xs font-extrabold text-slate-700 mb-2">Incident History</div>
                               <div className="space-y-3">
-                                {profile.data.medicalHse.incidentHistory.map((i) => (
+                                {profileData.medicalHse.incidentHistory.map((i) => (
                                   <div key={i.id} className="rounded-2xl border border-slate-200/60 bg-white p-4">
                                     <div className="text-sm font-extrabold text-slate-900">{i.title}</div>
                                     <div className="text-xs text-slate-500 font-semibold mt-1">
@@ -1973,13 +1977,13 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                                     </div>
                                   </div>
                                 ))}
-                                {profile.data.medicalHse.incidentHistory.length === 0 && <div className="text-sm text-slate-600 font-semibold">No incidents recorded.</div>}
+                                {profileData.medicalHse.incidentHistory.length === 0 && <div className="text-sm text-slate-600 font-semibold">No incidents recorded.</div>}
                               </div>
                             </div>
                             <div>
                               <div className="text-xs font-extrabold text-slate-700 mb-2">HSE Certifications</div>
                               <div className="space-y-3">
-                                {profile.data.medicalHse.hseCertifications.map((c) => (
+                                {profileData.medicalHse.hseCertifications.map((c) => (
                                   <div key={c.id} className="rounded-2xl border border-slate-200/60 bg-white p-4">
                                     <div className="text-sm font-extrabold text-slate-900">{c.name}</div>
                                     <div className="text-xs text-slate-500 font-semibold mt-1">
@@ -2002,11 +2006,11 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
 
                   {tab === 'disciplinary' && (
                     <Section title="Disciplinary Records" icon={AlertTriangle} actions={!perms.canViewDisciplinary ? <LockBadge /> : undefined}>
-                      {!perms.canViewDisciplinary || !profile.data.disciplinary ? (
+                      {!perms.canViewDisciplinary || !profileData.disciplinary ? (
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 font-semibold">You do not have permission to view disciplinary records.</div>
                       ) : (
                         <div className="divide-y divide-slate-100 border border-slate-200/60 rounded-2xl overflow-hidden">
-                          {profile.data.disciplinary.map((d) => (
+                          {profileData.disciplinary.map((d) => (
                             <div key={d.id} className="px-5 py-4 bg-white">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -2021,7 +2025,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                               </div>
                             </div>
                           ))}
-                          {profile.data.disciplinary.length === 0 && <div className="px-5 py-6 text-sm text-slate-600 font-semibold bg-white">No disciplinary records.</div>}
+                          {profileData.disciplinary.length === 0 && <div className="px-5 py-6 text-sm text-slate-600 font-semibold bg-white">No disciplinary records.</div>}
                         </div>
                       )}
                     </Section>
@@ -2030,7 +2034,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                   {tab === 'history' && (
                     <Section title="Employment History" icon={History}>
                       <div className="space-y-3">
-                        {profile.data.history.map((h) => (
+                        {profileData.history.map((h) => (
                           <div key={h.id} className="rounded-2xl border border-slate-200/60 bg-white p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -2054,7 +2058,7 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 font-semibold">You do not have permission to view the audit trail.</div>
                       ) : (
                         <div className="space-y-3">
-                          {audit.data.slice(0, 40).map((l) => (
+                          {auditData.slice(0, 40).map((l) => (
                             <div key={l.id} className="rounded-2xl border border-slate-200/60 bg-white p-4">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -2089,25 +2093,25 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
           <Card className="p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-extrabold text-slate-900">Quick Summary</div>
-              <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{profile.data.employmentStatus}</span>
+              <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{profileData.employmentStatus}</span>
             </div>
             <div className="mt-4 grid grid-cols-1 gap-3">
-              <Field label="Profile Completion" value={`${overview.data.profileCompletionPct}%`} />
-              <Field label="Attendance Score" value={`${overview.data.attendanceScore}/100`} />
-              <Field label="Leave Balance" value={`${overview.data.leaveBalanceDays} days`} />
-              <Field label="Training Compliance" value={`${overview.data.trainingCompliancePct}%`} />
-              <Field label="Document Status" value={overview.data.documentStatus} />
-              <Field label="Asset Status" value={overview.data.assetStatus} />
+              <Field label="Profile Completion" value={`${overviewData.profileCompletionPct}%`} />
+              <Field label="Attendance Score" value={`${overviewData.attendanceScore}/100`} />
+              <Field label="Leave Balance" value={`${overviewData.leaveBalanceDays} days`} />
+              <Field label="Training Compliance" value={`${overviewData.trainingCompliancePct}%`} />
+              <Field label="Document Status" value={overviewData.documentStatus} />
+              <Field label="Asset Status" value={overviewData.assetStatus} />
             </div>
           </Card>
 
           <Card className="p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-extrabold text-slate-900">Audit / Activity Timeline</div>
-              <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{formatNumber(audit.data.length)}</span>
+              <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{formatNumber(auditData.length)}</span>
             </div>
             <div className="mt-4 space-y-3">
-              {audit.data.slice(0, 10).map((l) => (
+              {auditData.slice(0, 10).map((l) => (
                 <div key={l.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">

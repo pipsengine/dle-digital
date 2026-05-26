@@ -1,6 +1,6 @@
 import { PageTemplate } from '@/components/layout/page-template';
 import { navigationConfig, NavItem, SubMenu } from '@/lib/config/navigation';
-import { FileUp, Target, Plus, AlertCircle } from 'lucide-react';
+import { Target, Plus, AlertCircle } from 'lucide-react';
 import { notFound } from 'next/navigation';
 
 export default async function GenericModulePage({ params }: { params: Promise<{ slug: string[] }> }) {
@@ -44,8 +44,6 @@ export default async function GenericModulePage({ params }: { params: Promise<{ 
       title={title}
       description={`Enterprise module for managing ${title.toLowerCase()} operations. AI integration ready.`}
       breadcrumbs={breadcrumbs}
-      primaryAction={{ label: `New ${title}`, icon: Plus, onClick: () => console.log('Create') }}
-      secondaryAction={{ label: 'Export', icon: FileUp, onClick: () => console.log('Export') }}
     >
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-12 flex flex-col items-center justify-center text-center min-h-[400px]">
         <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center mb-6 text-slate-300">
