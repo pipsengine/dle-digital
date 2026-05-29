@@ -72,6 +72,8 @@ type EmploymentEventType =
   | 'Retirement'
   | 'Exit Clearance';
 
+type EmploymentHistoryViewMode = 'history' | 'promotion' | 'confirmation' | 'exit' | 'transfer';
+
 type HistoryRow = {
   id: string;
   referenceNo: string;
@@ -396,29 +398,135 @@ const MultiSelectChips = ({
   );
 };
 
-export default function EmploymentHistoryClient({ initialNow, employeeId }: { initialNow: string; employeeId?: string }) {
+const createDefaultFilters = (viewMode: EmploymentHistoryViewMode) => ({
+  eventType: new Set<string>(
+    viewMode === 'promotion'
+      ? ['Promotion']
+      : viewMode === 'confirmation'
+        ? ['Probation Change', 'Confirmation']
+        : viewMode === 'exit'
+          ? ['Resignation', 'Termination', 'Retirement', 'Exit Clearance']
+          : viewMode === 'transfer'
+            ? ['Transfer', 'Department Change', 'Secondment', 'Project Assignment']
+          : []
+  ),
+  department: new Set<string>(),
+  businessUnit: new Set<string>(),
+  location: new Set<string>(),
+  employeeStatus: new Set<string>(),
+  previousJobGrade: new Set<string>(),
+  newJobGrade: new Set<string>(),
+  previousDepartment: new Set<string>(),
+  newDepartment: new Set<string>(),
+  jobTitle: new Set<string>(),
+  manager: new Set<string>(),
+  createdBy: new Set<string>(),
+  approvalStatus: new Set<string>(),
+});
+
+const createDefaultAddForm = (initialNow: string, employeeId: string | undefined, viewMode: EmploymentHistoryViewMode): Partial<DetailItem> => ({
+  eventType: viewMode === 'promotion' ? 'Promotion' : viewMode === 'confirmation' ? 'Confirmation' : viewMode === 'exit' ? 'Exit Clearance' : 'Transfer',
+  effectiveDate: new Date(initialNow).toISOString(),
+  reason: '',
+  notes: '',
+  employeeId: employeeId || '',
+  employeeName: '',
+});
+
+export default function EmploymentHistoryClient({
+  initialNow,
+  employeeId,
+  viewMode = 'history',
+}: {
+  initialNow: string;
+  employeeId?: string;
+  viewMode?: EmploymentHistoryViewMode;
+}) {
   const router = useRouter();
+  const isPromotionView = viewMode === 'promotion';
+  const isConfirmationView = viewMode === 'confirmation';
+  const isExitView = viewMode === 'exit';
+  const isTransferView = viewMode === 'transfer';
+  const moduleLabel = isPromotionView ? 'Employee Promotion' : isConfirmationView ? 'Employee Confirmation' : isExitView ? 'Employee Exit Status' : isTransferView ? 'Employee Transfer' : 'Employment History';
+  const scopeLabel = isPromotionView ? 'Promotion Scope' : isConfirmationView ? 'Confirmation Scope' : isExitView ? 'Exit Scope' : isTransferView ? 'Transfer Scope' : 'Scope';
+  const addEventLabel = isPromotionView ? 'Add Promotion Event' : isConfirmationView ? 'Add Confirmation Event' : isExitView ? 'Add Exit Event' : isTransferView ? 'Add Transfer Event' : 'Add History Event';
+  const exportLabel = isPromotionView ? 'Export Promotions' : isConfirmationView ? 'Export Confirmations' : isExitView ? 'Export Exit Records' : isTransferView ? 'Export Transfers' : 'Export History';
+  const reportLabel = isPromotionView ? 'Generate Promotion Report' : isConfirmationView ? 'Generate Confirmation Report' : isExitView ? 'Generate Exit Report' : isTransferView ? 'Generate Transfer Report' : 'Generate Report';
+  const timelineTitle = isPromotionView ? 'Promotion Timeline' : isConfirmationView ? 'Confirmation Timeline' : isExitView ? 'Exit Timeline' : isTransferView ? 'Transfer Timeline' : 'Employment History Timeline';
+  const timelineDescription = isPromotionView
+    ? 'Promotion milestones with audit-ready metadata.'
+    : isConfirmationView
+      ? 'Probation and confirmation milestones with audit-ready metadata.'
+      : isExitView
+        ? 'Exit milestones and clearance events with audit-ready metadata.'
+        : isTransferView
+          ? 'Transfer and reassignment milestones with audit-ready metadata.'
+      : 'Visual lifecycle events with audit-ready metadata.';
+  const tableTitle = isPromotionView ? 'Promotion Registry' : isConfirmationView ? 'Confirmation Registry' : isExitView ? 'Exit Registry' : isTransferView ? 'Transfer Registry' : 'Employment History Table';
+  const tableDescription = isPromotionView
+    ? 'Searchable, filterable, export-ready promotion registry.'
+    : isConfirmationView
+      ? 'Searchable, filterable, export-ready confirmation registry.'
+      : isExitView
+        ? 'Searchable, filterable, export-ready exit registry.'
+        : isTransferView
+          ? 'Searchable, filterable, export-ready transfer registry.'
+      : 'Searchable, filterable, export-ready registry.';
+  const analyticsTitle = isPromotionView ? 'Promotion Analytics' : isConfirmationView ? 'Confirmation Analytics' : isExitView ? 'Exit Analytics' : isTransferView ? 'Transfer Analytics' : 'Employee Movement Analytics';
+  const analyticsDescription = isPromotionView
+    ? 'Trend-ready counters for promotions by department and grade.'
+    : isConfirmationView
+      ? 'Trend-ready counters for probation and confirmation outcomes.'
+      : isExitView
+        ? 'Trend-ready counters for exit events, approvals, and clearance outcomes.'
+        : isTransferView
+          ? 'Trend-ready counters for transfers, reassignments, and organizational movement.'
+      : 'Trend-ready counters by event type and department.';
+  const insightTitle = isPromotionView ? 'AI Promotion Insights' : isConfirmationView ? 'AI Confirmation Insights' : isExitView ? 'AI Exit Insights' : isTransferView ? 'AI Transfer Insights' : 'AI History Insights';
+  const insightDescription = isPromotionView
+    ? 'Promotion readiness signals, workflow gaps, and change anomalies.'
+    : isConfirmationView
+      ? 'Probation completion gaps, confirmation readiness, and workflow anomalies.'
+      : isExitView
+        ? 'Exit workflow gaps, pending clearance, and termination anomalies.'
+        : isTransferView
+          ? 'Transfer workflow gaps, movement anomalies, and reassignment signals.'
+      : 'Missing updates, workflow gaps, and lifecycle anomalies.';
+  const addModalTitle = isPromotionView ? 'Add Promotion Event' : isConfirmationView ? 'Add Confirmation Event' : isExitView ? 'Add Exit Event' : isTransferView ? 'Add Transfer Event' : 'Add History Event';
+  const addModalDescription = isPromotionView
+    ? 'Create a promotion change request with title, grade, and approval control.'
+    : isConfirmationView
+      ? 'Create a probation or confirmation change request with approval-controlled updates.'
+      : isExitView
+        ? 'Create an exit-related request with approval-controlled status and clearance updates.'
+        : isTransferView
+          ? 'Create a transfer or reassignment request with approval-controlled movement updates.'
+      : 'Controlled changes require workflow approval to update employee profile.';
+  const eventScopedHint = isPromotionView
+    ? 'For this build, adding promotion events is easiest when you open the employee-scoped route: '
+    : isConfirmationView
+      ? 'For this build, adding confirmation events is easiest when you open the employee-scoped route: '
+      : isExitView
+        ? 'For this build, adding exit events is easiest when you open the employee-scoped route: '
+        : isTransferView
+          ? 'For this build, adding transfer events is easiest when you open the employee-scoped route: '
+      : 'For this build, adding events is easiest when you open the employee-scoped route: ';
+  const routeHintPath = isPromotionView
+    ? '/hris/employees/employee-promotion?employeeId=[employeeId]'
+    : isConfirmationView
+      ? '/hris/employees/employee-confirmation?employeeId=[employeeId]'
+      : isExitView
+        ? '/hris/employees/employee-exit-status?employeeId=[employeeId]'
+        : isTransferView
+          ? '/hris/employees/employee-transfer?employeeId=[employeeId]'
+      : '/hris/employees/employment-history/[employeeId]';
   const [role, setRole] = useState<Role>('HR Manager');
   const [viewerEmployeeId, setViewerEmployeeId] = useState<string | undefined>(undefined);
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<Record<string, Set<string>>>({
-    eventType: new Set(),
-    department: new Set(),
-    businessUnit: new Set(),
-    location: new Set(),
-    employeeStatus: new Set(),
-    previousJobGrade: new Set(),
-    newJobGrade: new Set(),
-    previousDepartment: new Set(),
-    newDepartment: new Set(),
-    jobTitle: new Set(),
-    manager: new Set(),
-    createdBy: new Set(),
-    approvalStatus: new Set(),
-  });
+  const [activeFilters, setActiveFilters] = useState<Record<string, Set<string>>>(() => createDefaultFilters(viewMode));
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -445,12 +553,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
 
   const [addOpen, setAddOpen] = useState(false);
   const [addProfile, setAddProfile] = useState<ApiState<ProfileSnapshot>>({ status: 'idle' });
-  const [addForm, setAddForm] = useState<Partial<DetailItem>>({
-    eventType: 'Transfer',
-    effectiveDate: new Date(initialNow).toISOString(),
-    reason: '',
-    notes: '',
-  });
+  const [addForm, setAddForm] = useState<Partial<DetailItem>>(() => createDefaultAddForm(initialNow, employeeId, viewMode));
   const [toast, setToast] = useState<{ title: string; detail: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
   const [exportFormat, setExportFormat] = useState<ExportFormat>('csv');
 
@@ -476,6 +579,12 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
   }, [activeFilters, dateFrom, dateTo]);
 
   const viewsStorageKey = 'dle.hris.employmentHistory.savedViews.v1';
+
+  useEffect(() => {
+    setActiveFilters(createDefaultFilters(viewMode));
+    setDateFrom('');
+    setDateTo('');
+  }, [viewMode]);
 
   useEffect(() => {
     try {
@@ -773,14 +882,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
       return;
     }
     setAddOpen(true);
-    setAddForm({
-      eventType: 'Transfer',
-      effectiveDate: new Date(initialNow).toISOString(),
-      reason: '',
-      notes: '',
-      employeeId: employeeId || '',
-      employeeName: '',
-    });
+    setAddForm(createDefaultAddForm(initialNow, employeeId, viewMode));
     if (employeeId) {
       setAddProfile({ status: 'loading' });
       try {
@@ -944,7 +1046,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
       <ChevronRight className="w-4 h-4" />
       <span>Employees</span>
       <ChevronRight className="w-4 h-4" />
-      <span className="text-slate-700 font-extrabold">Employment History</span>
+      <span className="text-slate-700 font-extrabold">{moduleLabel}</span>
       {employeeId ? (
         <>
           <ChevronRight className="w-4 h-4" />
@@ -959,12 +1061,20 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
       <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
         <div className="min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Employment History</h1>
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">{moduleLabel}</h1>
             <Chip label={`Loaded: ${nowStamp}`} />
-            {employeeId ? <Chip label={`Scope: ${employeeId}`} /> : <Chip label="Scope: Organization" />}
+            {employeeId ? <Chip label={`${scopeLabel}: ${employeeId}`} /> : <Chip label={`${scopeLabel}: Organization`} />}
           </div>
           <div className="text-sm text-slate-600 font-semibold mt-1">
-            Track every employee lifecycle event, movement, promotion, transfer, status change, and exit record across the organization.
+            {isPromotionView
+              ? 'Track promotion events, grade progression, title changes, and approval-controlled advancement records across the organization.'
+              : isConfirmationView
+                ? 'Track probation changes, employee confirmations, and approval-controlled status progression across the organization.'
+                : isExitView
+                  ? 'Track resignations, terminations, retirements, and exit clearance progress with approval-controlled records across the organization.'
+                  : isTransferView
+                    ? 'Track employee transfers, reassignments, secondments, and project movements with approval-controlled records across the organization.'
+              : 'Track every employee lifecycle event, movement, promotion, transfer, status change, and exit record across the organization.'}
           </div>
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
@@ -999,7 +1109,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <button type="button" onClick={openAdd} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 transition-colors">
             <Plus className="w-4 h-4" />
-            Add History Event
+            {addEventLabel}
           </button>
           <span className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
             <span className="text-xs font-extrabold text-slate-700">Export</span>
@@ -1011,11 +1121,11 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
           </span>
           <button type="button" onClick={exportCurrent} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">
             <Download className="w-4 h-4" />
-            Export History
+            {exportLabel}
           </button>
           <button type="button" onClick={generateReport} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">
             <FileText className="w-4 h-4" />
-            Generate Report
+            {reportLabel}
           </button>
           <button
             type="button"
@@ -1231,8 +1341,8 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
             <Layers className="w-5 h-5" />
           </span>
           <div>
-            <div className="text-sm font-extrabold text-slate-900">Employment History Timeline</div>
-            <div className="text-xs text-slate-500 font-semibold mt-0.5">Visual lifecycle events with audit-ready metadata.</div>
+            <div className="text-sm font-extrabold text-slate-900">{timelineTitle}</div>
+            <div className="text-xs text-slate-500 font-semibold mt-0.5">{timelineDescription}</div>
           </div>
         </div>
         <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
@@ -1282,8 +1392,8 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
             <BarChart3 className="w-5 h-5" />
           </span>
           <div>
-            <div className="text-sm font-extrabold text-slate-900">Employment History Table</div>
-            <div className="text-xs text-slate-500 font-semibold mt-0.5">Searchable, filterable, export-ready registry.</div>
+            <div className="text-sm font-extrabold text-slate-900">{tableTitle}</div>
+            <div className="text-xs text-slate-500 font-semibold mt-0.5">{tableDescription}</div>
           </div>
         </div>
         <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
@@ -1517,8 +1627,8 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
             <BarChart3 className="w-5 h-5" />
           </span>
           <div>
-            <div className="text-sm font-extrabold text-slate-900">Employee Movement Analytics</div>
-            <div className="text-xs text-slate-500 font-semibold mt-0.5">Trend-ready counters by event type and department.</div>
+            <div className="text-sm font-extrabold text-slate-900">{analyticsTitle}</div>
+            <div className="text-xs text-slate-500 font-semibold mt-0.5">{analyticsDescription}</div>
           </div>
         </div>
         <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
@@ -1574,8 +1684,8 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
             <Sparkles className="w-5 h-5" />
           </span>
           <div>
-            <div className="text-sm font-extrabold text-slate-900">AI History Insights</div>
-            <div className="text-xs text-slate-500 font-semibold mt-0.5">Missing updates, workflow gaps, and lifecycle anomalies.</div>
+            <div className="text-sm font-extrabold text-slate-900">{insightTitle}</div>
+            <div className="text-xs text-slate-500 font-semibold mt-0.5">{insightDescription}</div>
           </div>
         </div>
         <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">Confidence-weighted</span>
@@ -1632,27 +1742,35 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
     </Card>
   );
 
-  const eventTypes: EmploymentEventType[] = [
-    'Onboarding',
-    'Confirmation',
-    'Probation Change',
-    'Promotion',
-    'Transfer',
-    'Department Change',
-    'Manager Change',
-    'Job Title Change',
-    'Grade Change',
-    'Salary Grade Change',
-    'Secondment',
-    'Project Assignment',
-    'Suspension',
-    'Contract Renewal',
-    'Reactivation',
-    'Resignation',
-    'Termination',
-    'Retirement',
-    'Exit Clearance',
-  ];
+  const eventTypes: EmploymentEventType[] = isPromotionView
+    ? ['Promotion']
+    : isConfirmationView
+      ? ['Probation Change', 'Confirmation']
+      : isExitView
+        ? ['Resignation', 'Termination', 'Retirement', 'Exit Clearance']
+      : isTransferView
+        ? ['Transfer', 'Department Change', 'Secondment', 'Project Assignment']
+      : [
+        'Onboarding',
+        'Confirmation',
+        'Probation Change',
+        'Promotion',
+        'Transfer',
+        'Department Change',
+        'Manager Change',
+        'Job Title Change',
+        'Grade Change',
+        'Salary Grade Change',
+        'Secondment',
+        'Project Assignment',
+        'Suspension',
+        'Contract Renewal',
+        'Reactivation',
+        'Resignation',
+        'Termination',
+        'Retirement',
+        'Exit Clearance',
+      ];
   const approvalStatuses: ApprovalStatus[] = ['Draft', 'Submitted', 'Pending HR Review', 'Pending Department Head Approval', 'Pending HR Director Approval', 'Approved', 'Rejected', 'Reversed', 'Cancelled'];
 
   const filterDrawer = (
@@ -1806,21 +1924,7 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveFilters({
-                      eventType: new Set(),
-                      department: new Set(),
-                      businessUnit: new Set(),
-                      location: new Set(),
-                      employeeStatus: new Set(),
-                      previousJobGrade: new Set(),
-                      newJobGrade: new Set(),
-                      previousDepartment: new Set(),
-                      newDepartment: new Set(),
-                      jobTitle: new Set(),
-                      manager: new Set(),
-                      createdBy: new Set(),
-                      approvalStatus: new Set(),
-                    });
+                    setActiveFilters(createDefaultFilters(viewMode));
                     setDateFrom('');
                     setDateTo('');
                     setFilterPanelOpen(false);
@@ -1899,8 +2003,8 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
             <Plus className="w-5 h-5" />
           </span>
           <div>
-            <div className="text-sm font-extrabold text-slate-900">Add History Event</div>
-            <div className="text-xs text-slate-500 font-semibold mt-0.5">Controlled changes require workflow approval to update employee profile.</div>
+            <div className="text-sm font-extrabold text-slate-900">{addModalTitle}</div>
+            <div className="text-xs text-slate-500 font-semibold mt-0.5">{addModalDescription}</div>
           </div>
         </div>
         <button type="button" onClick={() => setAddOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
@@ -1910,7 +2014,8 @@ export default function EmploymentHistoryClient({ initialNow, employeeId }: { in
       <div className="p-6 space-y-5">
         {!employeeId ? (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 font-semibold">
-            For this build, adding events is easiest when you open the employee-scoped route: <span className="font-mono">/hris/employees/employment-history/[employeeId]</span>
+            {eventScopedHint}
+            <span className="font-mono">{routeHintPath}</span>
           </div>
         ) : null}
 
