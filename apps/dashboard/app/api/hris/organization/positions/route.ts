@@ -1,9 +1,26 @@
 import { NextResponse } from 'next/server';
 import type { HealthStatus, PositionRecord } from '@/lib/organization-data';
+import { appendOrganizationAuditEvent } from '@/lib/organization-audit-store';
+import { getUiPermissions, hasPermission, resolveAccessContext } from '@/lib/hris-access';
 import { getPersistedPositionsData, readPositions, writePositions } from '@/lib/positions-store';
 
-export async function GET() {
-  return NextResponse.json({ status: 'success', data: await getPersistedPositionsData() });
+export async function GET(request: Request) {
+  const access = resolveAccessContext(request);
+  const uiPermissions = getUiPermissions(access);
+  const data = await getPersistedPositionsData();
+  return NextResponse.json({
+    status: 'success',
+    data: {
+      ...data,
+      permissions: {
+        ...data.permissions,
+        actor: uiPermissions.actor,
+        role: uiPermissions.role,
+        canEdit: uiPermissions.canEditPositions,
+        canViewAudit: uiPermissions.canViewAudit,
+      },
+    },
+  });
 }
 
 type CreatePositionPayload = {
@@ -106,7 +123,11 @@ const validate = (payload: CreatePositionPayload, existing: PositionRecord[]) =>
 };
 
 export async function POST(request: Request) {
+  const access = resolveAccessContext(request);
+  if (!hasPermission(access, 'positions.manage')) return err(403, 'You do not have permission to create positions.');
+
   const payload = (await request.json()) as CreatePositionPayload;
+  const actor = access.actor;
   const existing = await readPositions();
   const validationError = validate(payload, existing);
   if (validationError) return err(400, validationError);
@@ -144,5 +165,15 @@ export async function POST(request: Request) {
 
   const next = [...existing, position].sort((a, b) => a.code.localeCompare(b.code));
   await writePositions(next);
+  await appendOrganizationAuditEvent({
+    module: 'positions',
+    entityType: 'position',
+    entityId: position.id,
+    action: 'POSITION_CREATED',
+    actor,
+    summary: `${actor} created position ${position.code} (${position.title}).`,
+    before: null,
+    after: position as unknown as Record<string, unknown>,
+  });
   return ok(position, 201);
 }

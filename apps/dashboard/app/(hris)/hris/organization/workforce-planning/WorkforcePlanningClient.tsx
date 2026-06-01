@@ -113,9 +113,15 @@ type Payload = {
   insights: StructureInsight[];
 };
 
-const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
+type WorkforcePlanningClientProps = {
+  pageTitle?: string;
+  pageDescription?: string;
+  breadcrumbLabel?: string;
+};
+
+const formatNumber = (value: number) => new Intl.NumberFormat('en-NG').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const healthTone = (status: HealthStatus) => {
   if (status === 'Critical') return 'bg-red-50 text-red-700 border-red-200';
@@ -149,7 +155,11 @@ const requestStatusTone = (status: WorkforcePlanningRequestRecord['status']) => 
   return 'bg-blue-50 text-blue-700 border-blue-200';
 };
 
-export default function WorkforcePlanningClient() {
+export default function WorkforcePlanningClient({
+  pageTitle = 'Workforce Planning',
+  pageDescription = 'Plan approved capacity, vacancy exposure, succession depth, and workforce budget demand across business units and departments.',
+  breadcrumbLabel = 'Workforce Planning',
+}: WorkforcePlanningClientProps) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -299,7 +309,7 @@ export default function WorkforcePlanningClient() {
   const exportCsv = () => {
     if (!payload?.permissions.canExport) return;
     const rows = [
-      ['Business Unit', 'Department', 'Location', 'Approved FTE', 'Filled FTE', 'Open Demand FTE', 'Vacancy Rate %', 'Critical Gap Roles', 'Immediate Backfills', 'Succession Coverage %', 'Attrition Risk %', 'Open Budget USD', 'Planning Priority', 'Health'],
+      ['Business Unit', 'Department', 'Location', 'Approved FTE', 'Filled FTE', 'Open Demand FTE', 'Vacancy Rate %', 'Critical Gap Roles', 'Immediate Backfills', 'Succession Coverage %', 'Attrition Risk %', 'Open Budget NGN', 'Planning Priority', 'Health'],
       ...visiblePlans.map((plan) => [
         plan.businessUnit,
         plan.department,
@@ -390,12 +400,12 @@ export default function WorkforcePlanningClient() {
 
   return (
     <PageTemplate
-      title="Workforce Planning"
-      description="Plan approved capacity, vacancy exposure, succession depth, and workforce budget demand across business units and departments."
+      title={pageTitle}
+      description={pageDescription}
       breadcrumbs={[
         { label: 'HRIS', href: '/hris' },
         { label: 'Organization', href: '/hris/organization' },
-        { label: 'Workforce Planning' },
+        { label: breadcrumbLabel },
       ]}
       primaryAction={{ label: showRequestForm ? 'Close Request' : 'Submit Request', onClick: () => setShowRequestForm((value) => !value), icon: Plus }}
       secondaryAction={{ label: 'Export CSV', onClick: exportCsv, icon: Download }}
@@ -427,7 +437,7 @@ export default function WorkforcePlanningClient() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-slate-900">Submit Workforce Request</div>
-              <div className="text-xs text-slate-500 mt-1">Raise a staffing request against the selected workforce segment and preview the target capacity impact.</div>
+              <div className="text-xs text-slate-500 mt-1">Raise a staffing request against the selected workforce segment and preview the target capacity impact in NGN.</div>
             </div>
             <button
               type="button"
@@ -477,7 +487,7 @@ export default function WorkforcePlanningClient() {
                     <DetailStat label="Projected Gap FTE" value={formatNumber(comparison.proposedGapFte)} />
                   </div>
                   <div className="mt-3 text-sm text-slate-600">
-                    Incremental budget impact: <span className="font-semibold text-slate-900">{formatCurrency(comparison.incrementalBudgetUsd)}</span>
+                    Incremental budget impact (NGN): <span className="font-semibold text-slate-900">{formatCurrency(comparison.incrementalBudgetUsd)}</span>
                   </div>
                 </div>
               ) : null}

@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { appendOrganizationAuditEvent } from '@/lib/organization-audit-store';
+import { getUiPermissions, hasPermission, resolveAccessContext } from '@/lib/hris-access';
 import type { HealthStatus, PositionRecord, StructureInsight } from '@/lib/organization-data';
 import { readPositions } from '@/lib/positions-store';
 import {
@@ -58,9 +60,12 @@ type WorkforcePlanRecord = {
 type WorkforcePlanningPayload = {
   generatedAt: string;
   permissions: {
+    actor: string;
+    role: string;
     canEdit: boolean;
     canExport: boolean;
     canViewCosts: boolean;
+    canViewAudit: boolean;
   };
   summary: {
     totalPlans: number;
@@ -303,7 +308,9 @@ const buildPlanRecord = (groupKey: string, positions: PositionRecord[]): Workfor
   };
 };
 
-const buildPayload = async (): Promise<WorkforcePlanningPayload> => {
+const buildPayload = async (request: Request): Promise<WorkforcePlanningPayload> => {
+  const access = resolveAccessContext(request);
+  const uiPermissions = getUiPermissions(access);
   const positions = await readPositions();
   const requests = (await readWorkforcePlanningRequests()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const grouped = positions.reduce<Map<string, PositionRecord[]>>((acc, position) => {
@@ -364,9 +371,12 @@ const buildPayload = async (): Promise<WorkforcePlanningPayload> => {
   return {
     generatedAt: new Date().toISOString(),
     permissions: {
-      canEdit: true,
+      actor: uiPermissions.actor,
+      role: uiPermissions.role,
+      canEdit: uiPermissions.canEditWorkforce,
       canExport: true,
       canViewCosts: true,
+      canViewAudit: uiPermissions.canViewAudit,
     },
     summary: {
       totalPlans: plans.length,
@@ -435,12 +445,16 @@ const validateStatusUpdate = (payload: UpdateWorkforceRequestPayload, requests: 
   return null;
 };
 
-export async function GET() {
-  return ok(await buildPayload());
+export async function GET(request: Request) {
+  return ok(await buildPayload(request));
 }
 
 export async function POST(request: Request) {
-  const current = await buildPayload();
+  const access = resolveAccessContext(request);
+  if (!hasPermission(access, 'workforce.manage')) return err(403, 'You do not have permission to submit workforce requests.');
+
+  const actor = access.actor;
+  const current = await buildPayload(request);
   const payload = (await request.json()) as CreateWorkforceRequestPayload;
   const validationError = validateRequest(payload, current.plans);
   if (validationError) return err(400, validationError);
@@ -470,22 +484,49 @@ export async function POST(request: Request) {
 
   const next = [record, ...existing].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   await writeWorkforcePlanningRequests(next);
+  await appendOrganizationAuditEvent({
+    module: 'workforce-planning',
+    entityType: 'workforce-request',
+    entityId: record.id,
+    action: 'WORKFORCE_REQUEST_CREATED',
+    actor,
+    summary: `${actor} submitted a ${record.requestType} request for ${record.department}.`,
+    before: null,
+    after: record as unknown as Record<string, unknown>,
+  });
   return ok(record);
 }
 
 export async function PATCH(request: Request) {
+  const access = resolveAccessContext(request);
+  if (!hasPermission(access, 'workforce.manage')) return err(403, 'You do not have permission to update workforce requests.');
+
+  const actor = access.actor;
   const payload = (await request.json()) as UpdateWorkforceRequestPayload;
   const existing = await readWorkforcePlanningRequests();
   const validationError = validateStatusUpdate(payload, existing);
   if (validationError) return err(400, validationError);
 
-  let updatedRecord: WorkforcePlanningRequestRecord | null = null;
+  const targetRequestId = payload.requestId!;
+  const previousRecord = existing.find((item) => item.id === payload.requestId) || null;
   const next = existing.map((item) => {
     if (item.id !== payload.requestId) return item;
-    updatedRecord = { ...item, status: payload.status! };
-    return updatedRecord;
+    return { ...item, status: payload.status! };
   });
 
+  const updatedRecord = next.find((item) => item.id === targetRequestId) || null;
   await writeWorkforcePlanningRequests(next);
+  if (updatedRecord && previousRecord) {
+    await appendOrganizationAuditEvent({
+      module: 'workforce-planning',
+      entityType: 'workforce-request',
+      entityId: updatedRecord.id,
+      action: 'WORKFORCE_REQUEST_STATUS_UPDATED',
+      actor,
+      summary: `${actor} moved workforce request ${updatedRecord.id} from ${previousRecord.status} to ${updatedRecord.status}.`,
+      before: previousRecord as unknown as Record<string, unknown>,
+      after: updatedRecord as unknown as Record<string, unknown>,
+    });
+  }
   return ok(updatedRecord);
 }

@@ -49,9 +49,9 @@ type PositionsClientProps = {
   breadcrumbLabel?: string;
 };
 
-const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
+const formatNumber = (value: number) => new Intl.NumberFormat('en-NG').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const healthTone = (status: HealthStatus) => {
   if (status === 'Critical') return 'bg-red-50 text-red-700 border-red-200';
@@ -191,7 +191,7 @@ export default function PositionsClient({
   const exportCsv = () => {
     if (!payload?.permissions.canExport) return;
     const rows = [
-      ['Code', 'Title', 'Department', 'Business Unit', 'Location', 'Grade', 'Type', 'Status', 'Criticality', 'Incumbent', 'Reporting To', 'Open Days', 'Succession Coverage %', 'Attrition Risk %', 'Approval Coverage %', 'Benchmark Salary USD'],
+      ['Code', 'Title', 'Department', 'Business Unit', 'Location', 'Grade', 'Type', 'Status', 'Criticality', 'Incumbent', 'Reporting To', 'Open Days', 'Succession Coverage %', 'Attrition Risk %', 'Approval Coverage %', 'Benchmark Salary NGN'],
       ...visiblePositions.map((position) => [
         position.code,
         position.title,
@@ -362,7 +362,7 @@ export default function PositionsClient({
               <SelectField label="Position Type" value={form.positionType} onChange={(value) => setForm((prev) => ({ ...prev, positionType: value }))} options={['Permanent', 'Contract', 'Project', 'Temporary']} />
               <SelectField label="Position Status" value={form.positionStatus} onChange={(value) => setForm((prev) => ({ ...prev, positionStatus: value }))} options={['Filled', 'Vacant', 'Frozen', 'Under Review']} />
               <SelectField label="Criticality" value={form.criticality} onChange={(value) => setForm((prev) => ({ ...prev, criticality: value }))} options={['Critical', 'Core', 'Support']} />
-              <Field label="Benchmark Salary USD" type="number" value={form.benchmarkSalaryUsd} onChange={(value) => setForm((prev) => ({ ...prev, benchmarkSalaryUsd: value }))} />
+              <Field label="Benchmark Salary (NGN)" type="number" value={form.benchmarkSalaryUsd} onChange={(value) => setForm((prev) => ({ ...prev, benchmarkSalaryUsd: value }))} />
               <Field label="FTE" type="number" value={form.fte} onChange={(value) => setForm((prev) => ({ ...prev, fte: value }))} />
               <Field label="Succession Coverage %" type="number" value={form.successionCoveragePct} onChange={(value) => setForm((prev) => ({ ...prev, successionCoveragePct: value }))} />
               <Field label="Attrition Risk %" type="number" value={form.attritionRiskPct} onChange={(value) => setForm((prev) => ({ ...prev, attritionRiskPct: value }))} />
