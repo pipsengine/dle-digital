@@ -55,6 +55,6 @@ export const buildBaseAttendanceRecords = (): BaseAttendanceRecord[] =>
   getAttendanceSeedRecords().map((employee, index) => ({
     id: `att-${index + 1}`,
     ...employee,
-    scheduledStart: employee.shift === 'Night' ? '19:00' : '08:00',
-    scheduledEnd: employee.shift === 'Night' ? '07:00' : '17:00',
+    scheduledStart: employee.shift === 'Night' ? '19:00' : '07:30',
+    scheduledEnd: employee.shift === 'Night' ? '07:00' : '16:30',
   }));

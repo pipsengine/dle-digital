@@ -4,14 +4,14 @@ import Link from 'next/link';
 
 interface PageTemplateProps {
   title: string;
-  description: string;
-  breadcrumbs: { label: string; href?: string }[];
+  description?: string;
+  breadcrumbs?: { label: string; href?: string }[];
   children: React.ReactNode;
   primaryAction?: { label: string; onClick: () => void; icon?: any };
   secondaryAction?: { label: string; onClick: () => void; icon?: any };
 }
 
-export function PageTemplate({ title, description, breadcrumbs, children, primaryAction, secondaryAction }: PageTemplateProps) {
+export function PageTemplate({ title, description, breadcrumbs = [], children, primaryAction, secondaryAction }: PageTemplateProps) {
   return (
     <div className="space-y-6">
       {/* Breadcrumbs */}

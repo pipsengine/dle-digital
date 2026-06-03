@@ -2,7 +2,24 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildBaseAttendanceRecords } from '@/lib/attendance-data';
 
-export type TimesheetStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Returned' | 'Locked';
+import { readClockingRecords } from './attendance-clocking-store';
+
+export type TimesheetStatus = 'Draft' | 'Submitted' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected';
+
+export type WorkflowStage = {
+  id: TimesheetStatus;
+  label: string;
+  order: number;
+};
+
+export const workflowStages: WorkflowStage[] = [
+  { id: 'Draft', label: 'Draft', order: 1 },
+  { id: 'Submitted', label: 'Supervisor Submitted', order: 2 },
+  { id: 'HR_Reviewed', label: 'HR Review', order: 3 },
+  { id: 'Project_Control_Reviewed', label: 'Project Control Review', order: 4 },
+  { id: 'Approved', label: 'Operations Approval', order: 5 },
+  { id: 'Locked', label: 'Payroll Lock', order: 6 },
+];
 export type TimesheetApprovalDecision = 'Pending' | 'Approved' | 'Rejected' | 'Returned' | 'Locked';
 export type TimesheetEntryMode =
   | 'Employee Self-Service'
@@ -10,6 +27,74 @@ export type TimesheetEntryMode =
   | 'Bulk Team Entry'
   | 'Project Engineer Entry'
   | 'Foreman Entry';
+
+export type TimesheetPeriod = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: 'Open' | 'Closed' | 'Locked';
+};
+
+export type IdleReason = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+};
+
+export type TimesheetHeader = {
+  id: string;
+  periodId: string;
+  timesheetDate: string;
+  supervisorId: string;
+  supervisorName: string;
+  workCenterId: string;
+  workCenterName: string;
+  status: TimesheetStatus;
+  submittedAt: string | null;
+  submittedBy: string | null;
+  approvedAt: string | null;
+  approvedBy: string | null;
+  lastSyncAt: string | null;
+};
+
+export type TimesheetLine = {
+  id: string;
+  headerId: string;
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  biometricId: string;
+  attendanceId: string | null;
+  clockIn: string | null;
+  clockOut: string | null;
+  attendanceDuration: number;
+  projectAllocations: Array<{
+    projectId: string;
+    projectCode: string;
+    projectName: string;
+    taskId?: string;
+    taskName?: string;
+    activityId?: string;
+    hours: number;
+    remarks: string | null;
+  }>;
+  idleAllocations: Array<{
+    reasonId: string;
+    reasonName: string;
+    hours: number;
+    remarks: string | null;
+  }>;
+  usedHours: number;
+  idleHours: number;
+  totalHours: number;
+  variance: number; // Booked vs Attendance
+  remarks: string | null;
+  validationStatus: 'Valid' | 'Error' | 'Warning' | 'Incomplete';
+  validationMessage: string | null;
+};
+
 export type HourType =
   | 'Project Work'
   | 'Internal Work'
@@ -41,6 +126,22 @@ export type AllocationBucket =
   | 'Equipment Downtime Time'
   | 'Leave Time';
 export type ColumnKind = 'project' | 'internal' | 'idle' | 'leave';
+
+export type ProjectTask = {
+  id: string;
+  name: string;
+  activityId?: string;
+  activityName?: string;
+};
+
+export type Project = {
+  id: string;
+  code: string;
+  name: string;
+  site: string;
+  status: 'Active' | 'Approved' | 'Open' | 'Completed' | 'Suspended' | 'Closed' | 'Archived';
+  tasks?: ProjectTask[];
+};
 
 export type DisplayColumn = {
   code: string;
@@ -124,7 +225,7 @@ const resolveDashboardRoot = () => {
 
 const DATA_DIR = path.join(resolveDashboardRoot(), 'data', 'hris');
 const FILE_PATH = path.join(DATA_DIR, 'timesheet-entry.json');
-const TIMESHEET_DATE = '2026-05-29';
+const TIMESHEET_DATE = '2026-06-03';
 
 const projectCatalog: ProjectCatalogItem[] = [
   { code: 'PRJ-001', label: 'PRJ-001', name: 'Dangote Refinery Pipe Fabrication', kind: 'project', hourType: 'Project Work', billable: true, phase: 'Mechanical', workPackage: 'Pipe Shop', activity: 'Pipe Fabrication', task: 'Fit-Up and Welding', costCode: 'FAB-001', wbs: 'PRJ-001.MEC.PSHOP.FAB', client: 'Dangote Refinery' },
@@ -378,5 +479,197 @@ export const writeTimesheetRecords = async (records: TimesheetRecord[]) => {
 
 export const getTimesheetProjectCatalog = () => projectCatalog;
 export const getTimesheetMatrixColumns = () => timesheetMatrixColumns;
+export const idleReasons: IdleReason[] = [
+  { id: 'idl-001', code: 'WAIT_JOB', name: 'Waiting for job assignment', description: 'Employee present but no job assigned yet.' },
+  { id: 'idl-002', code: 'WAIT_MAT', name: 'Waiting for materials', description: 'Production stopped due to material unavailability.' },
+  { id: 'idl-003', code: 'WAIT_EQUIP', name: 'Waiting for equipment', description: 'Equipment breakdown or unavailable.' },
+  { id: 'idl-004', code: 'WAIT_CLIENT', name: 'Waiting for client instruction', description: 'Awaiting client approval or direction.' },
+  { id: 'idl-005', code: 'MACHINE_DOWN', name: 'Machine downtime', description: 'Mechanical or electrical failure.' },
+  { id: 'idl-006', code: 'WEATHER', name: 'Weather disruption', description: 'Rain or severe weather preventing work.' },
+  { id: 'idl-007', code: 'STANDBY', name: 'Administrative standby', description: 'Staff on standby for mobilization.' },
+  { id: 'idl-008', code: 'SAFETY', name: 'Safety restriction', description: 'Work halted for safety inspections or incidents.' },
+  { id: 'idl-009', code: 'BREAK', name: 'Break Time', description: 'Standard daily break time (lunch/rest).' },
+];
+
+export const calculateTimesheetPeriod = (date: Date = new Date()): TimesheetPeriod => {
+  const year = date.getFullYear();
+  const month = date.getMonth(); // 0-indexed
+  const day = date.getDate();
+
+  let startYear = year;
+  let startMonth = month;
+  let endYear = year;
+  let endMonth = month;
+
+  if (day >= 16) {
+    // Current period started 16th of current month, ends 15th of next month
+    startMonth = month;
+    endMonth = month + 1;
+    if (endMonth > 11) {
+      endMonth = 0;
+      endYear++;
+    }
+  } else {
+    // Current period started 16th of previous month, ends 15th of current month
+    startMonth = month - 1;
+    if (startMonth < 0) {
+      startMonth = 11;
+      startYear--;
+    }
+    endMonth = month;
+  }
+
+  const startDate = new Date(startYear, startMonth, 16);
+  const endDate = new Date(endYear, endMonth, 15);
+
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const periodName = `${monthNames[endDate.getMonth()]} ${endDate.getFullYear()} Period`;
+
+  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+
+  return {
+    id: `per-${formatDate(endDate).slice(0, 7)}`,
+    name: periodName,
+    startDate: formatDate(startDate),
+    endDate: formatDate(endDate),
+    status: 'Open',
+  };
+};
+
 export const getTimesheetDate = () => TIMESHEET_DATE;
+
+const DATA_FILE_V2 = path.join(DATA_DIR, 'timesheet-v2.json');
+const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
+
+async function ensureStoreV2() {
+  await mkdir(DATA_DIR, { recursive: true });
+  try {
+    await access(DATA_FILE_V2);
+  } catch {
+    await writeFile(DATA_FILE_V2, JSON.stringify({ headers: [], lines: [] }, null, 2), 'utf8');
+  }
+  try {
+    await access(PROJECTS_FILE);
+  } catch {
+    const defaultProjects: Project[] = [
+      { id: 'prj-001', code: 'DL26001', name: 'Dangote Refinery Pipe Fabrication', site: 'Fabrication Yard', status: 'Active', tasks: [{ id: 't-1', name: 'Pipe Welding' }, { id: 't-2', name: 'Fit-up' }] },
+      { id: 'prj-002', code: 'DL26002', name: 'NLNG Train 7 E&I Works', site: 'Onne Yard', status: 'Active', tasks: [{ id: 't-3', name: 'Instrumentation Calibration' }, { id: 't-4', name: 'Loop Testing' }] },
+      { id: 'prj-003', code: 'DL26003', name: 'Bonga Shutdown Support', site: 'Marine Base', status: 'Active', tasks: [{ id: 't-5', name: 'Shutdown Maintenance' }, { id: 't-6', name: 'NDT Support' }] },
+      { id: 'prj-004', code: 'DL26004', name: 'Marine Logistics Operations', site: 'Marine Base', status: 'Active', tasks: [{ id: 't-7', name: 'Crew Dispatch' }, { id: 't-8', name: 'Materials Dispatch' }] },
+    ];
+    await writeFile(PROJECTS_FILE, JSON.stringify(defaultProjects, null, 2), 'utf8');
+  }
+}
+
+export async function readProjects(): Promise<Project[]> {
+  await ensureStoreV2();
+  const raw = await readFile(PROJECTS_FILE, 'utf8');
+  return JSON.parse(raw) as Project[];
+}
+
+export async function writeProjects(projects: Project[]) {
+  await ensureStoreV2();
+  await writeFile(PROJECTS_FILE, JSON.stringify(projects, null, 2), 'utf8');
+}
+
+export async function generateProjectCode(): Promise<string> {
+  const projects = await readProjects();
+  const year = new Date().getFullYear().toString().slice(-2);
+  const prefix = `DL${year}`;
+  
+  const serials = projects
+    .filter(p => p.code.startsWith(prefix))
+    .map(p => parseInt(p.code.slice(4)))
+    .filter(n => !isNaN(n));
+    
+  const nextSerial = serials.length > 0 ? Math.max(...serials) + 1 : 1;
+  return `${prefix}${nextSerial.toString().padStart(3, '0')}`;
+}
+
+export async function readTimesheetData() {
+  await ensureStoreV2();
+  const raw = await readFile(DATA_FILE_V2, 'utf8');
+  return JSON.parse(raw) as { headers: TimesheetHeader[]; lines: TimesheetLine[] };
+}
+
+export async function writeTimesheetData(data: { headers: TimesheetHeader[]; lines: TimesheetLine[] }) {
+  await ensureStoreV2();
+  await writeFile(DATA_FILE_V2, JSON.stringify(data, null, 2), 'utf8');
+}
+
+export async function syncAttendanceForTimesheet(date: string, supervisorId: string, workCenterName: string) {
+  const clockingRecords = await readClockingRecords();
+  
+  // Business Rule: A timesheet is created for a Work Center / Site.
+  // We should find all employees who clocked in at this site OR are assigned to this supervisor.
+  const attendanceForDay = clockingRecords.filter(
+    (r) => 
+      r.site === workCenterName ||
+      r.location === workCenterName ||
+      r.supervisor === supervisorId || 
+      r.supervisor.includes(supervisorId)
+  );
+
+  const { headers, lines } = await readTimesheetData();
+  const period = calculateTimesheetPeriod(new Date(date));
+
+  let header = headers.find((h) => h.timesheetDate === date && h.supervisorId === supervisorId);
+  if (!header) {
+    header = {
+      id: `hdr-${date}-${supervisorId.toLowerCase().replace(/\s+/g, '-')}`,
+      periodId: period.id,
+      timesheetDate: date,
+      supervisorId,
+      supervisorName: supervisorId,
+      workCenterId: workCenterName.toLowerCase().replace(/\s+/g, '-'),
+      workCenterName,
+      status: 'Draft',
+      submittedAt: null,
+      submittedBy: null,
+      approvedAt: null,
+      approvedBy: null,
+      lastSyncAt: new Date().toISOString(),
+    };
+    headers.push(header);
+  } else {
+    header.lastSyncAt = new Date().toISOString();
+  }
+
+  // Filter out lines for this header and rebuild
+  const otherLines = lines.filter((l) => l.headerId !== header!.id);
+  const newLines: TimesheetLine[] = attendanceForDay.map((att) => {
+    const existingLine = lines.find((l) => l.headerId === header!.id && l.employeeId === att.employeeId);
+    
+    // Attendance duration in hours
+    const duration = att.clockInTime && att.clockOutTime 
+      ? (new Date(`2026-01-01T${att.clockOutTime}`).getTime() - new Date(`2026-01-01T${att.clockInTime}`).getTime()) / (1000 * 60 * 60)
+      : att.clockInTime ? 9 : 0; // Default to 9 if clocked in but not out yet (7:30 to 16:30 is 9 hours)
+
+    return {
+      id: existingLine?.id || `line-${header!.id}-${att.employeeId}`,
+      headerId: header!.id,
+      employeeId: att.employeeId,
+      employeeNo: att.employeeId, // Map ID to NO for now
+      employeeName: att.employeeName,
+      biometricId: att.id,
+      attendanceId: att.id,
+      clockIn: att.clockInTime,
+      clockOut: att.clockOutTime,
+      attendanceDuration: Math.round(duration * 10) / 10,
+      projectAllocations: existingLine?.projectAllocations || [],
+      idleAllocations: existingLine?.idleAllocations || [],
+      usedHours: existingLine?.usedHours || 0,
+      idleHours: existingLine?.idleHours || 0,
+      totalHours: existingLine?.totalHours || 0,
+      variance: Math.round(((existingLine?.totalHours || 0) - (Math.round(duration * 10) / 10)) * 10) / 10,
+      remarks: existingLine?.remarks || null,
+      validationStatus: 'Incomplete',
+      validationMessage: 'Awaiting time allocation.',
+    };
+  });
+
+  await writeTimesheetData({ headers, lines: [...otherLines, ...newLines] });
+  return { header, lines: newLines };
+}
+
 export const buildDefaultTimesheetRecords = () => buildDefaultRecords();

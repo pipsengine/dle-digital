@@ -204,8 +204,8 @@ export async function PATCH(request: Request) {
         clockOutTime: timestamp,
         lastActionAt: timestamp,
         source,
+        overtimeHours: overtimeHoursFromTime(record.scheduledEnd, timestamp),
         clockingMode: 'Clocked Out',
-        overtimeHours: Math.max(record.overtimeHours, 0),
       };
       const event: ClockingEvent = {
         id: `clk-evt-${Date.now()}`,
@@ -220,47 +220,50 @@ export async function PATCH(request: Request) {
       return nextRecord;
     }
 
-    const nextRecord: ClockingRecord = {
-      ...record,
-      attendanceStatus: payload.overrideStatus!,
-      clockingMode: payload.overrideStatus === 'Absent' || payload.overrideStatus === 'On Leave' || payload.overrideStatus === 'Excused'
-        ? 'Exception'
-        : record.clockInTime && !record.clockOutTime
-          ? 'Clocked In'
-          : record.clockInTime && record.clockOutTime
-            ? 'Clocked Out'
-            : 'Ready To Clock In',
-      exceptionNote: payload.note?.trim() || null,
-      lastActionAt: new Date().toISOString().slice(11, 16),
-      source,
-    };
-    const event: ClockingEvent = {
-      id: `clk-evt-${Date.now()}`,
-      employeeId: record.employeeId,
-      action: 'MANUAL_OVERRIDE',
-      timestamp: new Date().toISOString(),
-      source,
-      actor,
-      note: payload.note?.trim() || null,
-    };
-    nextRecord.events = [event, ...events].slice(0, 20);
-    return nextRecord;
+    if (payload.action === 'MANUAL_OVERRIDE') {
+      const nextRecord: ClockingRecord = {
+        ...record,
+        attendanceStatus: payload.overrideStatus!,
+        clockingMode: payload.overrideStatus === 'Absent' || payload.overrideStatus === 'Excused' || payload.overrideStatus === 'On Leave' ? 'Exception' : record.clockingMode,
+        exceptionNote: payload.note?.trim() || 'Manual supervisor override applied.',
+        lastActionAt: new Date().toISOString().split('T')[1].slice(0, 5),
+      };
+      const event: ClockingEvent = {
+        id: `clk-evt-${Date.now()}`,
+        employeeId: record.employeeId,
+        action: 'MANUAL_OVERRIDE',
+        timestamp: new Date().toISOString(),
+        source: 'Supervisor Override',
+        actor,
+        note: payload.note?.trim() || `Status overridden to ${payload.overrideStatus}`,
+      };
+      nextRecord.events = [event, ...events].slice(0, 20);
+      return nextRecord;
+    }
+
+    return record;
   });
 
-  const updatedRecord = next.find((item) => item.employeeId === targetEmployeeId) || null;
   await writeClockingRecords(next);
-  if (updatedRecord) {
-    await appendOrganizationAuditEvent({
-      module: 'attendance',
-      entityType: 'attendance-clock',
-      entityId: updatedRecord.id,
-      action: payload.action!,
-      actor,
-      summary: `${actor} performed ${payload.action} for ${updatedRecord.employeeName}.`,
-      before: existing.find((item) => item.employeeId === updatedRecord?.employeeId) as unknown as Record<string, unknown>,
-      after: updatedRecord as unknown as Record<string, unknown>,
-    });
-  }
 
-  return ok(updatedRecord);
+  const target = next.find((r) => r.employeeId === targetEmployeeId)!;
+  await appendOrganizationAuditEvent({
+    module: 'attendance',
+    entityType: 'attendance-clock',
+    entityId: targetEmployeeId,
+    action: payload.action!,
+    actor,
+    summary: `${payload.action} recorded for ${target.employeeName} by ${actor}.`,
+    before: (existing.find((r) => r.employeeId === targetEmployeeId) || null) as unknown as Record<string, unknown>,
+    after: target as unknown as Record<string, unknown>,
+  });
+
+  return ok(await buildPayload(request));
+}
+
+const overtimeHoursFromTime = (scheduledEnd: string, actualTime: string) => {
+  const [sh, sm] = scheduledEnd.split(':').map(Number);
+  const [ah, am] = actualTime.split(':').map(Number);
+  const minutes = Math.max((ah * 60 + am) - (sh * 60 + sm), 0);
+  return Math.round((minutes / 60) * 10) / 10;
 }

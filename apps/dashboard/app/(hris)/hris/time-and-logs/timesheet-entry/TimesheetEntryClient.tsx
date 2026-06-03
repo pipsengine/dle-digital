@@ -1,121 +1,138 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { PageTemplate } from '@/components/layout/page-template';
 import {
   AlertTriangle,
   CheckCircle2,
   Copy,
-  Download,
   Plus,
   RefreshCcw,
   Save,
   Search,
   Send,
   ShieldCheck,
-  TimerReset,
-  Upload,
   Users,
   XCircle,
+  Clock,
+  Briefcase,
+  ChevronRight,
+  ArrowRight,
+  LayoutGrid,
+  CreditCard,
+  Info,
 } from 'lucide-react';
 import type { StructureInsight } from '@/lib/organization-data';
 
-type TimesheetStatus = 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Returned' | 'Locked';
-type TimesheetApprovalDecision = 'Pending' | 'Approved' | 'Rejected' | 'Returned' | 'Locked';
-type TimesheetEntryMode =
-  | 'Employee Self-Service'
-  | 'Supervisor Entry'
-  | 'Bulk Team Entry'
-  | 'Project Engineer Entry'
-  | 'Foreman Entry';
-type ColumnKind = 'project' | 'internal' | 'idle' | 'leave';
+type TimesheetStatus = 'Draft' | 'Submitted' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected';
+type TimesheetEntryMode = 'Supervisor Entry';
+
+type WorkflowStage = {
+  id: TimesheetStatus;
+  label: string;
+  order: number;
+};
+
+type TimesheetPeriod = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: 'Open' | 'Closed' | 'Locked';
+};
+
+type IdleReason = {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+};
+
+type TimesheetHeader = {
+  id: string;
+  periodId: string;
+  timesheetDate: string;
+  supervisorId: string;
+  supervisorName: string;
+  workCenterId: string;
+  workCenterName: string;
+  status: TimesheetStatus;
+  submittedAt: string | null;
+  submittedBy: string | null;
+  approvedAt: string | null;
+  approvedBy: string | null;
+  lastSyncAt: string | null;
+};
+
+type TimesheetLine = {
+  id: string;
+  headerId: string;
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  biometricId: string;
+  attendanceId: string | null;
+  clockIn: string | null;
+  clockOut: string | null;
+  attendanceDuration: number;
+  projectAllocations: Array<{
+    projectId: string;
+    projectCode: string;
+    projectName: string;
+    taskId?: string;
+    taskName?: string;
+    hours: number;
+    remarks: string | null;
+  }>;
+  idleAllocations: Array<{
+    reasonId: string;
+    reasonName: string;
+    hours: number;
+    remarks: string | null;
+  }>;
+  usedHours: number;
+  idleHours: number;
+  totalHours: number;
+  variance: number;
+  remarks: string | null;
+  validationStatus: 'Valid' | 'Error' | 'Warning' | 'Incomplete';
+  validationMessage: string | null;
+};
 
 type DisplayColumn = {
   code: string;
   label: string;
-  kind: ColumnKind;
+  kind: 'project' | 'internal' | 'idle' | 'leave';
 };
 
-type ProjectCatalogItem = {
+type Project = {
+  id: string;
   code: string;
-  label: string;
   name: string;
-  kind: ColumnKind;
-  hourType: string;
-  billable: boolean;
-  phase: string;
-  workPackage: string;
-  activity: string;
-  task: string;
-  costCode: string;
-  wbs: string;
-  client: string | null;
-};
-
-type TimesheetAllocation = {
-  id: string;
-  projectCode: string;
-  projectName: string;
-  projectLabel: string;
-  kind: ColumnKind;
-  hourType: string;
-  bucket: string;
-  phase: string;
-  workPackage: string;
-  activity: string;
-  task: string;
-  costCode: string;
-  wbs: string;
-  hours: number;
-  billable: boolean;
-  labourRateNgn: number;
-  labourCostNgn: number;
-};
-
-type TimesheetApprovalStep = {
-  stage: 'Employee' | 'Supervisor' | 'Project Engineer' | 'Department Head' | 'HR' | 'Payroll';
-  status: TimesheetApprovalDecision;
-  by: string | null;
-  actedAt: string | null;
-  comment: string | null;
-};
-
-type TimesheetRecord = {
-  id: string;
-  timesheetDate: string;
-  employeeId: string;
-  employeeName: string;
-  department: string;
-  businessUnit: string;
-  location: string;
   site: string;
-  supervisor: string;
-  shift: string;
-  labourRateNgn: number;
-  standardHours: number;
-  overtimeHours: number;
-  approvedOvertimeHours: number;
-  mode: TimesheetEntryMode;
-  status: TimesheetStatus;
-  remarks: string | null;
-  submittedAt: string | null;
-  updatedAt: string;
-  allocations: TimesheetAllocation[];
-  approvals: TimesheetApprovalStep[];
-};
-
-type AuditEvent = {
-  id: string;
-  action: string;
-  actor: string;
-  summary: string;
-  createdAt: string;
+  status: string;
+  tasks?: Array<{ id: string; name: string }>;
 };
 
 type Payload = {
   generatedAt: string;
   timesheetDate: string;
+  period: TimesheetPeriod;
+  header: TimesheetHeader | null;
+  lines: TimesheetLine[];
+  idleReasons: IdleReason[];
+  projects: Project[];
+  nextProjectCode: string;
+  workflowStages: WorkflowStage[];
+  biometricDevices: Array<{
+    id: string;
+    deviceName: string;
+    site: string;
+    operationalStatus: string;
+    lastSyncAt: string;
+  }>;
   permissions: {
     actor: string;
     role: string;
@@ -127,13 +144,16 @@ type Payload = {
   };
   summary: {
     totalEmployees: number;
+    presentEmployees: number;
+    absentEmployees: number;
+    onLeaveEmployees: number;
+    sickEmployees: number;
+    notSyncedEmployees: number;
     bookedHours: number;
     usedHours: number;
     idleHours: number;
-    projectHours: number;
-    nonProjectHours: number;
+    productivityPct: number;
     pendingApprovals: number;
-    overtimeHours: number;
   };
   filterOptions: {
     departments: string[];
@@ -146,116 +166,59 @@ type Payload = {
     statuses: TimesheetStatus[];
   };
   matrixColumns: DisplayColumn[];
-  projectCatalog: ProjectCatalogItem[];
-  records: TimesheetRecord[];
-  analytics: {
-    utilizationByDepartment: Array<{
-      department: string;
-      bookedHours: number;
-      availableHours: number;
-      utilizationPct: number;
-      idlePct: number;
-      labourCostNgn: number;
-    }>;
-    projectDashboard: Array<{
-      projectCode: string;
-      projectName: string;
-      labourHours: number;
-      labourCostNgn: number;
-      billableHours: number;
-      idleHours: number;
-      overtimeHours: number;
-    }>;
-  };
+  projectCatalog: any[];
   aiInsights: StructureInsight[];
 };
 
-type MatrixRowDraft = Record<string, number>;
-
-const formatNumber = (value: number) => new Intl.NumberFormat('en-NG').format(value);
-const formatMoney = (value: number) =>
-  new Intl.NumberFormat('en-NG', {
-    style: 'currency',
-    currency: 'NGN',
-    maximumFractionDigits: 0,
-  }).format(value);
-const formatDate = (value: string) => new Date(value).toLocaleDateString('en-NG');
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
-const statusTone = (status: TimesheetStatus | TimesheetApprovalDecision) => {
-  if (status === 'Rejected') return 'bg-red-50 text-red-700 border-red-200';
-  if (status === 'Returned' || status === 'Pending' || status === 'Submitted' || status === 'Draft') return 'bg-amber-50 text-amber-700 border-amber-200';
-  if (status === 'Locked') return 'bg-slate-100 text-slate-700 border-slate-200';
-  return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-};
-
-const insightTone = (severity: StructureInsight['severity']) => {
-  if (severity === 'high') return 'border-red-200 bg-red-50';
-  if (severity === 'medium') return 'border-amber-200 bg-amber-50';
-  return 'border-emerald-200 bg-emerald-50';
-};
-
-const idleHourTypes = new Set(['Idle', 'Standby', 'Equipment Downtime', 'Material Delay', 'Waiting Instruction', 'No Assignment']);
-const nonProjectHourTypes = new Set(['Internal Work', 'Meeting', 'Training', 'Travel', 'Safety Meeting', 'Toolbox Talk', 'Rework', 'Leave', 'Holiday']);
-
 export default function TimesheetEntryClient() {
+  const searchParams = useSearchParams();
+  const dateParam = searchParams.get('date');
+  const supervisorParam = searchParams.get('supervisorId');
+
   const [payload, setPayload] = useState<Payload | null>(null);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [query, setQuery] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState<'All' | string>('All');
-  const [projectFilter, setProjectFilter] = useState<'All' | string>('All');
-  const [locationFilter, setLocationFilter] = useState<'All' | string>('All');
-  const [supervisorFilter, setSupervisorFilter] = useState<'All' | string>('All');
-  const [shiftFilter, setShiftFilter] = useState<'All' | string>('All');
-  const [businessUnitFilter, setBusinessUnitFilter] = useState<'All' | string>('All');
-  const [statusFilter, setStatusFilter] = useState<'All' | TimesheetStatus>('All');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
-  const [allocationEditor, setAllocationEditor] = useState<TimesheetAllocation[]>([]);
-  const [remarks, setRemarks] = useState('');
-  const [mode, setMode] = useState<TimesheetEntryMode>('Employee Self-Service');
-  const [approvedOvertimeHours, setApprovedOvertimeHours] = useState('0');
-  const [bulkColumnCode, setBulkColumnCode] = useState('PRJ-001');
-  const [bulkHours, setBulkHours] = useState('8');
-  const [importText, setImportText] = useState('');
-  const [showBulkEntry, setShowBulkEntry] = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [isNewDraft, setIsNewDraft] = useState(false);
-  const [matrixEdits, setMatrixEdits] = useState<Record<string, MatrixRowDraft>>({});
+  const [viewMode, setViewMode] = useState<'matrix' | 'cards'>('matrix');
+  
+  const [selectedDate, setSelectedDate] = useState(dateParam || '2026-06-03');
+  const [selectedSupervisor, setSelectedSupervisor] = useState(supervisorParam || '');
+  const [selectedWorkCenter, setSelectedWorkCenter] = useState('Fabrication Yard');
 
-  const load = async () => {
+  const [localLines, setLocalLines] = useState<TimesheetLine[]>([]);
+  const [query, setQuery] = useState('');
+  const [matrixColumns, setMatrixColumns] = useState<DisplayColumn[]>([]);
+
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkProject, setBulkProject] = useState('');
+  const [bulkHours, setBulkHours] = useState(8);
+
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectSite, setNewProjectSite] = useState('');
+
+  const load = async (date?: string, supervisor?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/hris/time-and-logs/timesheet-entry', { cache: 'no-store' });
+      const url = new URL('/api/hris/time-and-logs/timesheet-entry', window.location.origin);
+      if (date) url.searchParams.set('date', date);
+      if (supervisor) url.searchParams.set('supervisorId', supervisor);
+      
+      const res = await fetch(url.toString(), { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to load timesheet entry');
+      
       const data = json.data as Payload;
       setPayload(data);
-      setSelectedId((prev) => prev || data.records[0]?.id || null);
-      setSelectedRecordIds((prev) => (prev.length ? prev : data.records.slice(0, 5).map((item) => item.id)));
-
-      if (data.permissions.canViewAudit) {
-        const auditRes = await fetch('/api/hris/organization/audit-log?module=attendance&limit=12', {
-          cache: 'no-store',
-          headers: {
-            'x-hris-actor': data.permissions.actor,
-            'x-hris-role': data.permissions.role,
-          },
-        });
-        const auditJson = await auditRes.json();
-        if (auditRes.ok && auditJson?.status === 'success') {
-          setAuditEvents((auditJson.data?.events || []) as AuditEvent[]);
-        } else {
-          setAuditEvents([]);
-        }
-      } else {
-        setAuditEvents([]);
+      setLocalLines(data.lines);
+      if (data.matrixColumns && matrixColumns.length === 0) {
+        setMatrixColumns(data.matrixColumns);
       }
+      if (!selectedSupervisor) setSelectedSupervisor(data.permissions.actor);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load timesheet entry');
     } finally {
@@ -264,1019 +227,689 @@ export default function TimesheetEntryClient() {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(selectedDate, selectedSupervisor);
+  }, [selectedDate, selectedSupervisor]);
 
-  const visibleRecords = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return (payload?.records || []).filter((record) => {
-      if (departmentFilter !== 'All' && record.department !== departmentFilter) return false;
-      if (locationFilter !== 'All' && record.location !== locationFilter) return false;
-      if (supervisorFilter !== 'All' && record.supervisor !== supervisorFilter) return false;
-      if (shiftFilter !== 'All' && record.shift !== shiftFilter) return false;
-      if (businessUnitFilter !== 'All' && record.businessUnit !== businessUnitFilter) return false;
-      if (statusFilter !== 'All' && record.status !== statusFilter) return false;
-      if (projectFilter !== 'All' && !record.allocations.some((item) => item.projectCode === projectFilter)) return false;
-      if (!q) return true;
-      return [
-        record.employeeId,
-        record.employeeName,
-        record.department,
-        record.businessUnit,
-        record.site,
-        record.supervisor,
-        record.shift,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(q);
-    });
-  }, [payload?.records, query, departmentFilter, projectFilter, locationFilter, supervisorFilter, shiftFilter, businessUnitFilter, statusFilter]);
-
-  const selectedRecord = useMemo(
-    () => visibleRecords.find((record) => record.id === selectedId) || visibleRecords[0] || null,
-    [visibleRecords, selectedId],
-  );
-
-  useEffect(() => {
-    if (!selectedRecord && visibleRecords.length) setSelectedId(visibleRecords[0].id);
-  }, [selectedRecord, visibleRecords]);
-
-  useEffect(() => {
-    if (!selectedRecord) return;
-    setAllocationEditor(selectedRecord.allocations.map((item) => ({ ...item })));
-    setRemarks(selectedRecord.remarks || '');
-    setMode(selectedRecord.mode);
-    setApprovedOvertimeHours(String(selectedRecord.approvedOvertimeHours));
-    setSubmitError(null);
-    setIsNewDraft(false);
-  }, [selectedRecord]);
-
-  const matrixValue = (record: TimesheetRecord, code: string) =>
-    round1(record.allocations.filter((item) => item.projectCode === code).reduce((sum, item) => sum + item.hours, 0));
-
-  const buildMatrixRow = (record: TimesheetRecord): MatrixRowDraft =>
-    Object.fromEntries((payload?.matrixColumns || []).map((column) => [column.code, matrixValue(record, column.code)]));
-
-  const buildAllocationsFromMatrix = (record: TimesheetRecord, row: MatrixRowDraft): TimesheetAllocation[] =>
-    Object.entries(row)
-      .map(([code, hours]) => {
-        const meta = projectCatalogMap.get(code);
-        if (!meta || !hours || hours <= 0) return null;
-        return {
-          id: `${record.employeeId.toLowerCase()}-matrix-${code.toLowerCase()}`,
-          projectCode: meta.code,
-          projectName: meta.name,
-          projectLabel: meta.label,
-          kind: meta.kind,
-          hourType: meta.hourType,
-          bucket: meta.kind === 'project' ? 'Productive Time' : meta.kind === 'idle' ? 'Idle Time' : 'Non-Productive Time',
-          phase: meta.phase,
-          workPackage: meta.workPackage,
-          activity: meta.activity,
-          task: meta.task,
-          costCode: meta.costCode,
-          wbs: meta.wbs,
-          hours: round1(hours),
-          billable: meta.billable,
-          labourRateNgn: record.labourRateNgn,
-          labourCostNgn: Math.round(hours * record.labourRateNgn),
-        } satisfies TimesheetAllocation;
-      })
-      .filter((item): item is TimesheetAllocation => Boolean(item));
-
-  const getActiveRow = (record: TimesheetRecord): MatrixRowDraft => matrixEdits[record.id] || buildMatrixRow(record);
-
-  const effectiveAllocationsForRecord = (record: TimesheetRecord) =>
-    matrixEdits[record.id] ? buildAllocationsFromMatrix(record, matrixEdits[record.id]) : record.allocations;
-
-  const metricsForRecord = (record: Pick<TimesheetRecord, 'allocations' | 'standardHours' | 'overtimeHours' | 'approvedOvertimeHours' | 'labourRateNgn'>) => {
-    const bookedHours = round1(record.allocations.reduce((sum, item) => sum + item.hours, 0));
-    const projectHours = round1(record.allocations.filter((item) => item.kind === 'project').reduce((sum, item) => sum + item.hours, 0));
-    const idleHours = round1(record.allocations.filter((item) => idleHourTypes.has(item.hourType)).reduce((sum, item) => sum + item.hours, 0));
-    const nonProjectHours = round1(record.allocations.filter((item) => nonProjectHourTypes.has(item.hourType)).reduce((sum, item) => sum + item.hours, 0));
-    const usedHours = round1(bookedHours - idleHours);
-    const productiveHours = round1(record.allocations.filter((item) => item.bucket === 'Productive Time').reduce((sum, item) => sum + item.hours, 0));
-    const utilizationPct = record.standardHours ? round1((usedHours / record.standardHours) * 100) : 0;
-    const labourCostNgn = Math.round(record.allocations.reduce((sum, item) => sum + item.labourCostNgn, 0));
-    const directLabourCostNgn = Math.round(record.allocations.filter((item) => item.billable).reduce((sum, item) => sum + item.labourCostNgn, 0));
-    const indirectLabourCostNgn = labourCostNgn - directLabourCostNgn;
-    return {
-      bookedHours,
-      projectHours,
-      idleHours,
-      nonProjectHours,
-      usedHours,
-      productiveHours,
-      utilizationPct,
-      labourCostNgn,
-      directLabourCostNgn,
-      indirectLabourCostNgn,
-    };
-  };
-
-  const selectedMetrics = useMemo(
-    () =>
-      selectedRecord
-        ? metricsForRecord({
-            allocations: matrixEdits[selectedRecord.id] ? buildAllocationsFromMatrix(selectedRecord, matrixEdits[selectedRecord.id]) : allocationEditor,
-            standardHours: selectedRecord.standardHours,
-            overtimeHours: selectedRecord.overtimeHours,
-            approvedOvertimeHours: selectedRecord.approvedOvertimeHours,
-            labourRateNgn: selectedRecord.labourRateNgn,
-          })
-        : null,
-    [selectedRecord, allocationEditor],
-  );
-
-  const projectCatalogMap = useMemo(
-    () => new Map((payload?.projectCatalog || []).map((item) => [item.code, item])),
-    [payload?.projectCatalog],
-  );
-
-  const exportCsv = () => {
-    if (!payload?.permissions.canExport) return;
-    const rows = [
-      ['Employee ID', 'Employee Name', 'Department', 'Business Unit', 'Location', 'Site', 'Shift', 'Status', 'Mode', 'Booked Hours', 'Used Hours', 'Idle Hours', 'Overtime', 'Approved Overtime'],
-      ...visibleRecords.map((record) => {
-        const metrics = metricsForRecord(record);
-        return [
-          record.employeeId,
-          record.employeeName,
-          record.department,
-          record.businessUnit,
-          record.location,
-          record.site,
-          record.shift,
-          record.status,
-          record.mode,
-          String(metrics.bookedHours),
-          String(metrics.usedHours),
-          String(metrics.idleHours),
-          String(record.overtimeHours),
-          String(record.approvedOvertimeHours),
-        ];
-      }),
-    ];
-    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'timesheet-entry.csv';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  const updateAllocation = (index: number, key: keyof TimesheetAllocation, value: string) => {
-    setAllocationEditor((current) =>
-      current.map((item, itemIndex) => {
-        if (itemIndex !== index) return item;
-        if (key === 'projectCode') {
-          const meta = projectCatalogMap.get(value);
-          if (!meta) return item;
-          return {
-            ...item,
-            projectCode: meta.code,
-            projectName: meta.name,
-            projectLabel: meta.label,
-            kind: meta.kind,
-            hourType: meta.hourType,
-            phase: meta.phase,
-            workPackage: meta.workPackage,
-            activity: meta.activity,
-            task: meta.task,
-            costCode: meta.costCode,
-            wbs: meta.wbs,
-            billable: meta.billable,
-            labourCostNgn: Math.round(item.hours * item.labourRateNgn),
-          };
-        }
-
-        const nextHours = key === 'hours' ? Number(value) || 0 : item.hours;
-        return {
-          ...item,
-          [key]: key === 'hours' ? nextHours : value,
-          labourCostNgn: Math.round(nextHours * item.labourRateNgn),
-        };
-      }),
-    );
-  };
-
-  const addAllocation = () => {
-    if (!selectedRecord || !payload?.projectCatalog[0]) return;
-    const meta = payload.projectCatalog[0];
-    setAllocationEditor((current) => [
-      ...current,
-      {
-        id: `${selectedRecord.employeeId.toLowerCase()}-new-${Date.now()}`,
-        projectCode: meta.code,
-        projectName: meta.name,
-        projectLabel: meta.label,
-        kind: meta.kind,
-        hourType: meta.hourType,
-        bucket: meta.kind === 'project' ? 'Productive Time' : meta.kind === 'idle' ? 'Idle Time' : 'Non-Productive Time',
-        phase: meta.phase,
-        workPackage: meta.workPackage,
-        activity: meta.activity,
-        task: meta.task,
-        costCode: meta.costCode,
-        wbs: meta.wbs,
-        hours: 0,
-        billable: meta.billable,
-        labourRateNgn: selectedRecord.labourRateNgn,
-        labourCostNgn: 0,
-      },
-    ]);
-  };
-
-  const startNewTimesheetDraft = () => {
-    if (!selectedRecord || !payload?.projectCatalog[0]) return;
-    const meta = payload.projectCatalog[0];
-    setAllocationEditor([
-      {
-        id: `${selectedRecord.employeeId.toLowerCase()}-draft-${Date.now()}`,
-        projectCode: meta.code,
-        projectName: meta.name,
-        projectLabel: meta.label,
-        kind: meta.kind,
-        hourType: meta.hourType,
-        bucket: meta.kind === 'project' ? 'Productive Time' : meta.kind === 'idle' ? 'Idle Time' : 'Non-Productive Time',
-        phase: meta.phase,
-        workPackage: meta.workPackage,
-        activity: meta.activity,
-        task: meta.task,
-        costCode: meta.costCode,
-        wbs: meta.wbs,
-        hours: 0,
-        billable: meta.billable,
-        labourRateNgn: selectedRecord.labourRateNgn,
-        labourCostNgn: 0,
-      },
-    ]);
-    setRemarks('');
-    setMode('Employee Self-Service');
-    setApprovedOvertimeHours('0');
-    setSubmitError(null);
-    setShowImport(false);
-    setShowBulkEntry(false);
-    setIsNewDraft(true);
-    setMatrixEdits((current) => ({
-      ...current,
-      [selectedRecord.id]: Object.fromEntries((payload?.matrixColumns || []).map((column) => [column.code, 0])),
-    }));
-  };
-
-  const removeAllocation = (index: number) => {
-    setAllocationEditor((current) => current.filter((_, itemIndex) => itemIndex !== index));
-  };
-
-  const applyImportTemplate = () => {
-    if (!selectedRecord || !importText.trim()) return;
-    const next: TimesheetAllocation[] = [];
-    const lines = importText
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    for (const [lineIndex, line] of lines.entries()) {
-      const [codeRaw, hoursRaw] = line.split(',').map((part) => part.trim());
-      const meta = projectCatalogMap.get(codeRaw);
-      const hours = Number(hoursRaw);
-      if (!meta || Number.isNaN(hours)) continue;
-      next.push({
-        id: `${selectedRecord.employeeId.toLowerCase()}-import-${lineIndex}-${meta.code.toLowerCase()}`,
-        projectCode: meta.code,
-        projectName: meta.name,
-        projectLabel: meta.label,
-        kind: meta.kind,
-        hourType: meta.hourType,
-        bucket: meta.kind === 'project' ? 'Productive Time' : meta.kind === 'idle' ? 'Idle Time' : 'Non-Productive Time',
-        phase: meta.phase,
-        workPackage: meta.workPackage,
-        activity: meta.activity,
-        task: meta.task,
-        costCode: meta.costCode,
-        wbs: meta.wbs,
-        hours: round1(hours),
-        billable: meta.billable,
-        labourRateNgn: selectedRecord.labourRateNgn,
-        labourCostNgn: Math.round(hours * selectedRecord.labourRateNgn),
-      });
-    }
-    if (next.length) {
-      setAllocationEditor(next);
-      setShowImport(false);
-      setImportText('');
-    }
-  };
-
-  const runRecordAction = async (
-    action: 'SAVE_DRAFT' | 'SUBMIT' | 'APPROVE' | 'REJECT' | 'RETURN' | 'LOCK' | 'COPY_PREVIOUS_DAY' | 'UPDATE_RECORD',
-  ) => {
-    if (!selectedRecord) return;
+  const handleSyncAttendance = async () => {
     setSubmitting(true);
-    setSubmitError(null);
     try {
-      const effectiveAllocations = matrixEdits[selectedRecord.id]
-        ? buildAllocationsFromMatrix(selectedRecord, matrixEdits[selectedRecord.id])
-        : allocationEditor;
       const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-hris-actor': payload?.permissions.actor || 'Timesheet Control Desk',
-          'x-hris-role': payload?.permissions.role || 'OrganizationAdmin',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action,
-          recordId: selectedRecord.id,
-          allocations: effectiveAllocations,
-          remarks,
-          mode,
-          approvedOvertimeHours: Number(approvedOvertimeHours) || 0,
-          reviewerNote: remarks || undefined,
+          action: 'SYNC_ATTENDANCE',
+          date: selectedDate,
+          supervisorId: selectedSupervisor,
+          workCenterName: selectedWorkCenter,
         }),
       });
       const json = await res.json();
-      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to update timesheet entry');
-      await load();
-      setSelectedId(selectedRecord.id);
-      setIsNewDraft(false);
-      setMatrixEdits((current) => {
-        const next = { ...current };
-        delete next[selectedRecord.id];
-        return next;
-      });
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Sync failed');
+      setPayload(json.data);
+      setLocalLines(json.data.lines);
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Unable to update timesheet entry');
+      setError(e instanceof Error ? e.message : 'Sync failed');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const updateMatrixCell = (record: TimesheetRecord, columnCode: string, value: string) => {
-    const parsed = value === '' ? 0 : Number(value);
-    const safeValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    setMatrixEdits((current) => {
-      const baseRow = current[record.id] || buildMatrixRow(record);
-      return {
-        ...current,
-        [record.id]: {
-          ...baseRow,
-          [columnCode]: safeValue,
-        },
-      };
-    });
+  const handleUpdateLine = (index: number, updates: Partial<TimesheetLine>) => {
+    const next = [...localLines];
+    const line = { ...next[index], ...updates };
+    
+    line.usedHours = round1(line.projectAllocations.reduce((sum, p) => sum + p.hours, 0));
+    line.idleHours = round1(line.idleAllocations.reduce((sum, i) => sum + i.hours, 0));
+    line.totalHours = round1(line.usedHours + line.idleHours);
+    line.variance = round1(line.totalHours - 8);
+    
+    if (line.totalHours > 8.001) {
+      line.validationStatus = 'Error';
+      line.validationMessage = 'Total hours cannot exceed 8 hours per day.';
+    } else if (line.totalHours === 8) {
+      line.validationStatus = 'Valid';
+      line.validationMessage = null;
+    } else if (line.idleHours > 0 && line.idleAllocations.some(a => a.hours > 0 && !a.reasonId)) {
+      line.validationStatus = 'Warning';
+      line.validationMessage = 'Idle time requires a valid reason.';
+    } else {
+      line.validationStatus = 'Incomplete';
+      line.validationMessage = `Awaiting full 8-hour allocation. Current: ${line.totalHours} hrs.`;
+    }
 
-    if (selectedRecord?.id === record.id) {
-      const nextRow = {
-        ...(matrixEdits[record.id] || buildMatrixRow(record)),
-        [columnCode]: safeValue,
-      };
-      setAllocationEditor(buildAllocationsFromMatrix(record, nextRow));
-      setIsNewDraft(false);
+    next[index] = line;
+    setLocalLines(next);
+  };
+
+  const handleCopyPrevious = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'COPY_PREVIOUS_DAY',
+          date: selectedDate,
+          supervisorId: selectedSupervisor,
+          workCenterName: selectedWorkCenter,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Copy failed');
+      setPayload(json.data);
+      setLocalLines(json.data.lines);
+      alert('Previous day allocations copied successfully.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Copy failed');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const runMatrixSave = async () => {
-    const dirtyRecords = visibleRecords.filter((record) => matrixEdits[record.id]);
-    if (!dirtyRecords.length) {
-      setSubmitError('Edit one or more matrix cells before saving the matrix.');
+  const handleSave = async (isSubmit = false) => {
+    if (!payload?.header?.id && !isSubmit) {
+      setError('No active timesheet header. Please sync attendance first.');
       return;
     }
-
+    
     setSubmitting(true);
-    setSubmitError(null);
     try {
-      const matrixRecords = dirtyRecords.map((record) => ({
-        recordId: record.id,
-        allocations: buildAllocationsFromMatrix(record, getActiveRow(record)),
-        remarks: record.id === selectedRecord?.id ? remarks : record.remarks,
-        mode: record.id === selectedRecord?.id ? mode : record.mode,
-        approvedOvertimeHours: record.id === selectedRecord?.id ? Number(approvedOvertimeHours) || 0 : record.approvedOvertimeHours,
-      }));
-
       const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-hris-actor': payload?.permissions.actor || 'Timesheet Control Desk',
-          'x-hris-role': payload?.permissions.role || 'OrganizationAdmin',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'MATRIX_SAVE',
-          matrixRecords,
+          action: isSubmit ? 'SUBMIT' : 'MATRIX_SAVE',
+          headerId: payload?.header?.id,
+          lines: localLines,
         }),
       });
       const json = await res.json();
-      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to save matrix changes');
-      await load();
-      setMatrixEdits({});
-      setIsNewDraft(false);
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Save failed');
+      setPayload(json.data);
+      setLocalLines(json.data.lines);
+      if (isSubmit) alert('Timesheet submitted successfully.');
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Unable to save matrix changes');
+      setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const runBulkApply = async () => {
-    if (!selectedRecordIds.length) return;
+  const handleBulkApply = async () => {
+    if (selectedEmployees.length === 0 || !bulkProject) return;
     setSubmitting(true);
-    setSubmitError(null);
     try {
       const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-hris-actor': payload?.permissions.actor || 'Timesheet Control Desk',
-          'x-hris-role': payload?.permissions.role || 'OrganizationAdmin',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'BULK_APPLY',
-          recordIds: selectedRecordIds,
-          bulkColumnCode,
-          bulkHours: Number(bulkHours) || 0,
+          headerId: payload?.header?.id,
+          bulkAllocation: {
+            employeeIds: selectedEmployees,
+            projectCode: bulkProject,
+            hours: bulkHours,
+          },
         }),
       });
       const json = await res.json();
-      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to apply bulk entry');
-      await load();
-      setShowBulkEntry(false);
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Bulk apply failed');
+      setPayload(json.data);
+      setLocalLines(json.data.lines);
+      setShowBulkModal(false);
+      setSelectedEmployees([]);
+      alert(`Applied ${bulkHours}h to ${selectedEmployees.length} employees.`);
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Unable to apply bulk entry');
+      setError(e instanceof Error ? e.message : 'Bulk apply failed');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const toggleSelectedRecord = (id: string) => {
-    setSelectedRecordIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  const handleDecision = async (decision: 'APPROVE' | 'REJECT') => {
+    if (!payload?.header?.id) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: decision,
+          headerId: payload.header.id,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Action failed');
+      setPayload(json.data);
+      setLocalLines(json.data.lines);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const selectVisible = () => {
-    setSelectedRecordIds(visibleRecords.map((item) => item.id));
+  const handleCreateProject = async () => {
+    if (!newProjectName || !newProjectSite) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CREATE_PROJECT',
+          project: {
+            code: payload?.nextProjectCode,
+            name: newProjectName,
+            site: newProjectSite,
+            status: 'Active',
+          },
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Failed to create project');
+      setPayload(json.data);
+      setShowProjectModal(false);
+      setNewProjectName('');
+      setNewProjectSite('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create project');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const selectedProjectDashboard = useMemo(() => {
-    if (!payload || !selectedRecord) return [];
-    return payload.analytics.projectDashboard.filter((item) => selectedRecord.allocations.some((allocation) => allocation.projectCode === item.projectCode)).slice(0, 6);
-  }, [payload, selectedRecord]);
+  const addProjectColumn = () => {
+    const newColCode = `NEW-${Date.now()}`;
+    setMatrixColumns([...matrixColumns, { code: newColCode, label: 'Select Project', kind: 'project' }]);
+  };
+
+  const updateColumnProject = (colIdx: number, projectCode: string) => {
+    const next = [...matrixColumns];
+    next[colIdx] = { ...next[colIdx], code: projectCode, label: projectCode };
+    setMatrixColumns(next);
+  };
+
+  const removeProjectColumn = (colIdx: number) => {
+    const colToRemove = matrixColumns[colIdx];
+    const nextCols = matrixColumns.filter((_, idx) => idx !== colIdx);
+    setMatrixColumns(nextCols);
+
+    const nextLines = localLines.map(line => {
+      const nextAllocations = line.projectAllocations.filter(p => p.projectCode !== colToRemove.code);
+      const usedHours = round1(nextAllocations.reduce((sum, p) => sum + p.hours, 0));
+      const totalHours = round1(usedHours + line.idleHours);
+      return {
+        ...line,
+        projectAllocations: nextAllocations,
+        usedHours,
+        totalHours,
+        variance: round1(totalHours - 8),
+        validationStatus: totalHours === 8 ? 'Valid' : (totalHours > 8.001 ? 'Error' : 'Incomplete')
+      } as TimesheetLine;
+    });
+    setLocalLines(nextLines);
+  };
+
+  const filteredLines = localLines.filter(l => 
+    l.employeeName.toLowerCase().includes(query.toLowerCase()) ||
+    l.employeeNo.toLowerCase().includes(query.toLowerCase())
+  );
+
+  if (loading && !payload) {
+    return (
+      <PageTemplate 
+        title="Timesheet Entry" 
+        description="Loading timesheet data..."
+        breadcrumbs={[{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Timesheet Entry' }]}
+      >
+        <div className="flex h-96 items-center justify-center"><RefreshCcw className="h-8 w-8 animate-spin text-slate-400" /></div>
+      </PageTemplate>
+    );
+  }
+
+  const currentStageIdx = payload?.workflowStages.findIndex(s => s.id === payload?.header?.status) ?? 0;
 
   return (
     <PageTemplate
       title="Timesheet Entry"
-      description="Daily labour allocation and project time booking."
-      breadcrumbs={[
-        { label: 'HRIS', href: '/hris' },
-        { label: 'Time and Logs', href: '/hris/time-and-logs' },
-        { label: 'Timesheet Entry' },
-      ]}
-      primaryAction={{ label: 'Refresh', onClick: () => void load(), icon: RefreshCcw }}
-      secondaryAction={{ label: 'Export', onClick: exportCsv, icon: Download }}
+      description="Record daily work hour allocations across projects and tasks."
+      breadcrumbs={[{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Timesheet Entry' }]}
+      primaryAction={{ label: 'Sync Attendance', onClick: handleSyncAttendance, icon: RefreshCcw }}
+      secondaryAction={{ label: 'Create Project', onClick: () => setShowProjectModal(true), icon: Plus }}
     >
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4">
-        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-slate-900">Enterprise Labour Utilization and Project Costing</div>
-            <div className="text-xs text-slate-500 mt-1">Timesheet date: {payload ? formatDate(payload.timesheetDate) : '—'} · Actor: {payload?.permissions.actor || '—'} · Role: {payload?.permissions.role || '—'}</div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={startNewTimesheetDraft} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <Plus className="w-4 h-4 inline mr-2" />
-              New Timesheet
-            </button>
-            <button type="button" onClick={() => void runRecordAction('COPY_PREVIOUS_DAY')} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <Copy className="w-4 h-4 inline mr-2" />
-              Copy Previous Day
-            </button>
-            <button type="button" onClick={() => setShowBulkEntry((current) => !current)} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <Users className="w-4 h-4 inline mr-2" />
-              Bulk Entry
-            </button>
-            <button type="button" onClick={() => setShowImport((current) => !current)} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              <Upload className="w-4 h-4 inline mr-2" />
-              Import
-            </button>
-            <button type="button" disabled={submitting || !payload?.permissions.canEdit} onClick={() => void runMatrixSave()} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
-              <Save className="w-4 h-4 inline mr-2" />
-              Save Matrix
-            </button>
-            <button type="button" disabled={submitting || !payload?.permissions.canEdit} onClick={() => void runRecordAction('SUBMIT')} className="px-3 py-2 rounded-lg bg-dle-blue text-white text-sm font-medium hover:bg-dle-blue-deep disabled:opacity-60">
-              <Send className="w-4 h-4 inline mr-2" />
-              Submit
-            </button>
-            <button type="button" disabled={submitting || !payload?.permissions.canApprove} onClick={() => void runRecordAction('APPROVE')} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60">
-              <CheckCircle2 className="w-4 h-4 inline mr-2" />
-              Approve
-            </button>
-            <button type="button" disabled={submitting || !payload?.permissions.canApprove} onClick={() => void runRecordAction('REJECT')} className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-60">
-              <XCircle className="w-4 h-4 inline mr-2" />
-              Reject
-            </button>
-          </div>
-        </div>
-
-        {isNewDraft && selectedRecord ? (
-          <div className="rounded-2xl border border-dle-blue/20 bg-dle-blue/5 px-4 py-3 text-sm text-slate-700">
-            Creating a new draft template for <span className="font-semibold text-slate-900">{selectedRecord.employeeName}</span>. You can save this draft even before the full `8` hours are allocated.
-          </div>
-        ) : null}
-
-        {showBulkEntry ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-            <div className="text-sm font-semibold text-slate-900">Bulk Team Entry</div>
-            <div className="text-xs text-slate-500">Apply one allocation column and hour value to the selected team or visible filtered employees.</div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <SelectField label="Allocation Column" value={bulkColumnCode} onChange={setBulkColumnCode} options={(payload?.matrixColumns || []).map((item) => item.code)} />
-              <Field label="Hours" value={bulkHours} onChange={setBulkHours} type="number" />
-              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 flex items-center text-sm text-slate-700">Selected Records: {formatNumber(selectedRecordIds.length)}</div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={selectVisible} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-white">Select Visible</button>
-                <button type="button" disabled={submitting || !payload?.permissions.canEdit} onClick={() => void runBulkApply()} className="px-3 py-2 rounded-lg bg-dle-blue text-white text-sm font-medium hover:bg-dle-blue-deep disabled:opacity-60">Apply To Selected</button>
+      <div className="space-y-8">
+        {/* Header Card */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-6 border-b border-slate-100 pb-6">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase">Timesheet Entry</h1>
+              <div className="flex items-center gap-3 text-sm font-bold text-slate-500">
+                <span className="flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">
+                  <Clock className="h-3.5 w-3.5" /> Period: {payload?.period.startDate} to {payload?.period.endDate}
+                </span>
+                <span className={`rounded-full px-2.5 py-1 border ${payload?.period.status === 'Open' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{payload?.period.status}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Supervisor</p>
+                <select value={selectedSupervisor} onChange={(e) => setSelectedSupervisor(e.target.value)} className="bg-transparent text-sm font-black text-slate-900 focus:outline-none">
+                  <option value={payload?.permissions.actor}>{payload?.permissions.actor}</option>
+                  {payload?.filterOptions.supervisors.filter(s => s !== payload?.permissions.actor).map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Work Center</p>
+                <select value={selectedWorkCenter} onChange={(e) => setSelectedWorkCenter(e.target.value)} className="bg-transparent text-sm font-black text-slate-900 focus:outline-none">
+                  <option value="Fabrication Yard">Fabrication Yard</option>
+                  <option value="Onne Yard">Onne Yard</option>
+                  <option value="Marine Base">Marine Base</option>
+                  <option value="Liaison Office">Liaison Office</option>
+                </select>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Working Date</p>
+                <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent text-sm font-black text-slate-900 focus:outline-none" />
               </div>
             </div>
           </div>
-        ) : null}
-
-        {showImport ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-            <div className="text-sm font-semibold text-slate-900">Import Helper</div>
-            <div className="text-xs text-slate-500">Paste `COLUMN_CODE,HOURS` per line to replace the selected employee allocation grid.</div>
-            <textarea
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              rows={4}
-              placeholder={`PRJ-001,3\nMEETING,1\nIDLE,4`}
-              className="w-full py-2.5 px-3 rounded-xl border border-slate-200 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-dle-blue/20 resize-y"
-            />
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={applyImportTemplate} className="px-3 py-2 rounded-lg bg-dle-blue text-white text-sm font-medium hover:bg-dle-blue-deep">Apply Import</button>
-              <button type="button" onClick={() => setShowImport(false)} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-white">Close</button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-8 gap-4">
-        <MetricCard icon={Users} label="Total Employees" value={payload ? formatNumber(payload.summary.totalEmployees) : '—'} detail="Employees in active timesheet scope" />
-        <MetricCard icon={CheckCircle2} label="Booked Hours" value={payload ? `${payload.summary.bookedHours}h` : '—'} detail="Total hours recorded" />
-        <MetricCard icon={ShieldCheck} label="Used Hours" value={payload ? `${payload.summary.usedHours}h` : '—'} detail="Productive and non-idle hours" />
-        <MetricCard icon={TimerReset} label="Idle Hours" value={payload ? `${payload.summary.idleHours}h` : '—'} detail="Idle and waiting time" />
-        <MetricCard icon={Users} label="Project Hours" value={payload ? `${payload.summary.projectHours}h` : '—'} detail="Direct project allocations" />
-        <MetricCard icon={Users} label="Non-Project Hours" value={payload ? `${payload.summary.nonProjectHours}h` : '—'} detail="Internal and support work" />
-        <MetricCard icon={AlertTriangle} label="Pending Approvals" value={payload ? formatNumber(payload.summary.pendingApprovals) : '—'} detail="Records awaiting workflow action" />
-        <MetricCard icon={AlertTriangle} label="Overtime Hours" value={payload ? `${payload.summary.overtimeHours}h` : '—'} detail="Daily overtime captured" />
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3">
-        <label className="relative xl:col-span-2">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search employee, department, site, or supervisor..."
-            className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
-          />
-        </label>
-        <Select value={departmentFilter} onChange={(value) => setDepartmentFilter(value as 'All' | string)} options={['All', ...(payload?.filterOptions.departments || [])]} labels={{ All: 'All Departments' }} />
-        <Select value={projectFilter} onChange={(value) => setProjectFilter(value as 'All' | string)} options={['All', ...(payload?.filterOptions.projects || [])]} labels={{ All: 'All Projects' }} />
-        <Select value={locationFilter} onChange={(value) => setLocationFilter(value as 'All' | string)} options={['All', ...(payload?.filterOptions.locations || [])]} labels={{ All: 'All Locations' }} />
-        <Select value={supervisorFilter} onChange={(value) => setSupervisorFilter(value as 'All' | string)} options={['All', ...(payload?.filterOptions.supervisors || [])]} labels={{ All: 'All Supervisors' }} />
-        <Select value={shiftFilter} onChange={(value) => setShiftFilter(value as 'All' | string)} options={['All', ...(payload?.filterOptions.shifts || [])]} labels={{ All: 'All Shifts' }} />
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex flex-col xl:flex-row gap-3 xl:items-center xl:justify-between">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:w-[440px]">
-          <Select value={businessUnitFilter} onChange={(value) => setBusinessUnitFilter(value as 'All' | string)} options={['All', ...(payload?.filterOptions.businessUnits || [])]} labels={{ All: 'All Business Units' }} />
-          <Select value={statusFilter} onChange={(value) => setStatusFilter(value as 'All' | TimesheetStatus)} options={['All', ...(payload?.filterOptions.statuses || [])]} labels={{ All: 'All Statuses' }} />
-        </div>
-        <div className="text-xs text-slate-500">
-          Matrix records: <span className="font-semibold text-slate-700">{formatNumber(visibleRecords.length)}</span>
-          {' '}<span className="mx-2">•</span>
-          Selected for bulk: <span className="font-semibold text-slate-700">{formatNumber(selectedRecordIds.length)}</span>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100">
-          <div className="text-sm font-bold text-slate-900">Timesheet Matrix</div>
-          <div className="text-xs text-slate-500 mt-1">Spreadsheet-style daily labour allocation across projects, non-project activities, and idle categories, editable for multiple employees at once.</div>
-        </div>
-        <div className="overflow-auto">
-          <table className="w-full text-left min-w-[1800px]">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Pick</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Employee</th>
-                {(payload?.matrixColumns || []).map((column) => (
-                  <th key={column.code} className="px-3 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap">{column.label}</th>
-                ))}
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Used</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Idle</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Total</th>
-                <th className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleRecords.map((record) => {
-                const row = getActiveRow(record);
-                const metrics = metricsForRecord({
-                  allocations: effectiveAllocationsForRecord(record),
-                  standardHours: record.standardHours,
-                  overtimeHours: record.overtimeHours,
-                  approvedOvertimeHours: record.approvedOvertimeHours,
-                  labourRateNgn: record.labourRateNgn,
-                });
-                const active = selectedRecord?.id === record.id;
-                return (
-                  <tr key={record.id} className={`border-t border-slate-100 hover:bg-slate-50 cursor-pointer ${active ? 'bg-dle-blue/5' : ''}`} onClick={() => setSelectedId(record.id)}>
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedRecordIds.includes(record.id)}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          toggleSelectedRecord(record.id);
-                        }}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-sm font-semibold text-slate-900">{record.employeeName}</div>
-                      <div className="text-xs text-slate-500">{record.employeeId}</div>
-                    </td>
-                    {(payload?.matrixColumns || []).map((column) => (
-                      <td key={`${record.id}-${column.code}`} className="px-2 py-2 text-sm text-slate-700">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={row[column.code] ?? 0}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => updateMatrixCell(record, column.code, e.target.value)}
-                          className="w-[72px] py-1.5 px-2 rounded-lg border border-slate-200 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
-                        />
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-sm font-semibold text-slate-900">{metrics.usedHours}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{metrics.idleHours}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-slate-900">{metrics.bookedHours}</td>
-                    <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${statusTone(record.status)}`}>{record.status}</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="text-xs text-slate-500">Capture hours directly in the matrix across multiple employees, then use `Save Matrix` to persist all edited rows together.</div>
-          <button type="button" disabled={submitting || !payload?.permissions.canEdit} onClick={() => void runMatrixSave()} className="px-3 py-2 rounded-lg bg-dle-blue text-white text-sm font-medium hover:bg-dle-blue-deep disabled:opacity-60">
-            <Save className="w-4 h-4 inline mr-2" />
-            Save Matrix
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6">
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">Daily Allocation Panel</div>
-              <div className="text-xs text-slate-500 mt-1">Review daily labour split, productive versus idle time, overtime, and validation posture.</div>
-            </div>
-            <div className="p-5">
-              {selectedRecord && selectedMetrics ? (
-                <div className="space-y-5">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${statusTone(selectedRecord.status)}`}>{selectedRecord.status}</span>
-                      <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold">{selectedRecord.mode}</span>
-                    </div>
-                    <h3 className="text-xl font-bold text-slate-900 mt-3">{selectedRecord.employeeName}</h3>
-                    <p className="text-sm text-slate-500 mt-1">{selectedRecord.department}</p>
+          <div className="mt-8">
+            <div className="relative flex justify-between">
+              {payload?.workflowStages.map((stage, idx) => (
+                <div key={stage.id} className="relative z-10 flex flex-col items-center gap-2">
+                  <div className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${idx <= currentStageIdx ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-400'}`}>
+                    {idx < currentStageIdx ? <CheckCircle2 className="h-4 w-4" /> : stage.order}
                   </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <DetailStat label="Standard Hours" value={`${selectedRecord.standardHours}h`} />
-                    <DetailStat label="Booked Hours" value={`${selectedMetrics.bookedHours}h`} />
-                    <DetailStat label="Used Time" value={`${selectedMetrics.usedHours}h`} />
-                    <DetailStat label="Idle Time" value={`${selectedMetrics.idleHours}h`} />
-                    <DetailStat label="Project Hours" value={`${selectedMetrics.projectHours}h`} />
-                    <DetailStat label="Non-Project Hours" value={`${selectedMetrics.nonProjectHours}h`} />
-                    <DetailStat label="Productive Time" value={`${selectedMetrics.productiveHours}h`} />
-                    <DetailStat label="Utilization" value={`${selectedMetrics.utilizationPct}%`} />
-                    <DetailStat label="Overtime" value={`${selectedRecord.overtimeHours}h`} />
-                    <DetailStat label="Approved Overtime" value={`${selectedRecord.approvedOvertimeHours}h`} />
-                    <DetailStat label="Labour Rate" value={formatMoney(selectedRecord.labourRateNgn)} />
-                    <DetailStat label="Total Labour Cost" value={formatMoney(selectedMetrics.labourCostNgn)} />
-                  </div>
-                </div>
-              ) : (
-                <div className="text-sm text-slate-600">Select a timesheet to inspect the daily allocation breakdown.</div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">Project Allocation Grid</div>
-              <div className="text-xs text-slate-500 mt-1">Allocate labour hours by project, WBS, cost code, internal activity, and idle categories.</div>
-            </div>
-            <div className="p-4 space-y-3">
-              {allocationEditor.map((allocation, index) => (
-                <div key={allocation.id} className="rounded-2xl border border-slate-200 p-4 bg-slate-50">
-                  <div className="grid grid-cols-1 xl:grid-cols-[220px_110px_1fr_1fr_1fr_1fr_1fr_auto] gap-3 items-start">
-                    <SelectField label="Column" value={allocation.projectCode} onChange={(value) => updateAllocation(index, 'projectCode', value)} options={(payload?.projectCatalog || []).map((item) => item.code)} />
-                    <Field label="Hours" value={String(allocation.hours)} onChange={(value) => updateAllocation(index, 'hours', value)} type="number" />
-                    <ReadOnlyField label="Phase" value={allocation.phase} />
-                    <ReadOnlyField label="Work Package" value={allocation.workPackage} />
-                    <ReadOnlyField label="Activity" value={allocation.activity} />
-                    <ReadOnlyField label="Cost Code" value={allocation.costCode} />
-                    <ReadOnlyField label="WBS" value={allocation.wbs} />
-                    <button type="button" onClick={() => removeAllocation(index)} className="mt-6 px-3 py-2 rounded-lg border border-red-200 text-red-700 text-sm font-medium hover:bg-red-50">
-                      Remove
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3 text-xs text-slate-600">
-                    <span>Task: {allocation.task}</span>
-                    <span>Type: {allocation.hourType}</span>
-                    <span>Bucket: {allocation.bucket}</span>
-                    <span>Cost: {formatMoney(allocation.labourCostNgn)}</span>
-                  </div>
+                  <span className={`text-[10px] font-black uppercase tracking-tighter ${idx <= currentStageIdx ? 'text-indigo-700' : 'text-slate-400'}`}>{stage.label}</span>
                 </div>
               ))}
-              <button type="button" onClick={addAllocation} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                <Plus className="w-4 h-4 inline mr-2" />
-                Add Allocation Row
+              <div className="absolute top-4 left-0 h-0.5 w-full -translate-y-1/2 bg-slate-100">
+                <div className="h-full bg-indigo-600 transition-all duration-500" style={{ width: `${(currentStageIdx / (payload!.workflowStages.length - 1)) * 100}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Dashboard Metrics */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+          {[
+            { label: 'Total Crew', value: payload?.summary.totalEmployees, color: 'indigo' },
+            { label: 'Present', value: payload?.summary.presentEmployees, color: 'emerald', pct: (payload!.summary.presentEmployees / payload!.summary.totalEmployees) * 100 },
+            { label: 'Absent', value: payload?.summary.absentEmployees, color: 'red', pct: (payload!.summary.absentEmployees / payload!.summary.totalEmployees) * 100 },
+            { label: 'On Leave', value: payload?.summary.onLeaveEmployees, color: 'amber' },
+            { label: 'Productive Hrs', value: payload?.summary.usedHours, color: 'blue', sub: `${payload?.summary.productivityPct}% Productivity` },
+            { label: 'Idle Hrs', value: payload?.summary.idleHours, color: 'slate', sub: `${round1(100 - payload!.summary.productivityPct)}% Idle Rate` },
+          ].map((m, i) => (
+            <div key={i} className={`rounded-2xl border border-slate-200 bg-white p-4 shadow-sm`}>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{m.label}</p>
+              <p className="mt-1 text-2xl font-black text-slate-900">{m.value}</p>
+              {m.pct !== undefined ? (
+                <div className="mt-2 h-1 w-full rounded-full bg-slate-100"><div className={`h-full rounded-full bg-${m.color}-500`} style={{ width: `${m.pct}%` }} /></div>
+              ) : m.sub ? (
+                <p className={`mt-1 text-[10px] font-bold text-${m.color}-500`}>{m.sub}</p>
+              ) : (
+                <div className="mt-2 h-1 w-full rounded-full bg-slate-100"><div className="h-full w-full rounded-full bg-indigo-600" /></div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Biometric Bar */}
+        <div className="flex flex-wrap items-center justify-between rounded-xl bg-slate-900 px-5 py-3 text-[11px] text-white shadow-lg">
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-400" /><span className="font-black uppercase tracking-widest text-emerald-400">Biometric Integrated</span></div>
+            <span className="opacity-30">|</span>
+            <div className="flex items-center gap-3"><span className="font-bold uppercase tracking-widest opacity-60">Active Site Devices:</span><div className="flex gap-2">
+              {payload?.biometricDevices.filter(d => d.site === selectedWorkCenter).map(device => (
+                <span key={device.id} className="flex items-center gap-1.5 rounded-md bg-white/5 px-2 py-0.5 font-bold"><span className={`h-1.5 w-1.5 rounded-full ${device.operationalStatus === 'Online' ? 'bg-emerald-500' : 'bg-amber-500'}`} />{device.deviceName}</span>
+              ))}
+            </div></div>
+          </div>
+          <div className="flex items-center gap-4 text-right">
+            <div><p className="text-[9px] font-bold uppercase opacity-50">Last Handshake</p><p className="font-black text-indigo-300">{payload?.header?.lastSyncAt ? new Date(payload.header.lastSyncAt).toLocaleTimeString() : 'Awaiting...'}</p></div>
+            <button onClick={handleSyncAttendance} disabled={submitting} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 disabled:opacity-50">Fetch Punches</button>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-1 items-center gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input type="text" placeholder="Search employee..." value={query} onChange={(e) => setQuery(e.target.value)} className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm font-medium focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+            </div>
+            {selectedEmployees.length > 0 && (
+              <button 
+                onClick={() => setShowBulkModal(true)}
+                className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-black text-white hover:bg-amber-700 shadow-lg shadow-amber-100 animate-in fade-in slide-in-from-left-2"
+              >
+                <Users className="h-4 w-4" /> 
+                APPLY TO {selectedEmployees.length} SELECTED
               </button>
+            )}
+            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              <button onClick={() => setViewMode('matrix')} className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${viewMode === 'matrix' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><LayoutGrid className="h-3.5 w-3.5" />Matrix</button>
+              <button onClick={() => setViewMode('cards')} className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${viewMode === 'cards' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><CreditCard className="h-3.5 w-3.5" />Cards</button>
             </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={handleCopyPrevious} disabled={submitting || payload?.header?.status === 'Approved' || payload?.header?.status === 'Locked'} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Copy className="h-3.5 w-3.5" />COPY PREVIOUS</button>
+            <button onClick={() => handleSave(false)} disabled={submitting || payload?.header?.status === 'Approved' || payload?.header?.status === 'Locked'} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50">SAVE DRAFT</button>
+            <button onClick={() => handleSave(true)} disabled={submitting || payload?.header?.status === 'Approved' || payload?.header?.status === 'Locked'} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50">SUBMIT</button>
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">Approval Workflow Panel</div>
-              <div className="text-xs text-slate-500 mt-1">Track the full approval path across employee, supervisor, engineering, HR, and payroll.</div>
-            </div>
-            <div className="p-4 space-y-3">
-              {(selectedRecord?.approvals || []).map((step) => (
-                <div key={step.stage} className="rounded-2xl border border-slate-200 p-4 bg-slate-50">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-slate-900">{step.stage}</div>
-                    <span className={`px-2 py-1 rounded-full border text-[11px] font-semibold ${statusTone(step.status)}`}>{step.status}</span>
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1">{step.by || 'Pending actor'}</div>
-                  <div className="text-xs text-slate-500 mt-1">{step.actedAt ? formatDate(step.actedAt) : 'No action yet'}</div>
-                  <div className="text-sm text-slate-600 mt-2">{step.comment || 'No workflow comment recorded.'}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">Resource Utilization Dashboard</div>
-              <div className="text-xs text-slate-500 mt-1">View labour utilization, direct versus indirect cost, and departmental productivity posture.</div>
-            </div>
-            <div className="p-4 space-y-4">
-              {selectedMetrics ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <DetailStat label="Utilization %" value={`${selectedMetrics.utilizationPct}%`} />
-                  <DetailStat label="Idle %" value={`${selectedRecord ? round1((selectedMetrics.idleHours / selectedRecord.standardHours) * 100) : 0}%`} />
-                  <DetailStat label="Direct Labour Cost" value={formatMoney(selectedMetrics.directLabourCostNgn)} />
-                  <DetailStat label="Indirect Labour Cost" value={formatMoney(selectedMetrics.indirectLabourCostNgn)} />
-                  <DetailStat label="Client Billing Base" value={formatMoney(Math.round(selectedMetrics.directLabourCostNgn * 1.15))} />
-                  <DetailStat label="Project Profitability Signal" value={selectedMetrics.directLabourCostNgn > selectedMetrics.indirectLabourCostNgn ? 'Recoverable' : 'At Risk'} />
-                </div>
-              ) : null}
-
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100">
-                  <div className="text-sm font-semibold text-slate-900">Department Utilization</div>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {(payload?.analytics.utilizationByDepartment || []).slice(0, 6).map((item) => (
-                    <div key={item.department} className="px-4 py-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-900">{item.department}</div>
-                        <div className="text-sm text-slate-700">{item.utilizationPct}%</div>
+        {/* Table or Card View */}
+        {viewMode === 'matrix' ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/50">
+                    <th className="sticky left-0 z-20 bg-slate-50 px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 min-w-[220px] shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedEmployees.length === filteredLines.length && filteredLines.length > 0}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedEmployees(filteredLines.map(l => l.employeeId));
+                            else setSelectedEmployees([]);
+                          }}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>Employee Details</span>
                       </div>
-                      <div className="text-xs text-slate-500 mt-1">Booked {item.bookedHours}h / Available {item.availableHours}h · Idle {item.idlePct}% · Cost {formatMoney(item.labourCostNgn)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">Submission Section</div>
-              <div className="text-xs text-slate-500 mt-1">Finalize entry mode, overtime approval, remarks, and workflow decision for the selected timesheet.</div>
-            </div>
-            <div className="p-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <SelectField label="Entry Mode" value={mode} onChange={(value) => setMode(value as TimesheetEntryMode)} options={payload?.filterOptions.modes || []} />
-                <Field label="Approved Overtime Hours" value={approvedOvertimeHours} onChange={setApprovedOvertimeHours} type="number" />
-              </div>
-              <TextAreaField label="Remarks" value={remarks} onChange={setRemarks} placeholder="Capture project notes, idle reasons, approval comments, or submission context." />
-
-              {submitError ? <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">{submitError}</div> : null}
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" disabled={submitting || !payload?.permissions.canEdit} onClick={() => void runRecordAction('SAVE_DRAFT')} className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">Save Draft</button>
-                <button type="button" disabled={submitting || !payload?.permissions.canEdit} onClick={() => void runRecordAction('SUBMIT')} className="px-3 py-2 rounded-lg bg-dle-blue text-white text-sm font-medium hover:bg-dle-blue-deep disabled:opacity-60">Submit</button>
-                <button type="button" disabled={submitting || !payload?.permissions.canApprove} onClick={() => void runRecordAction('APPROVE')} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60">Approve</button>
-                <button type="button" disabled={submitting || !payload?.permissions.canApprove} onClick={() => void runRecordAction('RETURN')} className="px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium hover:bg-amber-100 disabled:opacity-60">Return</button>
-                <button type="button" disabled={submitting || !payload?.permissions.canApprove} onClick={() => void runRecordAction('REJECT')} className="px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-60">Reject</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100">
-            <div className="text-sm font-bold text-slate-900">Project Dashboard</div>
-            <div className="text-xs text-slate-500 mt-1">Project labour hours, cost, recoverable billing base, and overtime burden for related allocations.</div>
-          </div>
-          <div className="overflow-auto">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50">
-                <tr>
-                  {['Project', 'Labour Hours', 'Labour Cost', 'Billable Hours', 'Idle Hours', 'Overtime Hours'].map((header) => (
-                    <th key={header} className="px-4 py-3 text-[11px] font-semibold text-slate-600 uppercase tracking-wide whitespace-nowrap">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {selectedProjectDashboard.map((item) => (
-                  <tr key={item.projectCode} className="border-t border-slate-100">
-                    <td className="px-4 py-3">
-                      <div className="text-sm font-semibold text-slate-900">{item.projectCode}</div>
-                      <div className="text-xs text-slate-500">{item.projectName}</div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{item.labourHours}h</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{formatMoney(item.labourCostNgn)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{item.billableHours}h</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{item.idleHours}h</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{item.overtimeHours}h</td>
+                    </th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 min-w-[120px]">Log</th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 text-center min-w-[60px]">Dur</th>
+                    {matrixColumns.map((col, colIdx) => (
+                      <th key={colIdx} className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 min-w-[160px] border-l border-slate-100">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between">
+                            <select value={col.code} onChange={(e) => updateColumnProject(colIdx, e.target.value)} className="bg-transparent font-black text-indigo-600 focus:outline-none text-[11px]">
+                              <option value={col.code}>{col.label}</option>
+                              {payload?.projects.map(p => <option key={p.id} value={p.code}>{p.code}</option>)}
+                            </select>
+                            <button onClick={() => removeProjectColumn(colIdx)} className="text-slate-300 hover:text-red-500"><XCircle className="h-3.5 w-3.5" /></button>
+                          </div>
+                          <span className="truncate text-[9px] font-bold text-slate-400">{payload?.projects.find(p => p.code === col.code)?.name || 'Select...'}</span>
+                        </div>
+                      </th>
+                    ))}
+                    <th className="px-4 py-5 border-l border-slate-100"><button onClick={addProjectColumn} className="rounded-lg bg-indigo-50 p-2 text-indigo-600 hover:bg-indigo-100"><Plus className="h-4 w-4" /></button></th>
+                    <th className="px-4 py-5 border-l border-slate-100 min-w-[60px] text-center">
+                      <button onClick={addProjectColumn} className="rounded-lg bg-indigo-50 p-2 text-indigo-600 hover:bg-indigo-100 transition-colors">
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 text-center bg-blue-50/30 min-w-[80px]">Used</th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 min-w-[220px] bg-amber-50/30">Idle Time</th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 text-center bg-indigo-50/30 min-w-[80px]">Total</th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 text-center min-w-[60px]">Var</th>
+                    <th className="px-4 py-5 font-black uppercase tracking-widest text-[10px] text-slate-500 text-center min-w-[100px]">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredLines.map((line) => {
+                    const isAbsent = !line.clockIn;
+                    const originalIdx = localLines.findIndex(l => l.id === line.id);
+                    return (
+                      <tr key={line.id} className={`hover:bg-slate-50/80 transition-colors ${isAbsent ? 'opacity-60 bg-slate-50/30' : line.validationStatus === 'Valid' ? 'bg-emerald-50/30' : line.validationStatus === 'Error' ? 'bg-red-50/30' : 'bg-white'}`}>
+                        <td className={`sticky left-0 z-10 px-4 py-4 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.03)] ${isAbsent ? 'bg-slate-50' : line.validationStatus === 'Valid' ? 'bg-[#f0fdf4]' : line.validationStatus === 'Error' ? 'bg-[#fef2f2]' : 'bg-white'}`}>
+                          <div className="flex items-center gap-3 min-w-max">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedEmployees.includes(line.employeeId)}
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedEmployees([...selectedEmployees, line.employeeId]);
+                                else setSelectedEmployees(selectedEmployees.filter(id => id !== line.employeeId));
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                            />
+                            {!isAbsent && <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />}
+                            <div className="flex flex-col whitespace-nowrap">
+                              <span className="text-[9px] font-black text-indigo-600 tracking-widest uppercase">{line.employeeNo}</span>
+                              <span className="text-[13px] font-black text-slate-900 tracking-tight">{line.employeeName}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 whitespace-nowrap">{isAbsent ? <span className="text-[10px] font-black text-red-600">ABSENT</span> : <div className="flex flex-col gap-0.5 text-[10px] font-black text-slate-700"><span>IN: {line.clockIn}</span><span>OUT: {line.clockOut || '--:--'}</span></div>}</td>
+                        <td className="px-4 py-4 text-center text-[11px] font-black text-slate-600 tabular-nums">{line.attendanceDuration}h</td>
+                        {matrixColumns.map((col) => (
+                          <td key={col.code} className="px-4 py-4 border-l border-slate-100"><input type="number" step="0.5" disabled={isAbsent || payload?.header?.status === 'Approved'} value={line.projectAllocations.find(p => p.projectCode === col.code)?.hours || ''} onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            const allocations = [...line.projectAllocations];
+                            const pIdx = allocations.findIndex(p => p.projectCode === col.code);
+                            if (pIdx >= 0) allocations[pIdx].hours = val;
+                            else allocations.push({ projectId: col.code, projectCode: col.code, projectName: col.label, hours: val, remarks: null });
+                            handleUpdateLine(originalIdx, { projectAllocations: allocations });
+                          }} className="w-full rounded-lg border border-slate-200 py-1.5 text-center text-xs font-black focus:border-indigo-500" /></td>
+                        ))}
+                        <td className="px-4 py-4 border-l border-slate-100"></td>
+                        <td className="px-4 py-4 text-center font-black text-blue-700 bg-blue-50/20">{line.usedHours}</td>
+                        <td className="px-4 py-4 bg-amber-50/20 border-l border-slate-100"><div className="flex flex-col gap-2">{(line.idleAllocations.length === 0 ? [{ reasonId: '', hours: 0 }] : line.idleAllocations).map((alloc, iIdx) => (
+                          <div key={iIdx} className="flex items-center gap-1.5"><input type="number" step="0.5" placeholder="Hrs" disabled={isAbsent} value={alloc.hours || ''} onChange={(e) => {
+                            const next = [...line.idleAllocations];
+                            if (next[iIdx]) next[iIdx].hours = parseFloat(e.target.value) || 0;
+                            else next.push({ reasonId: '', reasonName: '', hours: parseFloat(e.target.value) || 0, remarks: null });
+                            handleUpdateLine(originalIdx, { idleAllocations: next });
+                          }} className="w-12 rounded-lg border border-slate-200 py-1 text-center text-[10px] font-black" />
+                          <select value={alloc.reasonId} onChange={(e) => {
+                            const next = [...line.idleAllocations];
+                            if (next[iIdx]) next[iIdx].reasonId = e.target.value;
+                            handleUpdateLine(originalIdx, { idleAllocations: next });
+                          }} className="flex-1 rounded-lg border border-slate-200 py-1 text-[9px] font-bold">
+                            <option value="">Reason...</option>
+                            {payload?.idleReasons.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          </select>
+                          {iIdx === line.idleAllocations.length - 1 && !isAbsent && <button onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: '', reasonName: '', hours: 0, remarks: null }] })} className="p-1 text-slate-400 hover:text-indigo-600"><Plus className="h-3 w-3" /></button>}</div>
+                        ))}</div></td>
+                        <td className="px-4 py-4 text-center bg-indigo-50/20"><span className={`font-black ${line.totalHours === 8 ? 'text-emerald-600' : 'text-indigo-600'}`}>{line.totalHours}</span></td>
+                        <td className="px-4 py-4 text-center"><span className={`text-[10px] font-black ${line.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{line.variance > 0 ? `+${line.variance}` : line.variance}</span></td>
+                        <td className="px-4 py-4 text-center"><div className="flex flex-col items-center gap-1 group relative">
+                          {line.validationStatus === 'Valid' ? <><CheckCircle2 className="h-5 w-5 text-emerald-500" /><span className="text-[9px] font-black text-emerald-600">COMPLETE</span></> : <><AlertTriangle className={`h-5 w-5 ${line.validationStatus === 'Error' ? 'text-red-500' : 'text-amber-500'}`} /><span className={`text-[9px] font-black ${line.validationStatus === 'Error' ? 'text-red-600' : 'text-amber-600'}`}>{line.validationStatus}</span></>}
+                          {line.validationMessage && <div className="absolute bottom-full left-1/2 mb-2 hidden w-48 -translate-x-1/2 rounded-lg bg-slate-900 p-2 text-[10px] text-white group-hover:block z-50">{line.validationMessage}</div>}
+                        </div></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">AI Timesheet Insights</div>
-              <div className="text-xs text-slate-500 mt-1">AI-driven prompts on idle risk, labour waste, anomalies, and utilization pressure.</div>
-            </div>
-            <div className="p-4 space-y-3">
-              {(payload?.aiInsights || []).map((insight) => (
-                <div key={insight.id} className={`rounded-2xl border p-4 ${insightTone(insight.severity)}`}>
-                  <div className="text-sm font-semibold text-slate-900">{insight.title}</div>
-                  <div className="text-xs text-slate-600 mt-1">{insight.recommendation}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100">
-              <div className="text-sm font-bold text-slate-900">Recent Audit Activity</div>
-              <div className="text-xs text-slate-500 mt-1">Recent attendance and timesheet audit events for governance and traceability.</div>
-            </div>
-            <div className="p-4 space-y-3">
-              {payload?.permissions.canViewAudit ? (
-                auditEvents.length ? (
-                  auditEvents.map((event) => (
-                    <div key={event.id} className="rounded-2xl border border-slate-200 p-4 bg-slate-50">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-900">{event.action}</div>
-                        <div className="text-[11px] text-slate-500 font-semibold">{formatDate(event.createdAt)}</div>
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">{event.actor}</div>
-                      <div className="text-sm text-slate-700 mt-2">{event.summary}</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredLines.map((line) => {
+              const originalIdx = localLines.findIndex(l => l.id === line.id);
+              const isAbsent = !line.clockIn;
+              return (
+                <div key={line.id} className={`rounded-2xl border-2 p-5 shadow-sm ${line.validationStatus === 'Valid' ? 'border-emerald-100 bg-emerald-50/10' : line.validationStatus === 'Error' ? 'border-red-100 bg-red-50/10' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedEmployees.includes(line.employeeId)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedEmployees([...selectedEmployees, line.employeeId]);
+                          else setSelectedEmployees(selectedEmployees.filter(id => id !== line.employeeId));
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      {!isAbsent && <ShieldCheck className="h-4 w-4 text-emerald-600" />}
+                      <div><p className="text-[10px] font-black text-indigo-600 leading-none">{line.employeeNo}</p><h3 className="text-sm font-black text-slate-900 mt-1">{line.employeeName}</h3></div>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-slate-600">No attendance audit events are available yet.</div>
-                )
-              ) : (
-                <div className="text-sm text-slate-600">Your current role cannot view the attendance audit log.</div>
-              )}
+                    <div className={`rounded-full px-2 py-0.5 text-[9px] font-black border ${line.validationStatus === 'Valid' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{line.validationStatus === 'Valid' ? 'COMPLETE' : line.validationStatus}</div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex justify-between text-[11px] font-bold text-slate-500"><span>Attendance:</span><span>{isAbsent ? 'Absent' : `${line.clockIn}-${line.clockOut || '--'} (${line.attendanceDuration}h)`}</span></div>
+                    <div className="space-y-2">
+                      <p className="text-[9px] font-black uppercase text-slate-400">Projects</p>
+                      {matrixColumns.map(col => (
+                        <div key={col.code} className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-bold text-slate-600 truncate flex-1">{col.label}</span>
+                          <input type="number" step="0.5" disabled={isAbsent} value={line.projectAllocations.find(p => p.projectCode === col.code)?.hours || ''} onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            const next = [...line.projectAllocations];
+                            const pIdx = next.findIndex(p => p.projectCode === col.code);
+                            if (pIdx >= 0) next[pIdx].hours = val;
+                            else next.push({ projectId: col.code, projectCode: col.code, projectName: col.label, hours: val, remarks: null });
+                            handleUpdateLine(originalIdx, { projectAllocations: next });
+                          }} className="w-14 rounded-lg border border-slate-200 py-1 text-center text-xs font-black" />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-3">
+                      <p className="text-[9px] font-black uppercase text-slate-400">Idle Time</p>
+                      {line.idleAllocations.map((alloc, iIdx) => (
+                        <div key={iIdx} className="flex items-center gap-2">
+                          <select 
+                            value={alloc.reasonId} 
+                            onChange={(e) => {
+                              const next = [...line.idleAllocations];
+                              next[iIdx].reasonId = e.target.value;
+                              handleUpdateLine(originalIdx, { idleAllocations: next });
+                            }}
+                            className="flex-1 rounded-lg border border-slate-200 py-1.5 text-[10px] font-bold bg-amber-50/30"
+                          >
+                            <option value="">Select Reason...</option>
+                            {payload?.idleReasons.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          </select>
+                          <input 
+                            type="number" 
+                            step="0.5" 
+                            value={alloc.hours || ''} 
+                            onChange={(e) => {
+                              const next = [...line.idleAllocations];
+                              next[iIdx].hours = parseFloat(e.target.value) || 0;
+                              handleUpdateLine(originalIdx, { idleAllocations: next });
+                            }}
+                            className="w-14 rounded-lg border border-slate-200 py-1.5 text-center text-xs font-black bg-amber-50/30"
+                          />
+                        </div>
+                      ))}
+                      {!isAbsent && (
+                        <button 
+                          onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: '', reasonName: '', hours: 0, remarks: null }] })}
+                          className="w-full rounded-lg border border-dashed border-slate-200 py-1.5 text-[10px] font-black text-slate-400 hover:border-indigo-300 hover:text-indigo-600 transition-all"
+                        >
+                          + ADD IDLE REASON
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex justify-between border-t border-slate-100 pt-4 text-center font-black">
+                      <div><p className="text-[8px] text-slate-400">USED</p><p className="text-blue-700">{line.usedHours}h</p></div>
+                      <div><p className="text-[8px] text-slate-400">IDLE</p><p className="text-amber-700">{line.idleHours}h</p></div>
+                      <div><p className="text-[8px] text-slate-400">TOTAL</p><p className={line.totalHours === 8 ? 'text-emerald-600' : 'text-indigo-600'}>{line.totalHours}h</p></div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Approval Decisions Panel */}
+        {payload?.permissions.canApprove && payload.header?.status !== 'Approved' && payload.header?.status !== 'Locked' && payload.header?.status !== 'Draft' && (
+          <div className="rounded-2xl border-2 border-indigo-200 bg-white p-8 shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-8">
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-indigo-600 p-2 text-white"><ShieldCheck className="h-6 w-6" /></div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Pending Approval Review</h3>
+                </div>
+                <p className="text-sm font-medium text-slate-500">You are reviewing the timesheet for <strong className="text-slate-900">{payload.header?.workCenterName}</strong> for <strong className="text-slate-900">{payload.header?.timesheetDate}</strong>.</p>
+              </div>
+              <div className="flex items-center gap-4">
+                <button onClick={() => handleDecision('REJECT')} className="rounded-xl border-2 border-red-100 bg-red-50 px-8 py-3 text-sm font-black text-red-700 hover:bg-red-100 transition-all">REJECT</button>
+                <button onClick={() => handleDecision('APPROVE')} className="rounded-xl bg-indigo-600 px-10 py-3 text-sm font-black text-white hover:bg-indigo-700 shadow-xl transition-all">APPROVE</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* AI Insights */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {payload?.aiInsights.map((insight) => (
+            <div key={insight.id} className={`rounded-2xl border-2 p-6 transition-all hover:shadow-lg ${insight.severity === 'high' ? 'border-red-100 bg-red-50/20' : 'border-amber-100 bg-amber-50/20'}`}>
+              <div className="flex items-start gap-5">
+                <div className={`rounded-xl p-3 ${insight.severity === 'high' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'}`}><AlertTriangle className="h-6 w-6" /></div>
+                <div className="space-y-2"><h4 className="text-lg font-black text-slate-900 uppercase tracking-tight">{insight.title}</h4><p className="text-sm font-medium leading-relaxed text-slate-600">{insight.recommendation}</p><button className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-700">Investigate <ArrowRight className="h-3.5 w-3.5" /></button></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Project Modal */}
+      {showProjectModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="mb-8 flex items-center justify-between"><div className="space-y-1"><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Register Project</h3><p className="text-sm font-medium text-slate-500">Add a new project code to the company registry.</p></div><button onClick={() => setShowProjectModal(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"><XCircle className="h-8 w-8" /></button></div>
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Project Code (Auto)</label><div className="rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-3 text-sm font-black text-slate-400">{payload?.nextProjectCode}</div></div>
+                <div><label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Site Location</label><select value={newProjectSite} onChange={(e) => setNewProjectSite(e.target.value)} className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 focus:border-indigo-500 focus:outline-none transition-all"><option value="">Select Site...</option><option value="Fabrication Yard">Fabrication Yard</option><option value="Onne Yard">Onne Yard</option><option value="Marine Base">Marine Base</option><option value="Liaison Office">Liaison Office</option><option value="Head Office">Head Office</option></select></div>
+              </div>
+              <div><label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Project Name</label><input type="text" placeholder="e.g. NLNG Train 7 - Piping Works" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 placeholder:text-slate-300 focus:border-indigo-500 focus:outline-none transition-all" /></div>
+              <div className="pt-4 flex gap-3"><button onClick={() => setShowProjectModal(false)} className="flex-1 rounded-2xl border-2 border-slate-100 py-4 text-xs font-black text-slate-400 hover:bg-slate-50 transition-all uppercase tracking-widest">Cancel</button><button onClick={handleCreateProject} disabled={submitting || !newProjectName || !newProjectSite} className="flex-[2] rounded-2xl bg-indigo-600 py-4 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50 shadow-xl shadow-indigo-100 transition-all uppercase tracking-widest">{submitting ? 'Creating...' : 'Register Project'}</button></div>
             </div>
           </div>
         </div>
-      </div>
-    </PageTemplate>
-  );
-}
+      )}
 
-function MetricCard({ icon: Icon, label, value, detail }: { icon: any; label: string; value: string; detail: string }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{value}</div>
-          <div className="text-xs text-slate-500 mt-2">{detail}</div>
+      {/* Bulk Apply Modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/70 backdrop-blur-md p-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="mb-6 flex items-center justify-between">
+              <div className="space-y-1">
+                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Bulk Allocation</h3>
+                <p className="text-xs font-medium text-slate-500">Applying hours to {selectedEmployees.length} selected employees.</p>
+              </div>
+              <button onClick={() => setShowBulkModal(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"><XCircle className="h-6 w-6" /></button>
+            </div>
+            <div className="space-y-5">
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Select Project</label>
+                <select 
+                  value={bulkProject} 
+                  onChange={(e) => setBulkProject(e.target.value)}
+                  className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 focus:border-indigo-500 focus:outline-none transition-all"
+                >
+                  <option value="">Select Project...</option>
+                  {payload?.projects.map(p => <option key={p.id} value={p.code}>{p.code} - {p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Hours to Apply</label>
+                <div className="flex items-center gap-4">
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="8" 
+                    step="0.5" 
+                    value={bulkHours} 
+                    onChange={(e) => setBulkHours(parseFloat(e.target.value))}
+                    className="flex-1 h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                  <span className="w-12 text-center text-lg font-black text-indigo-600">{bulkHours}h</span>
+                </div>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button onClick={() => setShowBulkModal(false)} className="flex-1 rounded-2xl border-2 border-slate-100 py-3 text-[10px] font-black text-slate-400 hover:bg-slate-50 transition-all uppercase tracking-widest">Cancel</button>
+                <button 
+                  onClick={handleBulkApply} 
+                  disabled={submitting || !bulkProject} 
+                  className="flex-[2] rounded-2xl bg-amber-600 py-3 text-[10px] font-black text-white hover:bg-amber-700 disabled:opacity-50 shadow-xl shadow-amber-100 transition-all uppercase tracking-widest"
+                >
+                  {submitting ? 'Applying...' : 'Apply Allocation'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <span className="w-10 h-10 rounded-2xl bg-dle-blue/10 text-dle-blue flex items-center justify-center">
-          <Icon className="w-5 h-5" />
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function DetailStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
-      <div className="text-sm font-semibold text-slate-900 mt-1">{value}</div>
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
-  return (
-    <label className="block">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1.5">{label}</div>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full py-2.5 px-3 rounded-xl border border-slate-200 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
-      />
-    </label>
-  );
-}
-
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1.5">{label}</div>
-      <div className="w-full py-2.5 px-3 rounded-xl border border-slate-200 text-sm text-slate-700 bg-white">{value}</div>
-    </div>
-  );
-}
-
-function TextAreaField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
-  return (
-    <label className="block">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1.5">{label}</div>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={4}
-        placeholder={placeholder}
-        className="w-full py-2.5 px-3 rounded-xl border border-slate-200 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-dle-blue/20 resize-y"
-      />
-    </label>
-  );
-}
-
-function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
-  return (
-    <label className="block">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1.5">{label}</div>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full py-2.5 px-3 rounded-xl border border-slate-200 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function Select({ value, onChange, options, labels }: { value: string; onChange: (value: string) => void; options: string[]; labels?: Record<string, string> }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full py-2.5 px-3 rounded-xl border border-slate-200 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
-    >
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {labels?.[option] || option}
-        </option>
-      ))}
-    </select>
+      )}
+    </PageTemplate>
   );
 }

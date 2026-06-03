@@ -1,0 +1,113 @@
+{
+  "headers": [
+    {
+      "id": "hdr-2026-06-03-hris-administrator",
+      "periodId": "per-2026-06",
+      "timesheetDate": "2026-06-03",
+      "supervisorId": "HRIS Administrator",
+      "supervisorName": "HRIS Administrator",
+      "workCenterId": "fabrication-yard",
+      "workCenterName": "Fabrication Yard",
+      "status": "Draft",
+      "submittedAt": null,
+      "submittedBy": null,
+      "approvedAt": null,
+      "approvedBy": null,
+      "lastSyncAt": "2026-06-03T14:05:35.715Z"
+    }
+  ],
+  "lines": [
+    {
+      "id": "line-hdr-2026-06-03-hris-administrator-DLE-EMP-00004",
+      "headerId": "hdr-2026-06-03-hris-administrator",
+      "employeeId": "DLE-EMP-00004",
+      "employeeNo": "DLE-EMP-00004",
+      "employeeName": "Tunde Adebayo",
+      "biometricId": "clk-dle-emp-00004",
+      "attendanceId": "clk-dle-emp-00004",
+      "clockIn": "07:48",
+      "clockOut": "17:42",
+      "attendanceDuration": 9.9,
+      "projectAllocations": [
+        {
+          "projectId": "prj-001",
+          "projectCode": "DL26001",
+          "projectName": "Dangote Refinery Pipe Fabrication",
+          "hours": 2,
+          "remarks": null
+        },
+        {
+          "projectId": "prj-002",
+          "projectCode": "DL26002",
+          "projectName": "NLNG Train 7 E&I Works",
+          "hours": 3,
+          "remarks": null
+        },
+        {
+          "projectId": "prj-003",
+          "projectCode": "DL26003",
+          "projectName": "Bonga Shutdown Support",
+          "hours": 2,
+          "remarks": null
+        },
+        {
+          "projectId": "prj-004",
+          "projectCode": "DL26004",
+          "projectName": "Marine Logistics Operations",
+          "hours": 1,
+          "remarks": null
+        }
+      ],
+      "idleAllocations": [],
+      "usedHours": 8,
+      "idleHours": 0,
+      "totalHours": 8,
+      "variance": 0,
+      "remarks": null,
+      "validationStatus": "Valid",
+      "validationMessage": null
+    },
+    {
+      "id": "line-hdr-2026-06-03-hris-administrator-DLE-EMP-00006",
+      "headerId": "hdr-2026-06-03-hris-administrator",
+      "employeeId": "DLE-EMP-00006",
+      "employeeNo": "DLE-EMP-00006",
+      "employeeName": "Emeka Nwankwo",
+      "biometricId": "clk-dle-emp-00006",
+      "attendanceId": "clk-dle-emp-00006",
+      "clockIn": "08:22",
+      "clockOut": "17:31",
+      "attendanceDuration": 9.2,
+      "projectAllocations": [],
+      "idleAllocations": [],
+      "usedHours": 0,
+      "idleHours": 0,
+      "totalHours": 0,
+      "variance": -9.2,
+      "remarks": null,
+      "validationStatus": "Incomplete",
+      "validationMessage": "Awaiting time allocation."
+    },
+    {
+      "id": "line-hdr-2026-06-03-hris-administrator-DLE-EMP-00014",
+      "headerId": "hdr-2026-06-03-hris-administrator",
+      "employeeId": "DLE-EMP-00014",
+      "employeeNo": "DLE-EMP-00014",
+      "employeeName": "Ade Torres",
+      "biometricId": "clk-dle-emp-00014",
+      "attendanceId": "clk-dle-emp-00014",
+      "clockIn": "18:54",
+      "clockOut": null,
+      "attendanceDuration": 9,
+      "projectAllocations": [],
+      "idleAllocations": [],
+      "usedHours": 0,
+      "idleHours": 0,
+      "totalHours": 0,
+      "variance": -9,
+      "remarks": null,
+      "validationStatus": "Incomplete",
+      "validationMessage": "Awaiting time allocation."
+    }
+  ]
+}
