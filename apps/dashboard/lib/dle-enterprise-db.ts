@@ -85,7 +85,6 @@ export type DleEmployeeDirectoryRow = {
   setupAssignedToPayroll: boolean;
   sourceSystem: string;
   sourceEmployeeId: string;
-  sourceDraftId: string;
   createdAt: string;
   modifiedAt: string;
   aiRiskScore: number;
@@ -530,7 +529,7 @@ export const findEmployeeDuplicatesInDb = async (payload: any): Promise<Duplicat
       FROM [hris].[Employees] e
       LEFT JOIN [hris].[EmployeeContactInfo] c ON c.employee_id = e.employee_id
       LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = e.employee_id
-      WHERE e.is_deleted = 0 AND (
+      WHERE (
         (@official_email IS NOT NULL AND LOWER(c.official_email) = @official_email)
         OR (@personal_email IS NOT NULL AND LOWER(c.personal_email) = @personal_email)
         OR (@primary_phone IS NOT NULL AND REPLACE(c.primary_phone, ' ', '') = @primary_phone)
@@ -570,9 +569,8 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       v.preferred_name,
       v.employment_status,
       v.employment_type,
-      v.source_system,
-      v.source_employee_id,
-      v.source_draft_id,
+      sourceRecord.source_system,
+      sourceRecord.source_employee_id,
       pinfo.title,
       pinfo.first_name,
       pinfo.middle_name,
@@ -636,6 +634,14 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
     LEFT JOIN [hris].[EmployeeContactInfo] contact ON contact.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeePayrollSetup] payroll ON payroll.employee_id = v.employee_id
+    OUTER APPLY (
+      SELECT TOP (1)
+        src.source_system,
+        src.source_employee_id
+      FROM [hris].[EmployeeSourceRecords] src
+      WHERE src.employee_id = v.employee_id
+      ORDER BY src.imported_at DESC, src.employee_source_record_id DESC
+    ) sourceRecord
     OUTER APPLY (
       SELECT COUNT_BIG(*) AS emergency_contact_count
       FROM [hris].[EmployeeEmergencyContacts] c
@@ -738,7 +744,6 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       setupAssignedToPayroll: Boolean(row.setup_assigned_to_payroll),
       sourceSystem: str(row.source_system) || 'DLE_Enterprise',
       sourceEmployeeId: str(row.source_employee_id),
-      sourceDraftId: str(row.source_draft_id),
       createdAt: isoDateTime(row.created_at),
       modifiedAt: isoDateTime(row.modified_at),
       aiRiskScore,
@@ -838,14 +843,21 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         DECLARE @was_insert bit = 0;
 
         SELECT @employee_id = employee_id
-        FROM [hris].[Employees] WITH (UPDLOCK, HOLDLOCK)
+        FROM [hris].[EmployeeSourceRecords] WITH (UPDLOCK, HOLDLOCK)
         WHERE source_system = N'Sage 300 People Payroll'
           AND source_employee_id = @source_employee_id;
 
         IF @employee_id IS NULL
         BEGIN
-          INSERT [hris].[Employees](employee_code, full_name, employment_status, employment_type, source_system, source_employee_id)
-          VALUES (@employee_code, @full_name, @employment_status, @employment_type, N'Sage 300 People Payroll', @source_employee_id);
+          SELECT @employee_id = employee_id
+          FROM [hris].[Employees] WITH (UPDLOCK, HOLDLOCK)
+          WHERE employee_code = @employee_code;
+        END;
+
+        IF @employee_id IS NULL
+        BEGIN
+          INSERT [hris].[Employees](employee_code, full_name, employment_status, employment_type)
+          VALUES (@employee_code, @full_name, @employment_status, @employment_type);
           SET @employee_id = CONVERT(bigint, SCOPE_IDENTITY());
           SET @was_insert = 1;
         END
@@ -855,11 +867,6 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
           SET full_name = @full_name,
               employment_status = @employment_status,
               employment_type = @employment_type,
-              source_system = N'Sage 300 People Payroll',
-              source_employee_id = @source_employee_id,
-              is_deleted = 0,
-              deleted_at = NULL,
-              deleted_by = NULL,
               modified_at = SYSUTCDATETIME(),
               modified_by = SUSER_SNAME()
           WHERE employee_id = @employee_id;
@@ -1104,8 +1111,7 @@ export const previewNextEmployeeCodeFromDb = async (employeeType: string) => {
         ISNULL((
           SELECT MAX(TRY_CONVERT(int, SUBSTRING(employee_code, 2, 20)))
           FROM [hris].[Employees]
-          WHERE is_deleted = 0
-            AND employee_code LIKE @type_code + '[0-9][0-9][0-9][0-9]%'
+          WHERE employee_code LIKE @type_code + '[0-9][0-9][0-9][0-9]%'
             AND TRY_CONVERT(int, SUBSTRING(employee_code, 2, 20)) IS NOT NULL
         ), 0) AS latest_employee,
         ISNULL((
@@ -1148,13 +1154,33 @@ export const createEmployeeFromDraftInDb = async (draftId: string, employeeCode:
       .input('preferred_name', sql.NVarChar(150), nullable(personal.preferredName))
       .input('employment_status', sql.VarChar(40), nullable(employment.employmentStatus) || 'Active')
       .input('employment_type', sql.VarChar(40), nullable(employment.employmentType) || 'Permanent')
-      .input('source_draft_id', sql.NVarChar(40), draftId)
       .query(`
-        INSERT [hris].[Employees](employee_code, full_name, preferred_name, employment_status, employment_type, source_draft_id)
+        INSERT [hris].[Employees](employee_code, full_name, preferred_name, employment_status, employment_type)
         OUTPUT INSERTED.employee_id
-        VALUES (@employee_code, @full_name, @preferred_name, @employment_status, @employment_type, @source_draft_id);
+        VALUES (@employee_code, @full_name, @preferred_name, @employment_status, @employment_type);
       `);
     const employeeId = employeeRs.recordset[0].employee_id as number;
+
+    await new sql.Request(tx)
+      .input('employee_id', sql.BigInt, employeeId)
+      .input('source_draft_id', sql.NVarChar(80), draftId)
+      .input('raw_payload_json', sql.NVarChar(sql.MAX), JSON.stringify({ draftId, source: 'EmployeeDrafts' }))
+      .query(`
+        MERGE [hris].[EmployeeSourceRecords] AS target
+        USING (SELECT N'DLE Employee Draft' AS source_system, @source_draft_id AS source_employee_id) AS source
+        ON target.source_system = source.source_system
+        AND target.source_employee_id = source.source_employee_id
+        WHEN MATCHED THEN UPDATE SET
+          employee_id = @employee_id,
+          raw_payload_json = @raw_payload_json,
+          imported_at = SYSUTCDATETIME(),
+          imported_by = SUSER_SNAME()
+        WHEN NOT MATCHED THEN INSERT (
+          employee_id, source_system, source_employee_id, raw_payload_json
+        ) VALUES (
+          @employee_id, N'DLE Employee Draft', @source_draft_id, @raw_payload_json
+        );
+      `);
 
     await new sql.Request(tx)
       .input('employee_id', sql.BigInt, employeeId)

@@ -289,7 +289,7 @@ DECLARE @employee_id bigint;
 DECLARE @was_insert bit = 0;
 
 SELECT @employee_id = employee_id
-FROM hris.Employees WITH (UPDLOCK, HOLDLOCK)
+FROM hris.EmployeeSourceRecords WITH (UPDLOCK, HOLDLOCK)
 WHERE source_system = N'Sage 300 People Payroll'
   AND source_employee_id = @source_employee_id;
 
@@ -302,8 +302,8 @@ END;
 
 IF @employee_id IS NULL
 BEGIN
-  INSERT hris.Employees(employee_code, full_name, preferred_name, employment_status, employment_type, source_system, source_employee_id, created_by)
-  VALUES (@employee_code, @full_name, NULL, @employment_status, @employment_type, N'Sage 300 People Payroll', @source_employee_id, SUSER_SNAME());
+  INSERT hris.Employees(employee_code, full_name, preferred_name, employment_status, employment_type, created_by)
+  VALUES (@employee_code, @full_name, NULL, @employment_status, @employment_type, SUSER_SNAME());
   SET @employee_id = CONVERT(bigint, SCOPE_IDENTITY());
   SET @was_insert = 1;
 END
@@ -313,11 +313,6 @@ BEGIN
   SET full_name = @full_name,
       employment_status = @employment_status,
       employment_type = @employment_type,
-      source_system = N'Sage 300 People Payroll',
-      source_employee_id = @source_employee_id,
-      is_deleted = 0,
-      deleted_at = NULL,
-      deleted_by = NULL,
       modified_at = SYSUTCDATETIME(),
       modified_by = SUSER_SNAME()
   WHERE employee_id = @employee_id;

@@ -81,12 +81,6 @@ BEGIN
     preferred_name nvarchar(150) NULL,
     employment_status varchar(40) NOT NULL CONSTRAINT DF_Employees_employment_status DEFAULT ('Active'),
     employment_type varchar(40) NOT NULL CONSTRAINT DF_Employees_employment_type DEFAULT ('Permanent'),
-    source_system nvarchar(80) NOT NULL CONSTRAINT DF_Employees_source_system DEFAULT ('DLE_Enterprise'),
-    source_employee_id nvarchar(80) NULL,
-    source_draft_id nvarchar(40) NULL,
-    is_deleted bit NOT NULL CONSTRAINT DF_Employees_is_deleted DEFAULT (0),
-    deleted_at datetime2(0) NULL,
-    deleted_by sysname NULL,
     created_at datetime2(0) NOT NULL CONSTRAINT DF_Employees_created_at DEFAULT SYSUTCDATETIME(),
     created_by sysname NOT NULL CONSTRAINT DF_Employees_created_by DEFAULT SUSER_SNAME(),
     modified_at datetime2(0) NULL,
@@ -94,10 +88,8 @@ BEGIN
     row_version rowversion NOT NULL,
     CONSTRAINT PK_Employees PRIMARY KEY CLUSTERED (employee_id),
     CONSTRAINT UQ_Employees_employee_code UNIQUE (employee_code),
-    CONSTRAINT FK_Employees_SourceDraft FOREIGN KEY (source_draft_id) REFERENCES [hris].[EmployeeDrafts](draft_id),
     CONSTRAINT CK_Employees_status CHECK (employment_status IN ('Active', 'On Leave', 'Probation', 'Confirmed', 'Suspended', 'Resigned', 'Terminated', 'Retired', 'Contract', 'Seconded', 'Field Assignment', 'Inactive')),
-    CONSTRAINT CK_Employees_type CHECK (employment_type IN ('Permanent', 'Lumpsum', 'Daily Rate', 'Contract', 'Temporary', 'Intern', 'Consultant', 'Expatriate', 'Industrial Trainee', 'NYSC', 'Outsourced Staff')),
-    CONSTRAINT CK_Employees_soft_delete CHECK ((is_deleted = 0 AND deleted_at IS NULL AND deleted_by IS NULL) OR (is_deleted = 1 AND deleted_at IS NOT NULL))
+    CONSTRAINT CK_Employees_type CHECK (employment_type IN ('Permanent', 'Lumpsum', 'Daily Rate', 'Contract', 'Temporary', 'Intern', 'Consultant', 'Expatriate', 'Industrial Trainee', 'NYSC', 'Outsourced Staff'))
   );
 END;
 GO
@@ -459,7 +451,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'[hris].[E
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'[hris].[Employees]') AND name = N'IX_Employees_active_status')
-  CREATE INDEX IX_Employees_active_status ON [hris].[Employees](employment_status, employment_type) INCLUDE (employee_code, full_name) WHERE is_deleted = 0;
+  CREATE INDEX IX_Employees_active_status ON [hris].[Employees](employment_status, employment_type) INCLUDE (employee_code, full_name);
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'[hris].[EmployeeContactInfo]') AND name = N'UX_EmployeeContactInfo_official_email')
@@ -491,9 +483,6 @@ SELECT
   e.preferred_name,
   e.employment_status,
   e.employment_type,
-  e.source_system,
-  e.source_employee_id,
-  e.source_draft_id,
   p.first_name,
   p.middle_name,
   p.last_name,
@@ -523,8 +512,7 @@ FROM [hris].[Employees] e
 LEFT JOIN [hris].[EmployeePersonalInfo] p ON p.employee_id = e.employee_id
 LEFT JOIN [hris].[EmployeeContactInfo] c ON c.employee_id = e.employee_id
 LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = e.employee_id
-LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = e.employee_id
-WHERE e.is_deleted = 0;
+LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = e.employee_id;
 GO
 
 CREATE OR ALTER PROCEDURE [hris].[usp_AllocateEmployeeCode]
@@ -552,8 +540,7 @@ BEGIN
   DECLARE @latestExisting int = 0;
   SELECT @latestExisting = ISNULL(MAX(TRY_CONVERT(int, SUBSTRING(employee_code, 2, 20))), 0)
   FROM [hris].[Employees] WITH (UPDLOCK, HOLDLOCK)
-  WHERE is_deleted = 0
-    AND employee_code LIKE @typeCode + '[0-9][0-9][0-9][0-9]%'
+  WHERE employee_code LIKE @typeCode + '[0-9][0-9][0-9][0-9]%'
     AND TRY_CONVERT(int, SUBSTRING(employee_code, 2, 20)) IS NOT NULL;
 
   UPDATE [hris].[EmployeeCodeCounters] WITH (UPDLOCK, HOLDLOCK)
