@@ -181,6 +181,17 @@ type Payload = {
     location: string;
     status: string;
   }>;
+  supervisorEmployees: Array<{
+    employeeId: string;
+    employeeCode: string;
+    fullName: string;
+    jobTitle: string;
+    department: string;
+    location: string;
+    managerEmployeeCode: string | null;
+    managerName: string | null;
+    status: string;
+  }>;
   permissions: {
     actor: string;
     role: string;
@@ -213,6 +224,7 @@ type Payload = {
     businessUnits: string[];
     modes: TimesheetEntryMode[];
     statuses: TimesheetStatus[];
+    supervisorDirectory: Array<{ value: string; label: string; employeeCode: string; fullName: string; employeeCount: number }>;
   };
   matrixColumns: DisplayColumn[];
   projectCatalog: any[];
@@ -736,6 +748,9 @@ export default function TimesheetEntryClient() {
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
   const matchedPunches = payload?.summary.presentEmployees ?? 0;
   const exceptionPunches = payload?.summary.absentEmployees ?? 0;
+  const supervisorDirectory = payload?.filterOptions.supervisorDirectory ?? [];
+  const supervisorLabel = supervisorDirectory.find((item) => item.value === selectedSupervisor)?.label || selectedSupervisor || payload?.permissions.actor || 'Select supervisor';
+  const supervisorEmployees = payload?.supervisorEmployees ?? [];
   const biometricTone = onlineSiteDevices.length > 0
     ? 'text-emerald-400'
     : activeSiteDevices.length > 0
@@ -779,9 +794,24 @@ export default function TimesheetEntryClient() {
               </Link>
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Supervisor</p>
-                <select value={selectedSupervisor} onChange={(e) => setSelectedSupervisor(e.target.value)} className="bg-transparent text-sm font-black text-slate-900 focus:outline-none">
-                  <option value={payload?.permissions.actor}>{payload?.permissions.actor}</option>
-                  {payload?.filterOptions.supervisors.filter(s => s !== payload?.permissions.actor).map(s => <option key={s} value={s}>{s}</option>)}
+                <select
+                  value={selectedSupervisor}
+                  onChange={(e) => {
+                    setSelectedSupervisor(e.target.value);
+                    setSelectedEmployees([]);
+                    setQuery('');
+                  }}
+                  className="max-w-[260px] bg-transparent text-sm font-black text-slate-900 focus:outline-none"
+                >
+                  {!selectedSupervisor && <option value="">Select supervisor</option>}
+                  {payload?.filterOptions.supervisors.map((s) => {
+                    const item = supervisorDirectory.find((entry) => entry.value === s);
+                    return (
+                      <option key={s} value={s}>
+                        {item?.label || s}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div className="text-right">
@@ -878,6 +908,30 @@ export default function TimesheetEntryClient() {
             </div>
           </div>
         )}
+
+        <div className="rounded-2xl border border-sky-100 bg-sky-50/70 p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-sky-700/70">Selected Supervisor</p>
+              <h3 className="mt-1 text-lg font-black text-slate-950">{supervisorLabel}</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-600">
+                {supervisorEmployees.length ? `${supervisorEmployees.length} employee${supervisorEmployees.length === 1 ? '' : 's'} assigned to this supervisor.` : 'No employees are currently assigned to this supervisor in the system database.'}
+              </p>
+            </div>
+            <span className="rounded-full border border-sky-200 bg-white px-3 py-1 text-xs font-black text-sky-800">{supervisorEmployees.length} assigned</span>
+          </div>
+          {supervisorEmployees.length ? (
+            <div className="mt-4 grid max-h-[260px] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
+              {supervisorEmployees.map((employee) => (
+                <div key={employee.employeeCode} className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="text-xs font-black text-slate-950">{employee.employeeCode} - {employee.fullName}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-600">{employee.jobTitle || 'Unassigned role'} / {employee.department || 'Unassigned department'}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-500">{employee.location || 'No location'} / {employee.status || 'Unknown status'}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
 
         {/* Dashboard Metrics */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">

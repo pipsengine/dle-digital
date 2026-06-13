@@ -72,6 +72,17 @@ type TimesheetPayload = {
     location: string;
     status: string;
   }>;
+  supervisorEmployees: Array<{
+    employeeId: string;
+    employeeCode: string;
+    fullName: string;
+    jobTitle: string;
+    department: string;
+    location: string;
+    managerEmployeeCode: string | null;
+    managerName: string | null;
+    status: string;
+  }>;
   permissions: {
     actor: string;
     role: string;
@@ -104,6 +115,7 @@ type TimesheetPayload = {
     businessUnits: string[];
     modes: TimesheetEntryMode[];
     statuses: TimesheetStatus[];
+    supervisorDirectory: Array<{ value: string; label: string; employeeCode: string; fullName: string; employeeCount: number }>;
   };
   matrixColumns: DisplayColumn[];
   projectCatalog: any[];
@@ -258,6 +270,22 @@ async function handleCopyPreviousDay(request: Request, date: string, supervisorI
 const ok = <T,>(data: T, status = 200) => NextResponse.json({ status: 'success', data }, { status });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 const round1 = (value: number) => Math.round(value * 10) / 10;
+const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const employeeDisplay = (employee: { employeeCode?: string | null; fullName?: string | null }) => {
+  const code = clean(employee.employeeCode);
+  const name = clean(employee.fullName);
+  return [code, name].filter(Boolean).join(' - ') || code || name;
+};
+
+const managerMatches = (employee: { managerName?: string | null }, supervisor: string) => {
+  const selected = clean(supervisor).toLowerCase();
+  if (!selected) return false;
+  const selectedCode = selected.split(' - ')[0]?.trim();
+  const selectedName = selected.includes(' - ') ? selected.split(' - ').slice(1).join(' - ').trim() : selected;
+  const managerName = clean(employee.managerName).toLowerCase();
+  return managerName === selected || managerName === selectedName || managerName.includes(selected) || managerName.includes(selectedCode);
+};
 const resolveProjectManagerForSubmission = (lines: TimesheetLine[], projects: Project[]) => {
   const hoursByProject = new Map<string, number>();
   for (const line of lines) {
@@ -297,8 +325,8 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const nextProjectCode = await generateProjectCode();
   const biometricDevices = await readBiometricDevices();
   const employees = (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
-  const projectManagers = employees
-    .filter((employee) => !['Resigned', 'Terminated', 'Retired'].includes(employee.status))
+  const activeEmployees = employees.filter((employee) => !['Resigned', 'Terminated', 'Retired'].includes(employee.status));
+  const projectManagers = activeEmployees
     .map((employee) => ({
       employeeId: employee.employeeId,
       employeeCode: employee.employeeCode,
@@ -313,6 +341,42 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const targetDate = date || todayDateInputValue();
   const targetSupervisor = supervisorId || access.actor;
   const targetWorkCenter = workCenterName?.trim();
+  const employeesBySupervisor = new Map<string, typeof activeEmployees>();
+  for (const employee of activeEmployees) {
+    const keys = [employee.managerName].map(clean).filter(Boolean);
+    for (const key of keys) {
+      const existing = employeesBySupervisor.get(key) || [];
+      existing.push(employee);
+      employeesBySupervisor.set(key, existing);
+    }
+  }
+  const supervisorDirectory = Array.from(employeesBySupervisor.entries())
+    .map(([manager, directReports]) => {
+      const employeeCount = new Set(directReports.map((item) => item.employeeCode)).size;
+      return {
+        value: manager,
+        label: `${manager}${employeeCount ? ` (${employeeCount})` : ''}`,
+        employeeCode: manager.split(' - ')[0] || manager,
+        fullName: manager.includes(' - ') ? manager.split(' - ').slice(1).join(' - ') : manager,
+        employeeCount,
+      };
+    })
+    .filter((item) => item.employeeCount > 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const selectedSupervisorEmployees = activeEmployees
+    .filter((employee) => managerMatches(employee, targetSupervisor))
+    .map((employee) => ({
+      employeeId: employee.employeeId,
+      employeeCode: employee.employeeCode,
+      fullName: employee.fullName,
+      jobTitle: employee.jobTitle,
+      department: employee.department,
+      location: employee.location || employee.workLocation || employee.officeLocation,
+      managerEmployeeCode: null,
+      managerName: clean(employee.managerName) || null,
+      status: employee.status,
+    }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
   const attendanceWorkCenters = workCenters.map((workCenter) => ({
     location: workCenter.location || workCenter.name,
     site: workCenter.site || workCenter.location || workCenter.name,
@@ -359,6 +423,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     departments,
     locations,
     projectManagers,
+    supervisorEmployees: selectedSupervisorEmployees,
     permissions: {
       actor: uiPermissions.actor,
       role: uiPermissions.role,
@@ -374,11 +439,16 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
       departments: departments.map((department) => department.name),
       projects: activeProjects.map(p => p.code),
       locations: locations.map((location) => location.name),
-      supervisors: Array.from(new Set([uiPermissions.actor, 'HRIS Administrator'].filter(Boolean))).sort(),
+      supervisors: Array.from(new Set([targetSupervisor, uiPermissions.actor, ...supervisorDirectory.map((item) => item.value)].map(clean).filter(Boolean))).sort((a, b) => {
+        const aLabel = supervisorDirectory.find((item) => item.value === a)?.label || a;
+        const bLabel = supervisorDirectory.find((item) => item.value === b)?.label || b;
+        return aLabel.localeCompare(bLabel);
+      }),
       shifts: [],
       businessUnits: [],
       modes: ['Supervisor Entry'],
       statuses: ['Draft', 'Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed', 'HR_Acknowledged', 'Rejected', 'Returned', 'Locked'],
+      supervisorDirectory,
     },
     matrixColumns: activeProjects.slice(0, 4).map(p => ({ code: p.code, label: p.code, kind: 'project' })),
     projectCatalog: activeProjects,
