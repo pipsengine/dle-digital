@@ -90,8 +90,8 @@ CREATE TABLE [hris].[OrganizationLocationsSites] (
   [Location] NVARCHAR(180) NOT NULL,
   [Headcount] INT NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_Headcount] DEFAULT 0,
   [OpenRoles] INT NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_OpenRoles] DEFAULT 0,
-  [BudgetUsd] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_BudgetUsd] DEFAULT 0,
-  [PayrollUsd] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_PayrollUsd] DEFAULT 0,
+  [budgetNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_budgetNgn] DEFAULT 0,
+  [payrollNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_payrollNgn] DEFAULT 0,
   [SpanOfControl] DECIMAL(9,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_SpanOfControl] DEFAULT 0,
   [SuccessionCoveragePct] DECIMAL(9,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_SuccessionCoveragePct] DEFAULT 0,
   [AttritionRiskPct] DECIMAL(9,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_AttritionRiskPct] DEFAULT 0,
@@ -111,7 +111,15 @@ CREATE TABLE [hris].[OrganizationLocationsSites] (
   CONSTRAINT [CK_OrganizationLocationsSites_ParentChainJson] CHECK (ISJSON([ParentChainJson]) = 1),
   CONSTRAINT [CK_OrganizationLocationsSites_RelatedItemsJson] CHECK (ISJSON([RelatedItemsJson]) = 1),
   CONSTRAINT [CK_OrganizationLocationsSites_SourceSnapshotJson] CHECK (ISJSON([SourceSnapshotJson]) = 1)
-);`);
+);
+IF COL_LENGTH(N'hris.OrganizationLocationsSites', N'budgetNgn') IS NULL AND COL_LENGTH(N'hris.OrganizationLocationsSites', N'BudgetUsd') IS NOT NULL
+  EXEC sp_rename N'hris.OrganizationLocationsSites.BudgetUsd', N'budgetNgn', N'COLUMN';
+IF COL_LENGTH(N'hris.OrganizationLocationsSites', N'payrollNgn') IS NULL AND COL_LENGTH(N'hris.OrganizationLocationsSites', N'PayrollUsd') IS NOT NULL
+  EXEC sp_rename N'hris.OrganizationLocationsSites.PayrollUsd', N'payrollNgn', N'COLUMN';
+IF COL_LENGTH(N'hris.OrganizationLocationsSites', N'budgetNgn') IS NULL
+  ALTER TABLE [hris].[OrganizationLocationsSites] ADD [budgetNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_budgetNgn] DEFAULT 0;
+IF COL_LENGTH(N'hris.OrganizationLocationsSites', N'payrollNgn') IS NULL
+  ALTER TABLE [hris].[OrganizationLocationsSites] ADD [payrollNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationLocationsSites_payrollNgn] DEFAULT 0;`);
     dbReady.value = true;
   }
 
@@ -230,8 +238,8 @@ const buildLocationRecordsFromSage = (employees: SagePayrollEmployee[]): Locatio
       location: site,
       headcount: people.length,
       openRoles: 0,
-      budgetUsd: payroll,
-      payrollUsd: payroll,
+      budgetNgn: payroll,
+      payrollNgn: payroll,
       spanOfControl: managers.length ? round1(people.length / managers.length) : people.length,
       successionCoveragePct: round1(((people.length - missingManagerCount) / Math.max(people.length, 1)) * 100),
       attritionRiskPct: round1((missingManagerCount / Math.max(people.length, 1)) * 100),
@@ -253,7 +261,7 @@ const buildLocationRecordsFromSage = (employees: SagePayrollEmployee[]): Locatio
   const locationRecords: LocationSiteRecord[] = regionGroups.map((region) => {
     const sites = siteRecords.filter((site) => site.region === region);
     const headcount = sites.reduce((sum, site) => sum + site.headcount, 0);
-    const payroll = sites.reduce((sum, site) => sum + site.payrollUsd, 0);
+    const payroll = sites.reduce((sum, site) => sum + site.payrollNgn, 0);
     const relatedItems = sites.map((site) => ({
       id: site.id,
       name: site.name,
@@ -277,8 +285,8 @@ const buildLocationRecordsFromSage = (employees: SagePayrollEmployee[]): Locatio
       location: region,
       headcount,
       openRoles: 0,
-      budgetUsd: payroll,
-      payrollUsd: payroll,
+      budgetNgn: payroll,
+      payrollNgn: payroll,
       spanOfControl: sites.length ? round1(sites.reduce((sum, site) => sum + site.spanOfControl, 0) / sites.length) : 0,
       successionCoveragePct: sites.length ? round1(sites.reduce((sum, site) => sum + site.successionCoveragePct, 0) / sites.length) : 0,
       attritionRiskPct: sites.length ? round1(sites.reduce((sum, site) => sum + site.attritionRiskPct, 0) / sites.length) : 0,
@@ -328,8 +336,8 @@ const persistRecords = async (records: LocationSiteRecord[]) => {
         .input('Location', sql.NVarChar(180), record.location)
         .input('Headcount', sql.Int, record.headcount)
         .input('OpenRoles', sql.Int, record.openRoles)
-        .input('BudgetUsd', sql.Decimal(19, 2), record.budgetUsd)
-        .input('PayrollUsd', sql.Decimal(19, 2), record.payrollUsd)
+        .input('budgetNgn', sql.Decimal(19, 2), record.budgetNgn)
+        .input('payrollNgn', sql.Decimal(19, 2), record.payrollNgn)
         .input('SpanOfControl', sql.Decimal(9, 2), record.spanOfControl)
         .input('SuccessionCoveragePct', sql.Decimal(9, 2), record.successionCoveragePct)
         .input('AttritionRiskPct', sql.Decimal(9, 2), record.attritionRiskPct)
@@ -350,14 +358,14 @@ USING (SELECT @SourceSystem AS [SourceSystem], @RecordType AS [RecordType], @Sou
 ON target.[SourceSystem]=source.[SourceSystem] AND target.[RecordType]=source.[RecordType] AND target.[SourceCode]=source.[SourceCode]
 WHEN MATCHED THEN UPDATE SET
   [Id]=@Id,[Name]=@Name,[ParentName]=@ParentName,[Region]=@Region,[Country]=@Country,[SiteCategory]=@SiteCategory,[Leader]=@Leader,[Location]=@Location,
-  [Headcount]=@Headcount,[OpenRoles]=@OpenRoles,[BudgetUsd]=@BudgetUsd,[PayrollUsd]=@PayrollUsd,[SpanOfControl]=@SpanOfControl,
+  [Headcount]=@Headcount,[OpenRoles]=@OpenRoles,[budgetNgn]=@budgetNgn,[payrollNgn]=@payrollNgn,[SpanOfControl]=@SpanOfControl,
   [SuccessionCoveragePct]=@SuccessionCoveragePct,[AttritionRiskPct]=@AttritionRiskPct,[HealthStatus]=@HealthStatus,[CostCenter]=@CostCenter,
   [Description]=@Description,[NodeCount]=@NodeCount,[DivisionCount]=@DivisionCount,[BusinessUnitCount]=@BusinessUnitCount,[DepartmentCount]=@DepartmentCount,
   [TeamCount]=@TeamCount,[ParentChainJson]=@ParentChainJson,[RelatedItemsJson]=@RelatedItemsJson,[SourceSnapshotJson]=@SourceSnapshotJson,[LastSyncedAt]=SYSUTCDATETIME()
 WHEN NOT MATCHED THEN INSERT
-  ([Id],[SourceSystem],[SourceCode],[Name],[RecordType],[ParentName],[Region],[Country],[SiteCategory],[Leader],[Location],[Headcount],[OpenRoles],[BudgetUsd],[PayrollUsd],[SpanOfControl],[SuccessionCoveragePct],[AttritionRiskPct],[HealthStatus],[CostCenter],[Description],[NodeCount],[DivisionCount],[BusinessUnitCount],[DepartmentCount],[TeamCount],[ParentChainJson],[RelatedItemsJson],[SourceSnapshotJson])
+  ([Id],[SourceSystem],[SourceCode],[Name],[RecordType],[ParentName],[Region],[Country],[SiteCategory],[Leader],[Location],[Headcount],[OpenRoles],[budgetNgn],[payrollNgn],[SpanOfControl],[SuccessionCoveragePct],[AttritionRiskPct],[HealthStatus],[CostCenter],[Description],[NodeCount],[DivisionCount],[BusinessUnitCount],[DepartmentCount],[TeamCount],[ParentChainJson],[RelatedItemsJson],[SourceSnapshotJson])
 VALUES
-  (@Id,@SourceSystem,@SourceCode,@Name,@RecordType,@ParentName,@Region,@Country,@SiteCategory,@Leader,@Location,@Headcount,@OpenRoles,@BudgetUsd,@PayrollUsd,@SpanOfControl,@SuccessionCoveragePct,@AttritionRiskPct,@HealthStatus,@CostCenter,@Description,@NodeCount,@DivisionCount,@BusinessUnitCount,@DepartmentCount,@TeamCount,@ParentChainJson,@RelatedItemsJson,@SourceSnapshotJson);`);
+  (@Id,@SourceSystem,@SourceCode,@Name,@RecordType,@ParentName,@Region,@Country,@SiteCategory,@Leader,@Location,@Headcount,@OpenRoles,@budgetNgn,@payrollNgn,@SpanOfControl,@SuccessionCoveragePct,@AttritionRiskPct,@HealthStatus,@CostCenter,@Description,@NodeCount,@DivisionCount,@BusinessUnitCount,@DepartmentCount,@TeamCount,@ParentChainJson,@RelatedItemsJson,@SourceSnapshotJson);`);
     }
     await tx.commit();
   } catch (error) {
@@ -382,8 +390,8 @@ const readPersistedRecords = async (): Promise<LocationSiteRecord[]> => {
     location: row.Location,
     headcount: Number(row.Headcount || 0),
     openRoles: Number(row.OpenRoles || 0),
-    budgetUsd: Number(row.BudgetUsd || 0),
-    payrollUsd: Number(row.PayrollUsd || 0),
+    budgetNgn: Number(row.budgetNgn || 0),
+    payrollNgn: Number(row.payrollNgn || 0),
     spanOfControl: Number(row.SpanOfControl || 0),
     successionCoveragePct: Number(row.SuccessionCoveragePct || 0),
     attritionRiskPct: Number(row.AttritionRiskPct || 0),

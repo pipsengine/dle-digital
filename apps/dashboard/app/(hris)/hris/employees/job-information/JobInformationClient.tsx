@@ -442,7 +442,7 @@ export default function JobInformationClient({ initialNow, employeeId }: { initi
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <Link
-            href={`/hris/employees/employee-profile?employeeId=${encodeURIComponent(activeEmployeeId)}`}
+            href={`/hris/employees/employee-profile/${encodeURIComponent(activeEmployeeId)}`}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
           >
             <UserCircle2 className="w-4 h-4" />

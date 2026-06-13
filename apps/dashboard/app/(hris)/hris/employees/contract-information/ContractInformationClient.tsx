@@ -220,7 +220,18 @@ type EmployeeOption = {
   businessUnit?: string;
 };
 
-type ReportingLineFormOptions = { employees: EmployeeOption[] };
+type DirectoryEmployee = {
+  employeeId: string;
+  employeeCode?: string;
+  fullName: string;
+  department?: string;
+  jobTitle?: string;
+  managerName?: string;
+  location?: string;
+  workLocation?: string;
+  businessUnit?: string;
+};
+type DirectoryPayload = { employees: DirectoryEmployee[] };
 
 type ApiState<T> = { status: 'idle' | 'loading' | 'ready' | 'error'; data?: T; error?: string };
 
@@ -449,9 +460,20 @@ export default function ContractInformationClient({ employeeId, initialNow }: { 
     const run = async () => {
       setEmployeesState({ status: 'loading' });
       try {
-        const data = await apiFetchContract<ReportingLineFormOptions>(`/api/hris/reporting-line/form-options?includeEmployees=1`, { method: 'GET', role, viewerEmployeeId });
+        const data = await apiFetchContract<DirectoryPayload>(`/api/hris/employees`, { method: 'GET', role, viewerEmployeeId });
         if (cancelled) return;
-        setEmployeesState({ status: 'ready', data: data.employees || [] });
+        setEmployeesState({
+          status: 'ready',
+          data: (data.employees || []).map((e) => ({
+            employeeId: e.employeeId || e.employeeCode || '',
+            fullName: e.fullName,
+            department: e.department,
+            jobTitle: e.jobTitle,
+            currentManager: e.managerName,
+            location: e.location || e.workLocation,
+            businessUnit: e.businessUnit,
+          })),
+        });
       } catch (e) {
         if (cancelled) return;
         setEmployeesState({ status: 'error', error: e instanceof Error ? e.message : 'Unable to load employees' });
@@ -960,11 +982,11 @@ export default function ContractInformationClient({ employeeId, initialNow }: { 
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Start Date</div>
-            <input value={contractDraft.startDate} onChange={(e) => setContractDraft((d) => ({ ...d, startDate: e.target.value }))} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <input type="date" value={contractDraft.startDate} onChange={(e) => setContractDraft((d) => ({ ...d, startDate: e.target.value }))} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">End Date</div>
-            <input value={contractDraft.endDate} onChange={(e) => setContractDraft((d) => ({ ...d, endDate: e.target.value }))} placeholder="Required for fixed-term" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <input type="date" value={contractDraft.endDate} onChange={(e) => setContractDraft((d) => ({ ...d, endDate: e.target.value }))} aria-label="End Date" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Category</div>
@@ -986,15 +1008,15 @@ export default function ContractInformationClient({ employeeId, initialNow }: { 
           <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="text-[11px] font-extrabold text-slate-600">Probation Start</div>
-              <input value={contractDraft.probationStartDate} onChange={(e) => setContractDraft((d) => ({ ...d, probationStartDate: e.target.value }))} placeholder="Optional" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+              <input type="date" value={contractDraft.probationStartDate} onChange={(e) => setContractDraft((d) => ({ ...d, probationStartDate: e.target.value }))} aria-label="Probation Start" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="text-[11px] font-extrabold text-slate-600">Probation End</div>
-              <input value={contractDraft.probationEndDate} onChange={(e) => setContractDraft((d) => ({ ...d, probationEndDate: e.target.value }))} placeholder="Optional" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+              <input type="date" value={contractDraft.probationEndDate} onChange={(e) => setContractDraft((d) => ({ ...d, probationEndDate: e.target.value }))} aria-label="Probation End" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="text-[11px] font-extrabold text-slate-600">Confirmation Due</div>
-              <input value={contractDraft.confirmationDueDate} onChange={(e) => setContractDraft((d) => ({ ...d, confirmationDueDate: e.target.value }))} placeholder="Optional" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+              <input type="date" value={contractDraft.confirmationDueDate} onChange={(e) => setContractDraft((d) => ({ ...d, confirmationDueDate: e.target.value }))} aria-label="Confirmation Due" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
             </div>
           </div>
         </div>

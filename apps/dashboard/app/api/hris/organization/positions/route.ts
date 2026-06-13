@@ -37,7 +37,7 @@ type CreatePositionPayload = {
   positionStatus?: PositionRecord['positionStatus'];
   incumbentName?: string | null;
   incumbentEmployeeId?: string | null;
-  benchmarkSalaryUsd?: number;
+  benchmarkSalaryNgn?: number;
   fte?: number;
   criticality?: PositionRecord['criticality'];
   successionCoveragePct?: number;
@@ -85,17 +85,17 @@ const validate = (payload: CreatePositionPayload, existing: PositionRecord[]) =>
   if (!isNonEmpty(payload.jobTitleCode)) return 'Job title code is required.';
   if (!isNonEmpty(payload.responsibilityScope)) return 'Responsibility scope is required.';
 
-  const benchmarkSalaryUsd = asNumber(payload.benchmarkSalaryUsd);
+  const benchmarkSalaryNgn = asNumber(payload.benchmarkSalaryNgn);
   const fte = asNumber(payload.fte);
   const successionCoveragePct = asNumber(payload.successionCoveragePct);
   const attritionRiskPct = asNumber(payload.attritionRiskPct);
   const approvalCoveragePct = asNumber(payload.approvalCoveragePct);
   const openDays = asNumber(payload.openDays);
 
-  if ([benchmarkSalaryUsd, fte, successionCoveragePct, attritionRiskPct, approvalCoveragePct, openDays].some(Number.isNaN)) {
+  if ([benchmarkSalaryNgn, fte, successionCoveragePct, attritionRiskPct, approvalCoveragePct, openDays].some(Number.isNaN)) {
     return 'Numeric position fields must contain valid numbers.';
   }
-  if (benchmarkSalaryUsd < 0) return 'Benchmark salary cannot be negative.';
+  if (benchmarkSalaryNgn < 0) return 'Benchmark salary cannot be negative.';
   if (fte <= 0) return 'FTE must be greater than zero.';
   if (!Number.isInteger(openDays) || openDays < 0) return 'Open days must be a non-negative whole number.';
 
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
     positionStatus: payload.positionStatus!,
     incumbentName: payload.incumbentName?.trim() || null,
     incumbentEmployeeId: payload.incumbentEmployeeId?.trim() || null,
-    benchmarkSalaryUsd: Number(payload.benchmarkSalaryUsd),
+    benchmarkSalaryNgn: Number(payload.benchmarkSalaryNgn),
     fte: Number(payload.fte),
     criticality: payload.criticality!,
     successionCoveragePct: Number(payload.successionCoveragePct),

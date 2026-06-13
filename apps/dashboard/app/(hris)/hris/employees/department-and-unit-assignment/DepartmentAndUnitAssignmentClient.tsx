@@ -234,13 +234,13 @@ const Field = ({ label, value }: { label: string; value: string }) => (
 const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => (
   <AnimatePresence>
     {open ? (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="fixed inset-0 z-50 overflow-y-auto bg-black/30 p-2 backdrop-blur-sm sm:p-4" onClick={onClose}>
         <motion.div
           initial={{ opacity: 0, y: 10, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 10, scale: 0.98 }}
           transition={{ duration: 0.16 }}
-          className="mx-auto mt-10 w-[96%] max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden"
+          className="mx-auto my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl sm:my-6 sm:max-h-[calc(100dvh-3rem)]"
           onClick={(e) => e.stopPropagation()}
         >
           {children}
@@ -249,6 +249,14 @@ const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void
     ) : null}
   </AnimatePresence>
 );
+
+const statusTone = (status: string) => {
+  const s = String(status || '').toLowerCase();
+  if (s.includes('approved') || s.includes('active') || s.includes('permanent')) return 'border-emerald-200 bg-emerald-50/80';
+  if (s.includes('pending') || s.includes('draft') || s.includes('temporary') || s.includes('acting')) return 'border-amber-200 bg-amber-50/80';
+  if (s.includes('missing') || s.includes('rejected') || s.includes('cancelled') || s.includes('gap')) return 'border-rose-200 bg-rose-50/80';
+  return 'border-sky-100 bg-sky-50/70';
+};
 
 const buildPdf = (title: string, lines: string[]) => {
   const escapePdf = (s: string) => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
@@ -288,7 +296,15 @@ const buildPdf = (title: string, lines: string[]) => {
   return encoder.encode(out);
 };
 
-export default function DepartmentAndUnitAssignmentClient({ initialNow, employeeId }: { initialNow: string; employeeId: string }) {
+export default function DepartmentAndUnitAssignmentClient({
+  initialNow,
+  employeeId,
+  initialFormOptions,
+}: {
+  initialNow: string;
+  employeeId: string;
+  initialFormOptions?: FormOptions;
+}) {
   const [role, setRole] = useState<Role>('HR Manager');
   const [viewerEmployeeId, setViewerEmployeeId] = useState<string | undefined>(undefined);
   const [employeeInput, setEmployeeInput] = useState(employeeId);
@@ -298,7 +314,9 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
   const [employment, setEmployment] = useState<ApiState<EmployeeEmployment>>({ status: 'idle' });
   const [assignment, setAssignment] = useState<ApiState<DepartmentUnitAssignmentPayload>>({ status: 'idle' });
   const [assignmentHistory, setAssignmentHistory] = useState<ApiState<AssignmentHistoryRow[]>>({ status: 'idle' });
-  const [formOptions, setFormOptions] = useState<ApiState<FormOptions>>({ status: 'idle' });
+  const [formOptions, setFormOptions] = useState<ApiState<FormOptions>>(
+    initialFormOptions?.employees?.length ? { status: 'ready', data: initialFormOptions } : { status: 'idle' },
+  );
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -353,6 +371,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
     assignmentType: 'Permanent Assignment',
     assignmentStatus: 'Pending Approval',
   });
+  const [bulkEmployeeSearch, setBulkEmployeeSearch] = useState('');
+  const [bulkSelectedEmployeeIds, setBulkSelectedEmployeeIds] = useState<string[]>([]);
 
   const nowStamp = useMemo(() => formatDateTimeUtc(initialNow), [initialNow]);
   const nowMs = useMemo(() => new Date(initialNow).getTime(), [initialNow]);
@@ -360,6 +380,13 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      if (!activeEmployeeId.trim()) {
+        const msg = 'No employee records are available from DLE Enterprise HRIS.';
+        setEmployment({ status: 'error', error: msg });
+        setAssignment({ status: 'error', error: msg });
+        setAssignmentHistory({ status: 'error', error: msg });
+        return;
+      }
       setEmployment({ status: 'loading' });
       setAssignment({ status: 'loading' });
       setAssignmentHistory({ status: 'loading' });
@@ -389,7 +416,6 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
   }, [activeEmployeeId, refreshToken, role, viewerEmployeeId]);
 
   useEffect(() => {
-    if (!employeePickerOpen && !requestModalOpen && !bulkModalOpen) return;
     if (formOptions.status === 'ready' || formOptions.status === 'loading') return;
     let cancelled = false;
     const run = async () => {
@@ -407,12 +433,44 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
     return () => {
       cancelled = true;
     };
-  }, [employeePickerOpen, requestModalOpen, bulkModalOpen, formOptions.status, role, viewerEmployeeId]);
+  }, [formOptions.status, role, viewerEmployeeId]);
 
   const empData = employment.data;
   const asgData = assignment.data;
   const assignmentRows = useMemo(() => assignmentHistory.data || [], [assignmentHistory.data]);
   const requests = useMemo(() => asgData?.requests || [], [asgData?.requests]);
+  const optionEmployees = useMemo(() => formOptions.data?.employees || [], [formOptions.data?.employees]);
+  const bulkVisibleEmployees = useMemo(() => {
+    const q = bulkEmployeeSearch.trim().toLowerCase();
+    return optionEmployees
+      .filter((employee) => {
+        if (!q) return true;
+        const blob = [
+          employee.employeeId,
+          employee.fullName,
+          employee.currentDepartment,
+          employee.currentUnit,
+          employee.currentManager,
+          employee.location,
+          employee.employmentStatus,
+        ].join(' ').toLowerCase();
+        return blob.includes(q);
+      })
+      .slice(0, 80);
+  }, [bulkEmployeeSearch, optionEmployees]);
+  const bulkEmployeeIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...bulkSelectedEmployeeIds,
+          ...bulkDraft.employeeIdsText
+            .split(/\r?\n/g)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        ]),
+      ),
+    [bulkDraft.employeeIdsText, bulkSelectedEmployeeIds],
+  );
   const latestRequest = requests[0] || null;
   const approvalStatus = asgData?.approvalStatus || 'Approved';
 
@@ -443,7 +501,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           </div>
           <div className="mt-4 flex items-center gap-2 flex-wrap">
             <Pill label={`Employee: ${activeEmployeeId}`} />
-            <Pill label={`Loaded: ${nowStamp}`} />
+            <Pill label={`As of: ${nowStamp}`} />
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -570,12 +628,20 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
             <Search className="w-4 h-4 text-slate-500" />
-            <input
-              value={employeeInput}
-              onChange={(e) => setEmployeeInput(e.target.value)}
-              placeholder="Employee ID (e.g., DLE-EMP-00001)"
-              className="w-[260px] max-w-[70vw] text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent"
-            />
+              <input
+                value={employeeInput}
+                onChange={(e) => setEmployeeInput(e.target.value)}
+              placeholder="Search employee ID or name"
+                className="w-[260px] max-w-[70vw] text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent"
+                list="department-assignment-employees"
+              />
+              <datalist id="department-assignment-employees">
+                {optionEmployees.slice(0, 250).map((employee) => (
+                  <option key={employee.employeeId} value={employee.employeeId}>
+                    {employee.fullName} - {employee.currentDepartment}
+                  </option>
+                ))}
+              </datalist>
           </div>
           <button
             type="button"
@@ -701,7 +767,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
         return cards.map((c) => {
           const Icon = c.icon;
           return (
-            <Card key={c.label} className="p-4">
+            <Card key={c.label} className={`p-4 ${c.label === 'Pending Changes' ? statusTone(pending > 0 ? 'pending' : 'approved') : c.label === 'Assignment Status' ? statusTone(String(approvalStatus || c.value)) : statusTone(String(c.value || 'missing'))}`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[11px] font-extrabold text-slate-600">{c.label}</div>
@@ -920,7 +986,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           </span>
           <div>
             <div className="text-sm font-extrabold text-slate-900">Reporting Line Section</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Manager search is supported through controlled change requests (demo).</div>
+            <div className="text-xs text-slate-500 font-semibold mt-1">Manager changes are processed through controlled assignment requests.</div>
           </div>
         </div>
         <button type="button" onClick={() => setRequestModalOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-700 text-white text-xs font-extrabold hover:bg-emerald-800 transition-colors">
@@ -1411,11 +1477,11 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 12 }}
             transition={{ duration: 0.16 }}
-            className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl border-l border-slate-200 flex flex-col"
+            className="absolute right-0 top-0 flex h-full w-full max-w-[520px] flex-col border-l border-slate-200 bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
                 <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
                   <Filter className="w-5 h-5" />
                 </span>
@@ -1428,7 +1494,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
                 <X className="w-4 h-4 text-slate-600" />
               </button>
             </div>
-            <div className="p-6 space-y-4 overflow-auto">
+            <div className="space-y-4 overflow-auto p-4 sm:p-6">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
                 <div className="text-xs font-extrabold text-slate-700">Quick links</div>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1462,8 +1528,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
 
   const exportModal = (
     <Modal open={exportOpen} onClose={() => setExportOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Download className="w-5 h-5" />
           </span>
@@ -1476,12 +1542,12 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="text-xs font-extrabold text-slate-700">Included fields</div>
           <div className="text-xs text-slate-600 font-semibold mt-2">Department/division/unit/team, business unit, cost center, reporting, project/site assignment, and assignment workflow context.</div>
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" onClick={() => setExportOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">
             Cancel
           </button>
@@ -1554,8 +1620,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
 
   const employeePickerModal = (
     <Modal open={employeePickerOpen} onClose={() => setEmployeePickerOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Search className="w-5 h-5" />
           </span>
@@ -1568,15 +1634,24 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={employeeInput}
+            onChange={(e) => setEmployeeInput(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-semibold text-slate-900 outline-none focus:border-sky-300"
+            placeholder="Search ID, name, department, unit, manager, location, status..."
+          />
+        </label>
         {formOptions.status === 'loading' ? (
           <div className="text-sm text-slate-600 font-semibold">Loading employees…</div>
         ) : formOptions.status === 'error' ? (
           <div className="text-sm text-slate-600 font-semibold">{formOptions.error || 'Unable to load employees'}</div>
         ) : formOptions.data ? (
           <div className="rounded-2xl border border-slate-200 overflow-hidden">
-            <div className="max-h-[520px] overflow-auto">
-              <table className="w-full text-left bg-white">
+            <div className="max-h-[min(520px,60dvh)] overflow-auto">
+              <table className="hidden min-w-[920px] w-full text-left bg-white md:table">
                 <thead className="bg-slate-50 border-b border-slate-100 sticky top-0">
                   <tr>
                     {['Employee ID', 'Name', 'Department', 'Unit', 'Manager', 'Location', 'Status'].map((h) => (
@@ -1617,6 +1692,33 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
                     ))}
                 </tbody>
               </table>
+              <div className="space-y-2 p-2 md:hidden">
+                {formOptions.data.employees
+                  .filter((e) => {
+                    const q = employeeInput.trim().toLowerCase();
+                    if (!q) return true;
+                    const blob = `${e.employeeId} ${e.fullName} ${e.currentDepartment} ${e.currentUnit} ${e.currentManager} ${e.location} ${e.employmentStatus}`.toLowerCase();
+                    return blob.includes(q);
+                  })
+                  .slice(0, 120)
+                  .map((e) => (
+                    <button
+                      key={e.employeeId}
+                      type="button"
+                      onClick={() => {
+                        setEmployeePickerOpen(false);
+                        setEmployeeInput(e.employeeId);
+                        setActiveEmployeeId(e.employeeId);
+                        setToast({ title: 'Employee loaded', detail: `${e.employeeId} - ${e.fullName}`, tone: 'ok' });
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-left hover:bg-slate-100"
+                    >
+                      <div className="text-xs font-extrabold text-slate-900">{e.employeeId} - {e.fullName}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-600">{e.currentDepartment || 'Unassigned'} / {e.currentUnit || 'No unit'} / {e.location || 'No location'}</div>
+                      <div className="mt-1 text-[11px] font-semibold text-slate-500">Manager: {e.currentManager || 'Not assigned'} / {e.employmentStatus}</div>
+                    </button>
+                  ))}
+              </div>
             </div>
           </div>
         ) : null}
@@ -1626,8 +1728,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
 
   const requestModal = (
     <Modal open={requestModalOpen} onClose={() => setRequestModalOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-emerald-700 text-white flex items-center justify-center">
             <Pencil className="w-5 h-5" />
           </span>
@@ -1640,7 +1742,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Request Type</div>
@@ -1782,7 +1884,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" onClick={() => setRequestModalOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
             Close
           </button>
@@ -1865,8 +1967,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
 
   const bulkModal = (
     <Modal open={bulkModalOpen} onClose={() => setBulkModalOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <GitCompare className="w-5 h-5" />
           </span>
@@ -1879,10 +1981,86 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-[11px] font-extrabold text-slate-600">Employee IDs</div>
-          <textarea value={bulkDraft.employeeIdsText} onChange={(e) => setBulkDraft((d) => ({ ...d, employeeIdsText: e.target.value }))} rows={4} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900 focus:outline-none" placeholder="Paste one Employee ID per line" />
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
+        <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-[11px] font-extrabold text-slate-700">Employees</div>
+              <div className="mt-1 text-xs font-semibold text-slate-600">Search all system employees, select visible matches, or paste employee IDs for bulk assignment.</div>
+            </div>
+            <span className="inline-flex w-fit items-center rounded-full border border-sky-200 bg-white px-3 py-1 text-[11px] font-extrabold text-sky-800">
+              {bulkEmployeeIds.length} selected
+            </span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={bulkEmployeeSearch}
+                  onChange={(e) => setBulkEmployeeSearch(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-semibold text-slate-900 outline-none focus:border-sky-300"
+                  placeholder="Search ID, name, department, unit, manager, location, status..."
+                />
+              </label>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBulkSelectedEmployeeIds((current) =>
+                      Array.from(new Set([...current, ...bulkVisibleEmployees.map((employee) => employee.employeeId)])),
+                    )
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-extrabold text-sky-800 hover:bg-sky-100"
+                >
+                  Select Visible
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkSelectedEmployeeIds([])}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
+                >
+                  Clear Selected
+                </button>
+              </div>
+              <div className="mt-3 max-h-[320px] space-y-2 overflow-y-auto pr-1">
+                {formOptions.status === 'loading' ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">Loading employees...</div>
+                ) : formOptions.status === 'error' ? (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">{formOptions.error || 'Unable to load employees'}</div>
+                ) : bulkVisibleEmployees.length ? (
+                  bulkVisibleEmployees.map((employee) => {
+                    const checked = bulkSelectedEmployeeIds.includes(employee.employeeId);
+                    return (
+                      <label key={employee.employeeId} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${checked ? 'border-sky-300 bg-sky-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setBulkSelectedEmployeeIds((current) =>
+                              e.target.checked ? Array.from(new Set([...current, employee.employeeId])) : current.filter((id) => id !== employee.employeeId),
+                            );
+                          }}
+                          className="mt-1 h-4 w-4 rounded border-slate-300 text-sky-700"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-extrabold text-slate-900">{employee.employeeId} - {employee.fullName}</span>
+                          <span className="mt-1 block text-[11px] font-semibold text-slate-600">{employee.currentDepartment || 'Unassigned'} / {employee.currentUnit || 'No unit'}</span>
+                          <span className="mt-1 block text-[11px] font-semibold text-slate-500">Manager: {employee.currentManager || 'Unassigned'} / {employee.location || 'No location'} / {employee.employmentStatus || 'Unknown'}</span>
+                        </span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-600">No employees match this search.</div>
+                )}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+              <div className="text-[11px] font-extrabold text-slate-600">Paste Employee IDs</div>
+              <textarea value={bulkDraft.employeeIdsText} onChange={(e) => setBulkDraft((d) => ({ ...d, employeeIdsText: e.target.value }))} rows={10} className="mt-2 min-h-[220px] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-300" placeholder="Paste one Employee ID per line" />
+            </div>
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1922,17 +2100,18 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           <div className="text-[11px] font-extrabold text-slate-600">Reason</div>
           <textarea value={bulkDraft.reason} onChange={(e) => setBulkDraft((d) => ({ ...d, reason: e.target.value }))} rows={2} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-900 focus:outline-none" />
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" onClick={() => setBulkModalOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
             Close
           </button>
           <button
             type="button"
             onClick={async () => {
-              const employeeIds = bulkDraft.employeeIdsText
-                .split(/\r?\n/g)
-                .map((s) => s.trim())
-                .filter(Boolean);
+              const employeeIds = bulkEmployeeIds;
+              if (!employeeIds.length) {
+                setToast({ title: 'Select employees', detail: 'Search/select employees or paste at least one employee ID.', tone: 'warn' });
+                return;
+              }
               try {
                 const res = await apiPostGlobal<AssignmentRequest>(
                   '/api/hris/assignment-requests/bulk',
@@ -1970,8 +2149,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
 
   const auditModal = (
     <Modal open={auditModalOpen} onClose={() => setAuditModalOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Fingerprint className="w-5 h-5" />
           </span>
@@ -1984,7 +2163,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6">
+      <div className="overflow-y-auto p-4 sm:p-6">
         {requestAudit.status === 'loading' ? (
           <div className="text-sm text-slate-600 font-semibold">Loading audit log…</div>
         ) : requestAudit.status === 'error' ? (
@@ -1992,7 +2171,7 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
         ) : requestAudit.data && requestAudit.data.length ? (
           <div className="rounded-2xl border border-slate-200 overflow-hidden">
             <div className="max-h-[520px] overflow-auto">
-              <table className="w-full text-left bg-white">
+              <table className="min-w-[760px] w-full text-left bg-white">
                 <thead className="bg-slate-50 border-b border-slate-100 sticky top-0">
                   <tr>
                     {['Time', 'Action', 'By', 'Reason', 'Old', 'New'].map((h) => (
@@ -2079,8 +2258,8 @@ export default function DepartmentAndUnitAssignmentClient({ initialNow, employee
 
       <AnimatePresence>
         {toast ? (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.16 }} className="fixed bottom-6 right-6 z-50">
-            <div className={`w-[380px] rounded-2xl border shadow-lg p-4 bg-white ${toast.tone === 'err' ? 'border-red-200' : toast.tone === 'warn' ? 'border-amber-200' : 'border-slate-200'}`}>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.16 }} className="fixed bottom-4 right-4 z-50 sm:bottom-6 sm:right-6">
+            <div className={`w-[calc(100vw-2rem)] max-w-[380px] rounded-2xl border shadow-lg p-4 bg-white ${toast.tone === 'err' ? 'border-red-200' : toast.tone === 'warn' ? 'border-amber-200' : 'border-slate-200'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm font-extrabold text-slate-900">{toast.title}</div>

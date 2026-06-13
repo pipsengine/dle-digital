@@ -43,7 +43,7 @@ type Payload = {
 
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const healthTone = (status: HealthStatus) => {
   if (status === 'Critical') return 'bg-red-50 text-red-700 border-red-200';
@@ -152,8 +152,8 @@ export default function UnitsSectionsClient() {
         'Related Sections',
         'Succession Coverage %',
         'Attrition Risk %',
-        'Budget USD',
-        'Payroll USD',
+        'Budget NGN',
+        'Payroll NGN',
         'Cost Center',
       ],
       ...visibleRecords.map((record) => [
@@ -170,8 +170,8 @@ export default function UnitsSectionsClient() {
         String(record.relatedTeamCount),
         String(record.successionCoveragePct),
         String(record.attritionRiskPct),
-        String(record.budgetUsd),
-        String(record.payrollUsd),
+        String(record.budgetNgn),
+        String(record.payrollNgn),
         record.costCenter,
       ]),
     ];
@@ -336,8 +336,8 @@ export default function UnitsSectionsClient() {
                     <DetailStat label="Cost Center" value={selectedRecord.costCenter} />
                     <DetailStat label="Headcount" value={formatNumber(selectedRecord.headcount)} />
                     <DetailStat label="Open Roles" value={formatNumber(selectedRecord.openRoles)} />
-                    <DetailStat label="Budget" value={formatCurrency(selectedRecord.budgetUsd)} />
-                    <DetailStat label="Payroll" value={formatCurrency(selectedRecord.payrollUsd)} />
+                    <DetailStat label="Budget" value={formatCurrency(selectedRecord.budgetNgn)} />
+                    <DetailStat label="Payroll" value={formatCurrency(selectedRecord.payrollNgn)} />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

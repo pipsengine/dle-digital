@@ -19,7 +19,7 @@ export type WorkforcePlanningRequestRecord = {
   projectedApprovedFte: number;
   projectedFilledFte: number;
   projectedGapFte: number;
-  incrementalBudgetUsd: number;
+  incrementalBudgetNgn: number;
   status: WorkforceRequestStatus;
   createdAt: string;
 };

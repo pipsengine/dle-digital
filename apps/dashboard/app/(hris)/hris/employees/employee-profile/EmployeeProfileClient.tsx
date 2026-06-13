@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -28,6 +29,7 @@ import {
   Plus,
   Printer,
   RefreshCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   Stethoscope,
@@ -241,6 +243,16 @@ type AuditLog = {
   ipAddress?: string;
   device?: string;
   reason?: string;
+};
+
+type EmployeeSearchOption = {
+  employeeId: string;
+  employeeCode?: string;
+  fullName: string;
+  jobTitle: string;
+  department: string;
+  location: string;
+  status?: string;
 };
 
 type ApiState<T> = { status: 'idle' | 'loading' | 'ready' | 'error'; data?: T; error?: string };
@@ -828,10 +840,15 @@ const OverviewTab = ({
 };
 
 export default function EmployeeProfileClient({ employeeId, initialNow }: { employeeId: string; initialNow: string }) {
+  const router = useRouter();
   const [role, setRole] = useState<Role>('HR Manager');
   const [viewerEmployeeId, setViewerEmployeeId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<TabKey>('overview');
   const [toast, setToast] = useState<{ title: string; detail: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeOptions, setEmployeeOptions] = useState<EmployeeSearchOption[]>([]);
+  const [employeeSearchLoading, setEmployeeSearchLoading] = useState(false);
+  const [employeeSearchError, setEmployeeSearchError] = useState<string | null>(null);
 
   const perms = useMemo(() => rolePermissions(role, employeeId, viewerEmployeeId), [employeeId, role, viewerEmployeeId]);
   const nowStamp = useMemo(() => formatDateTimeUtc(initialNow), [initialNow]);
@@ -840,6 +857,61 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
   const [overview, setOverview] = useState<ApiState<EmployeeOverview>>({ status: 'idle' });
   const [insights, setInsights] = useState<ApiState<AIInsight[]>>({ status: 'idle' });
   const [audit, setAudit] = useState<ApiState<AuditLog[]>>({ status: 'idle' });
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadEmployees = async () => {
+      setEmployeeSearchLoading(true);
+      setEmployeeSearchError(null);
+      try {
+        const res = await fetch('/api/hris/employees', { cache: 'no-store' });
+        const json = (await res.json()) as { status: string; data?: { employees?: EmployeeSearchOption[] }; error?: string };
+        if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to load employees');
+        if (cancelled) return;
+        setEmployeeOptions(
+          [...(json.data?.employees || [])]
+            .filter((employee) => employee.employeeId && employee.fullName)
+            .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+        );
+      } catch (e) {
+        if (!cancelled) setEmployeeSearchError(e instanceof Error ? e.message : 'Unable to load employees');
+      } finally {
+        if (!cancelled) setEmployeeSearchLoading(false);
+      }
+    };
+    void loadEmployees();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const employeeSearchResults = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase();
+    if (!q) return employeeOptions.slice(0, 8);
+    return employeeOptions
+      .filter((employee) =>
+        [
+          employee.employeeId,
+          employee.employeeCode,
+          employee.fullName,
+          employee.jobTitle,
+          employee.department,
+          employee.location,
+          employee.status,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(q),
+      )
+      .slice(0, 8);
+  }, [employeeOptions, employeeSearch]);
+
+  const openEmployeeProfile = (nextEmployeeId: string) => {
+    const id = nextEmployeeId.trim();
+    if (!id || id === employeeId) return;
+    router.push(`/hris/employees/employee-profile/${encodeURIComponent(id)}`);
+  };
 
   const [personalEdit, setPersonalEdit] = useState(false);
   const [personalDraft, setPersonalDraft] = useState<PersonalInfo | null>(null);
@@ -1004,6 +1076,49 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input
+              value={employeeSearch}
+              list="employee-profile-search-options"
+              onChange={(e) => setEmployeeSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                const query = employeeSearch.trim().toLowerCase();
+                const match = employeeOptions.find((employee) =>
+                  employee.employeeId.toLowerCase() === query ||
+                  employee.fullName.toLowerCase() === query ||
+                  `${employee.employeeId} - ${employee.fullName}`.toLowerCase() === query,
+                );
+                openEmployeeProfile(match?.employeeId || employeeSearch);
+              }}
+              placeholder={employeeSearchLoading ? 'Loading employees...' : 'Search employee...'}
+              className="w-[260px] max-w-[70vw] text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            />
+            <datalist id="employee-profile-search-options">
+              {employeeSearchResults.map((employee) => (
+                <option key={employee.employeeId} value={`${employee.employeeId} - ${employee.fullName}`}>
+                  {employee.jobTitle} | {employee.department} | {employee.location}
+                </option>
+              ))}
+            </datalist>
+            <button
+              type="button"
+              onClick={() => {
+                const query = employeeSearch.trim().toLowerCase();
+                const match = employeeOptions.find((employee) =>
+                  employee.employeeId.toLowerCase() === query ||
+                  employee.fullName.toLowerCase() === query ||
+                  `${employee.employeeId} - ${employee.fullName}`.toLowerCase() === query,
+                );
+                openEmployeeProfile(match?.employeeId || employeeSearch);
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900 text-white text-[11px] font-extrabold hover:bg-slate-800"
+            >
+              Go
+            </button>
+          </div>
+          {employeeSearchError ? <span className="text-[11px] font-extrabold text-red-700">{employeeSearchError}</span> : null}
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
             <span className="text-xs font-extrabold text-slate-600">Viewer Role</span>
             <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="text-xs font-extrabold text-slate-800 bg-white focus:outline-none">

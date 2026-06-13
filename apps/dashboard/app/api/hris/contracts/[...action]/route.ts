@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readEmployeeContractFromDb, readEmployeeContractsFromDb } from '@/lib/dle-enterprise-db';
 
 type Role =
   | 'Super Admin'
@@ -280,6 +281,40 @@ const ensureCanViewContract = (role: Role, viewerEmployeeId: string | undefined,
 const signedDocPresent = (docs: ContractDocument[]) =>
   docs.some((d) => d.status === 'Active' && (d.category === 'Signed Acceptance Copy' || d.category === 'Employment Contract') && d.signatureStatus === 'Signed');
 
+const mergeContracts = async (employeeId?: string) => {
+  const s = stores();
+  const db = ((await readEmployeeContractsFromDb(employeeId)) || []) as unknown as EmployeeContract[];
+  const memory = Array.from(s.contracts.values()).filter((c) => (employeeId ? c.employeeId === employeeId : true));
+  const seen = new Set<string>();
+  return [...memory, ...db].filter((c) => {
+    if (seen.has(c.id)) return false;
+    seen.add(c.id);
+    return true;
+  });
+};
+
+const contractRow = (c: EmployeeContract) => {
+  const approvals = Array.isArray(c.approvals) ? c.approvals : [];
+  const lastApproved = approvals.find((a) => a && a.decision === 'Approved') || null;
+  return {
+    id: String(c.id || ''),
+    employeeId: String(c.employeeId || ''),
+    employeeName: String(c.employeeName || ''),
+    contractReferenceNo: String(c.contractReferenceNo || ''),
+    contractType: String(c.contractType || ''),
+    startDate: String(c.startDate || ''),
+    endDate: c.endDate ? String(c.endDate) : null,
+    contractStatus: String(c.contractStatus || ''),
+    renewalStatus: String(c.renewalStatus || ''),
+    approvalStatus: String(c.approvalStatus || ''),
+    documentStatus: String(c.documentStatus || ''),
+    createdBy: String(c.createdBy || ''),
+    approvedBy: lastApproved ? String(lastApproved.by || '') : null,
+    createdAt: String(c.createdAt || ''),
+    updatedAt: String(c.updatedAt || ''),
+  };
+};
+
 const buildPdfBytes = (title: string, lines: string[]) => {
   const escapePdf = (s: string) => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
   const clean = (s: string) => escapePdf(s.replace(/\r?\n/g, ' ').slice(0, 170));
@@ -384,8 +419,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
 
   if (seg0 === 'summary') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
-    const s = stores();
-    const all = Array.from(s.contracts.values());
+    const all = await mergeContracts();
     const active = all.filter((c) => c.contractStatus === 'Active').length;
     const pending = all.filter((c) => c.workflowStatus !== 'Draft' && c.workflowStatus !== 'Approved' && c.workflowStatus !== 'Rejected').length;
     const expiringSoon = all.filter((c) => {
@@ -394,9 +428,9 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
     }).length;
     const missingSigned = all.filter((c) => c.contractStatus === 'Active' && !signedDocPresent(c.documents)).length;
     return jsonOk({
-      totalContracts: Math.max(all.length, 12),
-      activeContracts: Math.max(active, 6),
-      pendingApprovals: Math.max(pending, 4),
+      totalContracts: all.length,
+      activeContracts: active,
+      pendingApprovals: pending,
       expiringSoon,
       missingSignedDocuments: missingSigned,
       lastUpdatedAt: nowIso(),
@@ -405,9 +439,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
 
   if (seg0 === 'ai-insights') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
-    const s = stores();
     const employeeId = normalizeStr(url.searchParams.get('employeeId'), 40).toUpperCase();
-    const list = Array.from(s.contracts.values()).filter((c) => (employeeId ? c.employeeId === employeeId : true));
+    const list = await mergeContracts(employeeId || undefined);
     const out: AIInsight[] = [];
     const add = (severity: Severity, title: string, confidence: number, recommendation: string, actionLabel: string, actionKey: string) =>
       out.push({ id: `con-ai-${employeeId || 'org'}-${Math.random().toString(16).slice(2)}`, severity, confidence, title, recommendation, actionLabel, action: actionKey });
@@ -431,8 +464,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   if (seg0 === 'expiring') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
     const withinDays = Math.max(1, Math.min(365, Number(url.searchParams.get('withinDays') || '90')));
-    const s = stores();
-    const rows = Array.from(s.contracts.values())
+    const rows = (await mergeContracts())
       .map((c) => ({ c, exp: computeExpiry(c.endDate) }))
       .filter((x) => typeof x.exp.daysToExpiry === 'number' && x.exp.daysToExpiry >= 0 && x.exp.daysToExpiry <= withinDays)
       .sort((a, b) => (a.exp.daysToExpiry! > b.exp.daysToExpiry! ? 1 : -1))
@@ -457,8 +489,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
     const stamp = new Date().toISOString().slice(0, 10);
     const fileBase = employeeId ? `contract_report_${employeeId}_${stamp}` : `contract_report_${stamp}`;
 
-    const s = stores();
-    const list = Array.from(s.contracts.values()).filter((c) => (employeeId ? c.employeeId === employeeId : true));
+    const list = await mergeContracts(employeeId || undefined);
     const header = ['Employee ID', 'Employee Name', 'Contract Ref', 'Type', 'Status', 'Start Date', 'End Date', 'Workflow', 'Approval', 'Documents', 'HR Officer'];
     const rows = list.slice(0, 200).map((c) => [
       c.employeeId,
@@ -511,7 +542,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
 
   const contractId = seg0;
   const s = stores();
-  const c = s.contracts.get(contractId);
+  const c = (s.contracts.get(contractId) || (await readEmployeeContractFromDb(contractId))) as EmployeeContract | null;
   if (!c) return jsonErr(404, 'Contract not found');
   if (!ensureCanViewContract(role, viewerEmployeeId, c)) return jsonErr(403, 'Permission denied');
 

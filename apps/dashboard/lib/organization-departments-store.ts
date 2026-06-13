@@ -1,7 +1,6 @@
 import sql from 'mssql';
 import { getDleEnterpriseDbPool } from '@/lib/dle-enterprise-db';
 import type { DepartmentRecord, HealthStatus, NodeKind, StructureInsight } from '@/lib/organization-data';
-import { readActiveSagePayrollEmployeeKeys, type SagePayrollEmployee } from '@/lib/sage-people-payroll-store';
 
 type DepartmentPayload = {
   generatedAt: string;
@@ -30,71 +29,49 @@ type DepartmentPayload = {
 };
 
 type DepartmentTeam = DepartmentRecord['teams'][number];
+type SystemEmployeeDepartmentRow = {
+  employeeCode: string;
+  fullName: string;
+  employmentStatus: string;
+  department: string;
+  division: string;
+  businessUnit: string;
+  costCenter: string;
+  managerName: string;
+  functionalManager: string;
+  departmentHead: string;
+  workLocation: string;
+  officeLocation: string;
+  projectSite: string;
+  annualSalary: number;
+};
 
 const dbReady = { value: false };
+const SOURCE_SYSTEM = 'DLE Enterprise HRIS';
 
 const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const cleanMax = (value: unknown, max: number) => clean(value).slice(0, max);
 const round1 = (value: number) => Math.round(value * 10) / 10;
-const currency = (value: unknown) => {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? n : 0;
+const slug = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unassigned';
+const uniqueSorted = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+const validHealth = (value: unknown): HealthStatus => {
+  const v = clean(value);
+  return v === 'Critical' || v === 'Needs Attention' || v === 'Healthy' ? v : 'Healthy';
 };
-const slug = (value: string) =>
-  value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unassigned';
+const numberValue = (value: unknown, fallback = 0) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
 
 const mostCommon = (values: Array<string | null | undefined>, fallback: string) => {
   const counts = new Map<string, number>();
-  for (const value of values.map(clean).filter(Boolean)) {
-    counts.set(value, (counts.get(value) || 0) + 1);
-  }
+  for (const value of values.map(clean).filter(Boolean)) counts.set(value, (counts.get(value) || 0) + 1);
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || fallback;
-};
-
-const uniqueSorted = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
-
-const isTerminated = (employee: SagePayrollEmployee) => {
-  const status = `${clean(employee.statusName)} ${clean(employee.statusCode)}`.toLowerCase();
-  return Boolean(employee.terminationDate) || status.includes('terminated') || status.includes('resigned') || status.includes('inactive');
-};
-
-const isSecurityRole = (employee: SagePayrollEmployee) => {
-  const text = [employee.jobTitle, employee.jobTitleCode, employee.displayName, employee.managerName]
-    .map(clean)
-    .join(' ')
-    .toLowerCase();
-  return text.includes('security') || text.includes('community liaison');
-};
-
-const baseDepartmentName = (employee: SagePayrollEmployee) =>
-  clean(employee.departmentName) || clean(employee.hierarchyDepartmentName);
-
-const baseDepartmentCode = (employee: SagePayrollEmployee, name: string) =>
-  clean(employee.departmentCode) || clean(employee.hierarchyDepartmentCode) || name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
-
-const departmentName = (employee: SagePayrollEmployee) => {
-  if (isSecurityRole(employee)) return 'SECURITY';
-  return baseDepartmentName(employee) || 'Unassigned Department';
-};
-
-const departmentCode = (employee: SagePayrollEmployee, name: string) => {
-  if (isSecurityRole(employee)) return 'SECURITY';
-  return baseDepartmentCode(employee, name);
-};
-
-const employeeLocation = (employee: SagePayrollEmployee) =>
-  clean(employee.hierarchyLocationName) || clean(employee.siteName) || 'Unassigned Location';
-
-const employeeStatus = (employee: SagePayrollEmployee) => clean(employee.statusName) || clean(employee.statusCode) || 'Active';
-
-const healthFrom = (headcount: number, missingManagerCount: number, locationCount: number): HealthStatus => {
-  if (!headcount || missingManagerCount / Math.max(headcount, 1) >= 0.35) return 'Critical';
-  if (missingManagerCount > 0 || locationCount > 3) return 'Needs Attention';
-  return 'Healthy';
 };
 
 const ensureDb = async () => {
   const pool = await getDleEnterpriseDbPool();
-  if (!pool) throw new Error('DLE Enterprise database is not configured. Organization departments must be stored in the database.');
+  if (!pool) throw new Error('DLE Enterprise database is not configured. Organization departments must be stored in the system database.');
 
   if (!dbReady.value) {
     await pool.request().query(`
@@ -111,8 +88,8 @@ CREATE TABLE [hris].[OrganizationDepartments] (
   [Leader] NVARCHAR(220) NOT NULL,
   [Headcount] INT NOT NULL CONSTRAINT [DF_OrganizationDepartments_Headcount] DEFAULT 0,
   [OpenRoles] INT NOT NULL CONSTRAINT [DF_OrganizationDepartments_OpenRoles] DEFAULT 0,
-  [BudgetUsd] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_BudgetUsd] DEFAULT 0,
-  [PayrollUsd] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_PayrollUsd] DEFAULT 0,
+  [budgetNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_budgetNgn] DEFAULT 0,
+  [payrollNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_payrollNgn] DEFAULT 0,
   [SpanOfControl] DECIMAL(9,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_SpanOfControl] DEFAULT 0,
   [SuccessionCoveragePct] DECIMAL(9,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_SuccessionCoveragePct] DEFAULT 0,
   [AttritionRiskPct] DECIMAL(9,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_AttritionRiskPct] DEFAULT 0,
@@ -127,43 +104,43 @@ CREATE TABLE [hris].[OrganizationDepartments] (
   CONSTRAINT [UQ_OrganizationDepartments_Source] UNIQUE ([SourceSystem], [SourceCode]),
   CONSTRAINT [CK_OrganizationDepartments_TeamsJson] CHECK (ISJSON([TeamsJson]) = 1),
   CONSTRAINT [CK_OrganizationDepartments_SourceSnapshotJson] CHECK (ISJSON([SourceSnapshotJson]) = 1)
-);`);
+);
+IF COL_LENGTH(N'hris.OrganizationDepartments', N'budgetNgn') IS NULL AND COL_LENGTH(N'hris.OrganizationDepartments', N'BudgetUsd') IS NOT NULL
+  EXEC sp_rename N'hris.OrganizationDepartments.BudgetUsd', N'budgetNgn', N'COLUMN';
+IF COL_LENGTH(N'hris.OrganizationDepartments', N'payrollNgn') IS NULL AND COL_LENGTH(N'hris.OrganizationDepartments', N'PayrollUsd') IS NOT NULL
+  EXEC sp_rename N'hris.OrganizationDepartments.PayrollUsd', N'payrollNgn', N'COLUMN';
+IF COL_LENGTH(N'hris.OrganizationDepartments', N'budgetNgn') IS NULL
+  ALTER TABLE [hris].[OrganizationDepartments] ADD [budgetNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_budgetNgn] DEFAULT 0;
+IF COL_LENGTH(N'hris.OrganizationDepartments', N'payrollNgn') IS NULL
+  ALTER TABLE [hris].[OrganizationDepartments] ADD [payrollNgn] DECIMAL(19,2) NOT NULL CONSTRAINT [DF_OrganizationDepartments_payrollNgn] DEFAULT 0;`);
     dbReady.value = true;
   }
 
   return pool;
 };
 
-const buildDepartmentsFromSage = (employees: SagePayrollEmployee[]): DepartmentRecord[] => {
-  const reportDepartmentsByManagerCode = new Map<string, Array<{ name: string; code: string }>>();
-  for (const employee of employees) {
-    const managerCode = clean(employee.managerEmployeeCode) || clean(employee.managerName).split(' ')[0];
-    const name = departmentName(employee);
-    if (!managerCode || name === 'Unassigned Department') continue;
-    const code = departmentCode(employee, name);
-    const key = managerCode.replace(/_/g, '').toLowerCase();
-    const current = reportDepartmentsByManagerCode.get(key) || [];
-    current.push({ name, code });
-    reportDepartmentsByManagerCode.set(key, current);
-  }
+const employeeDepartment = (employee: SystemEmployeeDepartmentRow) => clean(employee.department) || 'Unassigned Department';
+const employeeDepartmentCode = (employee: SystemEmployeeDepartmentRow, name: string) =>
+  clean(employee.costCenter) || name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+const employeeLocation = (employee: SystemEmployeeDepartmentRow) => clean(employee.officeLocation) || clean(employee.workLocation) || 'Unassigned Location';
+const isInactive = (employee: SystemEmployeeDepartmentRow) => {
+  const status = clean(employee.employmentStatus).toLowerCase();
+  return ['terminated', 'resigned', 'retired', 'inactive', 'exited'].some((item) => status.includes(item));
+};
+const healthFrom = (headcount: number, missingManagerCount: number, locationCount: number): HealthStatus => {
+  if (!headcount || missingManagerCount / Math.max(headcount, 1) >= 0.35) return 'Critical';
+  if (missingManagerCount > 0 || locationCount > 3) return 'Needs Attention';
+  return 'Healthy';
+};
 
-  const groups = new Map<string, { code: string; name: string; rows: SagePayrollEmployee[] }>();
+const buildDepartmentsFromSystemEmployees = (employees: SystemEmployeeDepartmentRow[]): DepartmentRecord[] => {
+  const groups = new Map<string, { code: string; name: string; rows: SystemEmployeeDepartmentRow[] }>();
 
   for (const employee of employees) {
-    let name = departmentName(employee);
-    let inferredCode: string | null = null;
-    if (name === 'Unassigned Department') {
-      const normalizedCode = clean(employee.employeeCode).replace(/_/g, '').toLowerCase();
-      const inferred = mostCommon((reportDepartmentsByManagerCode.get(normalizedCode) || []).map((item) => `${item.code}|||${item.name}`), '');
-      if (inferred) name = inferred;
-      else if (isTerminated(employee)) continue;
-      else continue;
-      const [codePart, namePart] = inferred.split('|||');
-      inferredCode = codePart || null;
-      name = namePart || name;
-    }
-    const code = inferredCode || departmentCode(employee, name);
-    const key = code.toLowerCase();
+    if (isInactive(employee)) continue;
+    const name = employeeDepartment(employee);
+    const code = employeeDepartmentCode(employee, name);
+    const key = `${code}|||${name}`.toLowerCase();
     const group = groups.get(key) || { code, name, rows: [] };
     group.rows.push(employee);
     groups.set(key, group);
@@ -177,12 +154,11 @@ const buildDepartmentsFromSage = (employees: SagePayrollEmployee[]): DepartmentR
       const locations = uniqueSorted(rows.map(employeeLocation));
       const managers = uniqueSorted(rows.map((employee) => clean(employee.managerName)).filter(Boolean));
       const missingManagerCount = rows.filter((employee) => !clean(employee.managerName)).length;
-      const leader = mostCommon(rows.map((employee) => employee.managerName), 'Unassigned Department Leader');
-      const parentName = mostCommon(rows.map((employee) => employee.companyName), 'Dorman Long Engineering');
-      const payrollUsd = rows.reduce((sum, employee) => sum + currency(employee.annualSalary), 0);
-      const budgetUsd = payrollUsd;
+      const leader = mostCommon(rows.map((employee) => employee.departmentHead || employee.managerName), 'Unassigned Department Leader');
+      const parentName = mostCommon(rows.map((employee) => employee.businessUnit), 'DLE Enterprise');
+      const payrollNgn = rows.reduce((sum, employee) => sum + Number(employee.annualSalary || 0), 0);
       const spanOfControl = managers.length ? round1(headcount / managers.length) : headcount;
-      const successionCoveragePct = Math.max(0, round1(((headcount - missingManagerCount) / Math.max(headcount, 1)) * 100));
+      const successionCoveragePct = round1(((headcount - missingManagerCount) / Math.max(headcount, 1)) * 100);
       const attritionRiskPct = round1((missingManagerCount / Math.max(headcount, 1)) * 100);
       const healthStatus = healthFrom(headcount, missingManagerCount, locations.length);
       const teams: DepartmentTeam[] = locations.map((location) => {
@@ -199,7 +175,7 @@ const buildDepartmentsFromSage = (employees: SagePayrollEmployee[]): DepartmentR
       });
 
       return {
-        id: `dept-${slug(group.code)}`,
+        id: `dept-${slug(group.code)}-${slug(group.name)}`,
         parentId: null,
         name: group.name,
         code: group.code,
@@ -208,14 +184,14 @@ const buildDepartmentsFromSage = (employees: SagePayrollEmployee[]): DepartmentR
         location: mostCommon(rows.map(employeeLocation), 'Unassigned Location'),
         headcount,
         openRoles: 0,
-        budgetUsd,
-        payrollUsd,
+        budgetNgn: payrollNgn,
+        payrollNgn,
         spanOfControl,
         successionCoveragePct,
         attritionRiskPct,
         healthStatus,
         costCenter: group.code,
-        description: `Sage Payroll department ${group.name} with ${headcount} active employee${headcount === 1 ? '' : 's'} across ${locations.length || 1} location${locations.length === 1 ? '' : 's'}.`,
+        description: `System department ${group.name} with ${headcount} active employee${headcount === 1 ? '' : 's'} across ${locations.length || 1} location${locations.length === 1 ? '' : 's'}.`,
         childCount: teams.length,
         descendantCount: teams.length,
         parentName,
@@ -228,24 +204,15 @@ const buildDepartmentsFromSage = (employees: SagePayrollEmployee[]): DepartmentR
     });
 };
 
-const persistDepartments = async (departments: DepartmentRecord[]) => {
+const persistSystemDepartments = async (departments: DepartmentRecord[]) => {
   const pool = await ensureDb();
   const tx = new sql.Transaction(pool);
   await tx.begin();
   try {
-    const activeSourceCodes = new Set(departments.map((department) => department.code));
-    const existing = await new sql.Request(tx).query(`SELECT [SourceCode] FROM [hris].[OrganizationDepartments] WHERE [SourceSystem]=N'Sage Payroll'`);
-    for (const row of existing.recordset) {
-      if (activeSourceCodes.has(row.SourceCode)) continue;
-      await new sql.Request(tx)
-        .input('SourceCode', sql.NVarChar(80), row.SourceCode)
-        .query(`DELETE FROM [hris].[OrganizationDepartments] WHERE [SourceSystem]=N'Sage Payroll' AND [SourceCode]=@SourceCode`);
-    }
-
     for (const department of departments) {
       await new sql.Request(tx)
         .input('Id', sql.NVarChar(120), department.id)
-        .input('SourceSystem', sql.NVarChar(80), 'Sage Payroll')
+        .input('SourceSystem', sql.NVarChar(80), SOURCE_SYSTEM)
         .input('SourceCode', sql.NVarChar(80), department.code)
         .input('Name', sql.NVarChar(180), department.name)
         .input('ParentName', sql.NVarChar(180), department.parentName)
@@ -254,8 +221,8 @@ const persistDepartments = async (departments: DepartmentRecord[]) => {
         .input('Leader', sql.NVarChar(220), department.leader)
         .input('Headcount', sql.Int, department.headcount)
         .input('OpenRoles', sql.Int, department.openRoles)
-        .input('BudgetUsd', sql.Decimal(19, 2), department.budgetUsd)
-        .input('PayrollUsd', sql.Decimal(19, 2), department.payrollUsd)
+        .input('budgetNgn', sql.Decimal(19, 2), department.budgetNgn)
+        .input('payrollNgn', sql.Decimal(19, 2), department.payrollNgn)
         .input('SpanOfControl', sql.Decimal(9, 2), department.spanOfControl)
         .input('SuccessionCoveragePct', sql.Decimal(9, 2), department.successionCoveragePct)
         .input('AttritionRiskPct', sql.Decimal(9, 2), department.attritionRiskPct)
@@ -265,32 +232,80 @@ const persistDepartments = async (departments: DepartmentRecord[]) => {
         .input('TeamCount', sql.Int, department.teamCount)
         .input('TeamHeadcount', sql.Int, department.teamHeadcount)
         .input('TeamsJson', sql.NVarChar(sql.MAX), JSON.stringify(department.teams))
-        .input('SourceSnapshotJson', sql.NVarChar(sql.MAX), JSON.stringify({ parentChain: department.parentChain, migratedAt: new Date().toISOString() }))
+        .input('SourceSnapshotJson', sql.NVarChar(sql.MAX), JSON.stringify({ parentChain: department.parentChain, generatedFrom: 'EmployeeMasterView', updatedAt: new Date().toISOString() }))
         .query(`
 MERGE [hris].[OrganizationDepartments] AS target
 USING (SELECT @SourceSystem AS [SourceSystem], @SourceCode AS [SourceCode]) AS source
 ON target.[SourceSystem] = source.[SourceSystem] AND target.[SourceCode] = source.[SourceCode]
 WHEN MATCHED THEN UPDATE SET
   [Id]=@Id,[Name]=@Name,[ParentName]=@ParentName,[ParentKind]=@ParentKind,[Location]=@Location,[Leader]=@Leader,
-  [Headcount]=@Headcount,[OpenRoles]=@OpenRoles,[BudgetUsd]=@BudgetUsd,[PayrollUsd]=@PayrollUsd,[SpanOfControl]=@SpanOfControl,
+  [Headcount]=@Headcount,[OpenRoles]=@OpenRoles,[budgetNgn]=@budgetNgn,[payrollNgn]=@payrollNgn,[SpanOfControl]=@SpanOfControl,
   [SuccessionCoveragePct]=@SuccessionCoveragePct,[AttritionRiskPct]=@AttritionRiskPct,[HealthStatus]=@HealthStatus,[CostCenter]=@CostCenter,
   [Description]=@Description,[TeamCount]=@TeamCount,[TeamHeadcount]=@TeamHeadcount,[TeamsJson]=@TeamsJson,[SourceSnapshotJson]=@SourceSnapshotJson,
   [LastSyncedAt]=SYSUTCDATETIME()
 WHEN NOT MATCHED THEN INSERT
-  ([Id],[SourceSystem],[SourceCode],[Name],[ParentName],[ParentKind],[Location],[Leader],[Headcount],[OpenRoles],[BudgetUsd],[PayrollUsd],[SpanOfControl],[SuccessionCoveragePct],[AttritionRiskPct],[HealthStatus],[CostCenter],[Description],[TeamCount],[TeamHeadcount],[TeamsJson],[SourceSnapshotJson])
+  ([Id],[SourceSystem],[SourceCode],[Name],[ParentName],[ParentKind],[Location],[Leader],[Headcount],[OpenRoles],[budgetNgn],[payrollNgn],[SpanOfControl],[SuccessionCoveragePct],[AttritionRiskPct],[HealthStatus],[CostCenter],[Description],[TeamCount],[TeamHeadcount],[TeamsJson],[SourceSnapshotJson])
 VALUES
-  (@Id,@SourceSystem,@SourceCode,@Name,@ParentName,@ParentKind,@Location,@Leader,@Headcount,@OpenRoles,@BudgetUsd,@PayrollUsd,@SpanOfControl,@SuccessionCoveragePct,@AttritionRiskPct,@HealthStatus,@CostCenter,@Description,@TeamCount,@TeamHeadcount,@TeamsJson,@SourceSnapshotJson);`);
+  (@Id,@SourceSystem,@SourceCode,@Name,@ParentName,@ParentKind,@Location,@Leader,@Headcount,@OpenRoles,@budgetNgn,@payrollNgn,@SpanOfControl,@SuccessionCoveragePct,@AttritionRiskPct,@HealthStatus,@CostCenter,@Description,@TeamCount,@TeamHeadcount,@TeamsJson,@SourceSnapshotJson);`);
     }
     await tx.commit();
   } catch (error) {
-    await tx.rollback();
+    await tx.rollback().catch(() => undefined);
     throw error;
   }
 };
 
+const saveDepartment = async (department: DepartmentRecord) => {
+  const pool = await ensureDb();
+  await pool
+    .request()
+    .input('Id', sql.NVarChar(120), department.id)
+    .input('SourceSystem', sql.NVarChar(80), SOURCE_SYSTEM)
+    .input('SourceCode', sql.NVarChar(80), department.code)
+    .input('Name', sql.NVarChar(180), department.name)
+    .input('ParentName', sql.NVarChar(180), department.parentName)
+    .input('ParentKind', sql.NVarChar(40), department.parentKind)
+    .input('Location', sql.NVarChar(180), department.location)
+    .input('Leader', sql.NVarChar(220), department.leader)
+    .input('Headcount', sql.Int, department.headcount)
+    .input('OpenRoles', sql.Int, department.openRoles)
+    .input('budgetNgn', sql.Decimal(19, 2), department.budgetNgn)
+    .input('payrollNgn', sql.Decimal(19, 2), department.payrollNgn)
+    .input('SpanOfControl', sql.Decimal(9, 2), department.spanOfControl)
+    .input('SuccessionCoveragePct', sql.Decimal(9, 2), department.successionCoveragePct)
+    .input('AttritionRiskPct', sql.Decimal(9, 2), department.attritionRiskPct)
+    .input('HealthStatus', sql.NVarChar(40), department.healthStatus)
+    .input('CostCenter', sql.NVarChar(100), department.costCenter)
+    .input('Description', sql.NVarChar(500), department.description)
+    .input('TeamCount', sql.Int, department.teamCount)
+    .input('TeamHeadcount', sql.Int, department.teamHeadcount)
+    .input('TeamsJson', sql.NVarChar(sql.MAX), JSON.stringify(department.teams))
+    .input('SourceSnapshotJson', sql.NVarChar(sql.MAX), JSON.stringify({ parentChain: department.parentChain, editedAt: new Date().toISOString() }))
+    .query(`
+MERGE [hris].[OrganizationDepartments] AS target
+USING (SELECT @SourceSystem AS [SourceSystem], @SourceCode AS [SourceCode]) AS source
+ON target.[SourceSystem] = source.[SourceSystem] AND target.[SourceCode] = source.[SourceCode]
+WHEN MATCHED THEN UPDATE SET
+  [Id]=@Id,[Name]=@Name,[ParentName]=@ParentName,[ParentKind]=@ParentKind,[Location]=@Location,[Leader]=@Leader,
+  [OpenRoles]=@OpenRoles,[budgetNgn]=@budgetNgn,[payrollNgn]=@payrollNgn,[SpanOfControl]=@SpanOfControl,
+  [SuccessionCoveragePct]=@SuccessionCoveragePct,[AttritionRiskPct]=@AttritionRiskPct,[HealthStatus]=@HealthStatus,[CostCenter]=@CostCenter,
+  [Description]=@Description,[TeamCount]=@TeamCount,[TeamHeadcount]=@TeamHeadcount,[TeamsJson]=@TeamsJson,[SourceSnapshotJson]=@SourceSnapshotJson,
+  [LastSyncedAt]=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT
+  ([Id],[SourceSystem],[SourceCode],[Name],[ParentName],[ParentKind],[Location],[Leader],[Headcount],[OpenRoles],[budgetNgn],[payrollNgn],[SpanOfControl],[SuccessionCoveragePct],[AttritionRiskPct],[HealthStatus],[CostCenter],[Description],[TeamCount],[TeamHeadcount],[TeamsJson],[SourceSnapshotJson])
+VALUES
+  (@Id,@SourceSystem,@SourceCode,@Name,@ParentName,@ParentKind,@Location,@Leader,@Headcount,@OpenRoles,@budgetNgn,@payrollNgn,@SpanOfControl,@SuccessionCoveragePct,@AttritionRiskPct,@HealthStatus,@CostCenter,@Description,@TeamCount,@TeamHeadcount,@TeamsJson,@SourceSnapshotJson);`);
+};
+
 const readPersistedDepartments = async (): Promise<DepartmentRecord[]> => {
   const pool = await ensureDb();
-  const result = await pool.request().query(`SELECT * FROM [hris].[OrganizationDepartments] WHERE [SourceSystem]=N'Sage Payroll' ORDER BY [Name]`);
+  const result = await pool.request().input('SourceSystem', sql.NVarChar(80), SOURCE_SYSTEM).query(`
+    SELECT *
+    FROM [hris].[OrganizationDepartments]
+    WHERE [SourceSystem]=@SourceSystem
+    ORDER BY [Name];
+  `);
+
   return result.recordset.map((row) => {
     const teams = JSON.parse(row.TeamsJson || '[]') as DepartmentTeam[];
     const snapshot = JSON.parse(row.SourceSnapshotJson || '{}') as { parentChain?: string[] };
@@ -304,8 +319,8 @@ const readPersistedDepartments = async (): Promise<DepartmentRecord[]> => {
       location: row.Location,
       headcount: Number(row.Headcount || 0),
       openRoles: Number(row.OpenRoles || 0),
-      budgetUsd: Number(row.BudgetUsd || 0),
-      payrollUsd: Number(row.PayrollUsd || 0),
+      budgetNgn: Number(row.budgetNgn || 0),
+      payrollNgn: Number(row.payrollNgn || 0),
       spanOfControl: Number(row.SpanOfControl || 0),
       successionCoveragePct: Number(row.SuccessionCoveragePct || 0),
       attritionRiskPct: Number(row.AttritionRiskPct || 0),
@@ -324,16 +339,55 @@ const readPersistedDepartments = async (): Promise<DepartmentRecord[]> => {
   });
 };
 
+const readSystemEmployeeDepartmentRows = async (): Promise<SystemEmployeeDepartmentRow[]> => {
+  const pool = await ensureDb();
+  const result = await pool.request().query(`
+    SELECT
+      e.employee_code,
+      e.full_name,
+      e.employment_status,
+      j.department,
+      j.division,
+      j.business_unit,
+      j.cost_center,
+      j.reporting_manager,
+      j.functional_manager,
+      j.department_head,
+      emp.work_location,
+      j.office_location,
+      j.project_site,
+      pay.annual_salary
+    FROM [hris].[Employees] e
+    LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = e.employee_id
+    LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = e.employee_id
+    LEFT JOIN [hris].[EmployeePayrollSetup] pay ON pay.employee_id = e.employee_id
+    ORDER BY e.employee_code;
+  `);
+
+  return (result.recordset || []).map((row: any) => ({
+    employeeCode: clean(row.employee_code),
+    fullName: clean(row.full_name),
+    employmentStatus: clean(row.employment_status),
+    department: clean(row.department),
+    division: clean(row.division),
+    businessUnit: clean(row.business_unit),
+    costCenter: clean(row.cost_center),
+    managerName: clean(row.reporting_manager),
+    functionalManager: clean(row.functional_manager),
+    departmentHead: clean(row.department_head),
+    workLocation: clean(row.work_location),
+    officeLocation: clean(row.office_location),
+    projectSite: clean(row.project_site),
+    annualSalary: Number(row.annual_salary || 0),
+  }));
+};
+
 const buildPayload = (departments: DepartmentRecord[]): DepartmentPayload => {
   const totalHeadcount = departments.reduce((sum, department) => sum + department.headcount, 0);
   const totalOpenRoles = departments.reduce((sum, department) => sum + department.openRoles, 0);
   const totalTeams = departments.reduce((sum, department) => sum + department.teamCount, 0);
-  const avgSuccessionCoverage = departments.length
-    ? round1(departments.reduce((sum, department) => sum + department.successionCoveragePct, 0) / departments.length)
-    : 0;
-  const avgAttritionRisk = departments.length
-    ? round1(departments.reduce((sum, department) => sum + department.attritionRiskPct, 0) / departments.length)
-    : 0;
+  const avgSuccessionCoverage = departments.length ? round1(departments.reduce((sum, department) => sum + department.successionCoveragePct, 0) / departments.length) : 0;
+  const avgAttritionRisk = departments.length ? round1(departments.reduce((sum, department) => sum + department.attritionRiskPct, 0) / departments.length) : 0;
   const criticalDepartments = departments.filter((department) => department.healthStatus === 'Critical').length;
   const needsAttentionDepartments = departments.filter((department) => department.healthStatus === 'Needs Attention').length;
   const highestAttrition = [...departments].sort((a, b) => b.attritionRiskPct - a.attritionRiskPct)[0];
@@ -342,11 +396,7 @@ const buildPayload = (departments: DepartmentRecord[]): DepartmentPayload => {
 
   return {
     generatedAt: new Date().toISOString(),
-    permissions: {
-      canEdit: true,
-      canExport: true,
-      canViewCosts: true,
-    },
+    permissions: { canEdit: true, canExport: true, canViewCosts: true },
     summary: {
       totalDepartments: departments.length,
       totalHeadcount,
@@ -363,33 +413,127 @@ const buildPayload = (departments: DepartmentRecord[]): DepartmentPayload => {
       parentUnits: uniqueSorted(departments.map((department) => department.parentName || '').filter(Boolean)),
     },
     departments,
-    insights: [
-      {
-        id: 'dept-ins-1',
-        severity: highestAttrition && highestAttrition.attritionRiskPct >= 35 ? 'high' : highestAttrition && highestAttrition.attritionRiskPct > 0 ? 'medium' : 'low',
-        title: `${highestAttrition?.name || 'Department'} has the highest manager assignment gap`,
-        recommendation: 'Review Sage manager assignments and department leadership ownership for affected employees.',
-      },
-      {
-        id: 'dept-ins-2',
-        severity: weakestCoverage && weakestCoverage.successionCoveragePct <= 65 ? 'high' : 'medium',
-        title: `${weakestCoverage?.name || 'Department'} has the weakest structure coverage`,
-        recommendation: 'Improve department reporting completeness in Sage Payroll before downstream HRIS workflows depend on it.',
-      },
-      {
-        id: 'dept-ins-3',
-        severity: 'low',
-        title: `${largestDepartment?.name || 'Department'} has the largest active workforce`,
-        recommendation: 'Use this view to validate Sage department coding, location spread, and supervisory accountability.',
-      },
-    ],
+    insights: departments.length
+      ? [
+          {
+            id: 'dept-ins-1',
+            severity: highestAttrition && highestAttrition.attritionRiskPct >= 35 ? 'high' : highestAttrition && highestAttrition.attritionRiskPct > 0 ? 'medium' : 'low',
+            title: `${highestAttrition?.name || 'Department'} has the highest manager assignment gap`,
+            recommendation: 'Review reporting manager and department leader assignments in the system employee master.',
+          },
+          {
+            id: 'dept-ins-2',
+            severity: weakestCoverage && weakestCoverage.successionCoveragePct <= 65 ? 'high' : 'medium',
+            title: `${weakestCoverage?.name || 'Department'} has the weakest structure coverage`,
+            recommendation: 'Complete manager, department head, and business unit ownership in the system database.',
+          },
+          {
+            id: 'dept-ins-3',
+            severity: 'low',
+            title: `${largestDepartment?.name || 'Department'} has the largest active workforce`,
+            recommendation: 'Use this system view to validate department coding, location spread, and supervisory accountability.',
+          },
+        ]
+      : [],
   };
 };
 
-export async function syncSageDepartmentsToOrganizationDb(): Promise<DepartmentPayload> {
+export async function readSystemDepartmentsFromOrganizationDb(): Promise<DepartmentPayload> {
   await ensureDb();
-  const { employees } = await readActiveSagePayrollEmployeeKeys();
-  const departments = buildDepartmentsFromSage(employees);
-  await persistDepartments(departments);
-  return buildPayload(await readPersistedDepartments());
+  const persisted = await readPersistedDepartments();
+  if (persisted.length) return buildPayload(persisted);
+
+  const employees = await readSystemEmployeeDepartmentRows();
+  const departments = buildDepartmentsFromSystemEmployees(employees);
+  if (departments.length) {
+    await persistSystemDepartments(departments);
+    return buildPayload(await readPersistedDepartments());
+  }
+  return buildPayload([]);
+}
+
+export async function createDepartmentInOrganizationDb(input: Record<string, unknown>): Promise<DepartmentPayload> {
+  const name = cleanMax(input.name, 180);
+  const code = cleanMax(input.code, 80).toUpperCase();
+  if (!name) throw new Error('Department name is required.');
+  if (!code) throw new Error('Department code is required.');
+  const existing = await readPersistedDepartments();
+  if (existing.some((department) => department.code.toLowerCase() === code.toLowerCase())) throw new Error('Department code already exists.');
+
+  const parentName = cleanMax(input.parentName, 180) || null;
+  await saveDepartment({
+    id: `dept-${slug(code)}-${slug(name)}`,
+    parentId: null,
+    name,
+    code,
+    kind: 'Department',
+    leader: cleanMax(input.leader, 220) || 'Unassigned Department Leader',
+    location: cleanMax(input.location, 180) || 'Unassigned Location',
+    headcount: 0,
+    openRoles: Math.max(0, Math.floor(numberValue(input.openRoles))),
+    budgetNgn: Math.max(0, numberValue(input.budgetNgn)),
+    payrollNgn: 0,
+    spanOfControl: Math.max(0, numberValue(input.spanOfControl)),
+    successionCoveragePct: Math.max(0, Math.min(100, numberValue(input.successionCoveragePct, 0))),
+    attritionRiskPct: Math.max(0, Math.min(100, numberValue(input.attritionRiskPct, 0))),
+    healthStatus: validHealth(input.healthStatus),
+    costCenter: cleanMax(input.costCenter, 100) || code,
+    description: cleanMax(input.description, 500) || `System department ${name}.`,
+    childCount: 0,
+    descendantCount: 0,
+    parentName,
+    parentKind: parentName ? 'Company' : null,
+    parentChain: parentName ? [parentName] : [],
+    teamCount: 0,
+    teamHeadcount: 0,
+    teams: [],
+  });
+  return readSystemDepartmentsFromOrganizationDb();
+}
+
+export async function updateDepartmentInOrganizationDb(id: string, input: Record<string, unknown>): Promise<DepartmentPayload> {
+  const departments = await readPersistedDepartments();
+  const current = departments.find((department) => department.id === id || department.code.toLowerCase() === id.toLowerCase());
+  if (!current) throw new Error('Department not found.');
+  const parentName = cleanMax(input.parentName, 180);
+  const next: DepartmentRecord = {
+    ...current,
+    name: cleanMax(input.name, 180) || current.name,
+    leader: cleanMax(input.leader, 220) || current.leader,
+    location: cleanMax(input.location, 180) || current.location,
+    openRoles: Math.max(0, Math.floor(numberValue(input.openRoles, current.openRoles))),
+    budgetNgn: Math.max(0, numberValue(input.budgetNgn, current.budgetNgn)),
+    spanOfControl: Math.max(0, numberValue(input.spanOfControl, current.spanOfControl)),
+    successionCoveragePct: Math.max(0, Math.min(100, numberValue(input.successionCoveragePct, current.successionCoveragePct))),
+    attritionRiskPct: Math.max(0, Math.min(100, numberValue(input.attritionRiskPct, current.attritionRiskPct))),
+    healthStatus: validHealth(input.healthStatus || current.healthStatus),
+    costCenter: cleanMax(input.costCenter, 100) || current.costCenter,
+    description: cleanMax(input.description, 500) || current.description,
+    parentName: parentName || null,
+    parentKind: parentName ? 'Company' : null,
+    parentChain: parentName ? [parentName] : [],
+  };
+  await saveDepartment(next);
+  return readSystemDepartmentsFromOrganizationDb();
+}
+
+export async function deleteDepartmentFromOrganizationDb(id: string): Promise<DepartmentPayload> {
+  const departments = await readPersistedDepartments();
+  const current = departments.find((department) => department.id === id || department.code.toLowerCase() === id.toLowerCase());
+  if (!current) throw new Error('Department not found.');
+  if (current.headcount > 0) throw new Error('Departments with assigned employees cannot be deleted. Reassign employees first.');
+  const pool = await ensureDb();
+  await pool
+    .request()
+    .input('SourceSystem', sql.NVarChar(80), SOURCE_SYSTEM)
+    .input('SourceCode', sql.NVarChar(80), current.code)
+    .query(`DELETE FROM [hris].[OrganizationDepartments] WHERE [SourceSystem]=@SourceSystem AND [SourceCode]=@SourceCode`);
+  return readSystemDepartmentsFromOrganizationDb();
+}
+
+export async function refreshDepartmentsFromSystemEmployees(): Promise<DepartmentPayload> {
+  const employees = await readSystemEmployeeDepartmentRows();
+  const departments = buildDepartmentsFromSystemEmployees(employees);
+  await persistSystemDepartments(departments);
+  return readSystemDepartmentsFromOrganizationDb();
 }

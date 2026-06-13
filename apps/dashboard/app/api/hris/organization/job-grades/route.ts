@@ -7,9 +7,9 @@ type CreateJobGradePayload = {
   name?: string;
   family?: JobGradeRecord['family'];
   level?: JobGradeRecord['level'];
-  minSalaryUsd?: number;
-  midpointSalaryUsd?: number;
-  maxSalaryUsd?: number;
+  minSalaryNgn?: number;
+  midpointSalaryNgn?: number;
+  maxSalaryNgn?: number;
   employeeCount?: number;
   openPositions?: number;
   successionCoveragePct?: number;
@@ -47,9 +47,9 @@ const validate = (payload: CreateJobGradePayload, existing: JobGradeRecord[]) =>
   if (!isNonEmpty(payload.benchmarkPosition)) return 'Benchmark position is required.';
   if (!isNonEmpty(payload.description)) return 'Description is required.';
 
-  const minSalaryUsd = asNumber(payload.minSalaryUsd);
-  const midpointSalaryUsd = asNumber(payload.midpointSalaryUsd);
-  const maxSalaryUsd = asNumber(payload.maxSalaryUsd);
+  const minSalaryNgn = asNumber(payload.minSalaryNgn);
+  const midpointSalaryNgn = asNumber(payload.midpointSalaryNgn);
+  const maxSalaryNgn = asNumber(payload.maxSalaryNgn);
   const employeeCount = asInt(payload.employeeCount);
   const openPositions = asInt(payload.openPositions);
   const successionCoveragePct = asNumber(payload.successionCoveragePct);
@@ -58,12 +58,12 @@ const validate = (payload: CreateJobGradePayload, existing: JobGradeRecord[]) =>
   const averageTenureYears = asNumber(payload.averageTenureYears);
   const femaleRepresentationPct = asNumber(payload.femaleRepresentationPct);
 
-  if ([minSalaryUsd, midpointSalaryUsd, maxSalaryUsd, successionCoveragePct, attritionRiskPct, internalMobilityPct, averageTenureYears, femaleRepresentationPct].some(Number.isNaN)) {
+  if ([minSalaryNgn, midpointSalaryNgn, maxSalaryNgn, successionCoveragePct, attritionRiskPct, internalMobilityPct, averageTenureYears, femaleRepresentationPct].some(Number.isNaN)) {
     return 'Numeric grade fields must contain valid numbers.';
   }
   if ([employeeCount, openPositions].some(Number.isNaN)) return 'Employee count and open positions must be whole numbers.';
-  if (minSalaryUsd < 0 || midpointSalaryUsd < 0 || maxSalaryUsd < 0) return 'Salary values cannot be negative.';
-  if (!(minSalaryUsd <= midpointSalaryUsd && midpointSalaryUsd <= maxSalaryUsd)) return 'Salary band must follow min <= midpoint <= max.';
+  if (minSalaryNgn < 0 || midpointSalaryNgn < 0 || maxSalaryNgn < 0) return 'Salary values cannot be negative.';
+  if (!(minSalaryNgn <= midpointSalaryNgn && midpointSalaryNgn <= maxSalaryNgn)) return 'Salary band must follow min <= midpoint <= max.';
   if (employeeCount < 0 || openPositions < 0) return 'Employee count and open positions cannot be negative.';
   if (averageTenureYears < 0) return 'Average tenure cannot be negative.';
 
@@ -106,9 +106,9 @@ export async function POST(request: Request) {
     name: payload.name!.trim(),
     family: payload.family!,
     level: payload.level!,
-    minSalaryUsd: Number(payload.minSalaryUsd),
-    midpointSalaryUsd: Number(payload.midpointSalaryUsd),
-    maxSalaryUsd: Number(payload.maxSalaryUsd),
+    minSalaryNgn: Number(payload.minSalaryNgn),
+    midpointSalaryNgn: Number(payload.midpointSalaryNgn),
+    maxSalaryNgn: Number(payload.maxSalaryNgn),
     employeeCount: Number(payload.employeeCount),
     openPositions: Number(payload.openPositions),
     successionCoveragePct: Number(payload.successionCoveragePct),

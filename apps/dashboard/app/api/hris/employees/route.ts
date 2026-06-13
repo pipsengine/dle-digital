@@ -107,6 +107,36 @@ const storeOverrides = (() => {
 
 const nowIso = () => new Date().toISOString();
 
+const toDirectoryEmployee = (employee: any) => {
+  const {
+    employeeDbId,
+    payrollSource,
+    payrollGroup,
+    salaryGrade,
+    benefitGroup,
+    payCurrency,
+    paymentRun,
+    paymentType,
+    periodSalary,
+    annualSalary,
+    setupAssignedToPayroll,
+    sourceSystem,
+    sourceEmployeeId,
+    sourceDraftId,
+    sageEmployeeId,
+    sageEmployeeCode,
+    sageEntityCode,
+    sageCompanyCode,
+    sageCompanyName,
+    sageStatusCode,
+    sageStatusName,
+    aiRiskScore,
+    ...directoryEmployee
+  } = employee;
+
+  return directoryEmployee;
+};
+
 const nextSeq = () => {
   const g = globalThis as unknown as { __dleHrisEmployeeSeq?: number };
   if (!g.__dleHrisEmployeeSeq) g.__dleHrisEmployeeSeq = 1;
@@ -308,7 +338,7 @@ export async function GET() {
     return jsonOk({
       source: 'DLE_Enterprise HRIS',
       syncedAt: nowIso(),
-      employees,
+      employees: employees.map(toDirectoryEmployee),
     });
   } catch (error) {
     return jsonErr(502, error instanceof Error ? `Unable to read DLE_Enterprise HRIS employees: ${error.message}` : 'Unable to read DLE_Enterprise HRIS employees');

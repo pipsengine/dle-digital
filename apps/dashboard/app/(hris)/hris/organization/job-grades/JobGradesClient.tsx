@@ -44,7 +44,7 @@ type Payload = {
 
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const healthTone = (status: HealthStatus) => {
   if (status === 'Critical') return 'bg-red-50 text-red-700 border-red-200';
@@ -76,9 +76,9 @@ export default function JobGradesClient() {
     name: '',
     family: 'Professional',
     level: 'Mid',
-    minSalaryUsd: '0',
-    midpointSalaryUsd: '0',
-    maxSalaryUsd: '0',
+    minSalaryNgn: '0',
+    midpointSalaryNgn: '0',
+    maxSalaryNgn: '0',
     employeeCount: '0',
     openPositions: '0',
     successionCoveragePct: '70',
@@ -173,9 +173,9 @@ export default function JobGradesClient() {
         'Internal Mobility %',
         'Average Tenure Years',
         'Female Representation %',
-        'Min Salary USD',
-        'Midpoint Salary USD',
-        'Max Salary USD',
+        'Min Salary NGN',
+        'Midpoint Salary NGN',
+        'Max Salary NGN',
       ],
       ...visibleGrades.map((grade) => [
         grade.code,
@@ -190,9 +190,9 @@ export default function JobGradesClient() {
         String(grade.internalMobilityPct),
         String(grade.averageTenureYears),
         String(grade.femaleRepresentationPct),
-        String(grade.minSalaryUsd),
-        String(grade.midpointSalaryUsd),
-        String(grade.maxSalaryUsd),
+        String(grade.minSalaryNgn),
+        String(grade.midpointSalaryNgn),
+        String(grade.maxSalaryNgn),
       ]),
     ];
 
@@ -218,9 +218,9 @@ export default function JobGradesClient() {
       name: form.name,
       family: form.family as JobGradeRecord['family'],
       level: form.level as JobGradeRecord['level'],
-      minSalaryUsd: Number(form.minSalaryUsd),
-      midpointSalaryUsd: Number(form.midpointSalaryUsd),
-      maxSalaryUsd: Number(form.maxSalaryUsd),
+      minSalaryNgn: Number(form.minSalaryNgn),
+      midpointSalaryNgn: Number(form.midpointSalaryNgn),
+      maxSalaryNgn: Number(form.maxSalaryNgn),
       employeeCount: Number(form.employeeCount),
       openPositions: Number(form.openPositions),
       successionCoveragePct: Number(form.successionCoveragePct),
@@ -258,9 +258,9 @@ export default function JobGradesClient() {
         name: '',
         family: 'Professional',
         level: 'Mid',
-        minSalaryUsd: '0',
-        midpointSalaryUsd: '0',
-        maxSalaryUsd: '0',
+        minSalaryNgn: '0',
+        midpointSalaryNgn: '0',
+        maxSalaryNgn: '0',
         employeeCount: '0',
         openPositions: '0',
         successionCoveragePct: '70',
@@ -285,7 +285,7 @@ export default function JobGradesClient() {
   };
 
   const salarySpreadPct = selectedGrade
-    ? Math.round((((selectedGrade.maxSalaryUsd - selectedGrade.minSalaryUsd) / selectedGrade.midpointSalaryUsd) * 100) * 10) / 10
+    ? Math.round((((selectedGrade.maxSalaryNgn - selectedGrade.minSalaryNgn) / selectedGrade.midpointSalaryNgn) * 100) * 10) / 10
     : 0;
 
   return (
@@ -337,9 +337,9 @@ export default function JobGradesClient() {
               <Field label="Grade Name" value={form.name} onChange={(value) => setForm((prev) => ({ ...prev, name: value }))} placeholder="Senior Technical Lead" />
               <SelectField label="Family" value={form.family} onChange={(value) => setForm((prev) => ({ ...prev, family: value }))} options={['Executive', 'Management', 'Professional', 'Technical', 'Operations Support']} />
               <SelectField label="Level" value={form.level} onChange={(value) => setForm((prev) => ({ ...prev, level: value }))} options={['Strategic', 'Senior', 'Mid', 'Entry']} />
-              <Field label="Min Salary USD" type="number" value={form.minSalaryUsd} onChange={(value) => setForm((prev) => ({ ...prev, minSalaryUsd: value }))} />
-              <Field label="Midpoint Salary USD" type="number" value={form.midpointSalaryUsd} onChange={(value) => setForm((prev) => ({ ...prev, midpointSalaryUsd: value }))} />
-              <Field label="Max Salary USD" type="number" value={form.maxSalaryUsd} onChange={(value) => setForm((prev) => ({ ...prev, maxSalaryUsd: value }))} />
+              <Field label="Min Salary NGN" type="number" value={form.minSalaryNgn} onChange={(value) => setForm((prev) => ({ ...prev, minSalaryNgn: value }))} />
+              <Field label="Midpoint Salary NGN" type="number" value={form.midpointSalaryNgn} onChange={(value) => setForm((prev) => ({ ...prev, midpointSalaryNgn: value }))} />
+              <Field label="Max Salary NGN" type="number" value={form.maxSalaryNgn} onChange={(value) => setForm((prev) => ({ ...prev, maxSalaryNgn: value }))} />
               <Field label="Benchmark Position" value={form.benchmarkPosition} onChange={(value) => setForm((prev) => ({ ...prev, benchmarkPosition: value }))} placeholder="Senior Technical Lead" />
               <Field label="Employee Count" type="number" value={form.employeeCount} onChange={(value) => setForm((prev) => ({ ...prev, employeeCount: value }))} />
               <Field label="Open Positions" type="number" value={form.openPositions} onChange={(value) => setForm((prev) => ({ ...prev, openPositions: value }))} />
@@ -523,9 +523,9 @@ export default function JobGradesClient() {
                     <DetailStat label="Next Grade" value={selectedGrade.nextGradeCode || 'Top Grade'} />
                     <DetailStat label="Employees" value={formatNumber(selectedGrade.employeeCount)} />
                     <DetailStat label="Open Roles" value={formatNumber(selectedGrade.openPositions)} />
-                    <DetailStat label="Min Salary" value={formatCurrency(selectedGrade.minSalaryUsd)} />
-                    <DetailStat label="Midpoint" value={formatCurrency(selectedGrade.midpointSalaryUsd)} />
-                    <DetailStat label="Max Salary" value={formatCurrency(selectedGrade.maxSalaryUsd)} />
+                    <DetailStat label="Min Salary" value={formatCurrency(selectedGrade.minSalaryNgn)} />
+                    <DetailStat label="Midpoint" value={formatCurrency(selectedGrade.midpointSalaryNgn)} />
+                    <DetailStat label="Max Salary" value={formatCurrency(selectedGrade.maxSalaryNgn)} />
                     <DetailStat label="Salary Spread" value={`${salarySpreadPct}%`} />
                   </div>
 

@@ -30,8 +30,8 @@ type OrgNode = {
   location: string;
   headcount: number;
   openRoles: number;
-  budgetUsd: number;
-  payrollUsd: number;
+  budgetNgn: number;
+  payrollNgn: number;
   spanOfControl: number;
   successionCoveragePct: number;
   attritionRiskPct: number;
@@ -76,7 +76,7 @@ type Payload = {
 
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const kindOrder: NodeKind[] = ['Company', 'Division', 'Business Unit', 'Department', 'Team'];
 
@@ -211,8 +211,8 @@ export default function CompanyStructureClient() {
         'Health',
         'Headcount',
         'Open Roles',
-        'Budget USD',
-        'Payroll USD',
+        'Budget NGN',
+        'Payroll NGN',
         'Span Of Control',
         'Succession Coverage %',
         'Attrition Risk %',
@@ -227,8 +227,8 @@ export default function CompanyStructureClient() {
         node.healthStatus,
         String(node.headcount),
         String(node.openRoles),
-        String(node.budgetUsd),
-        String(node.payrollUsd),
+        String(node.budgetNgn),
+        String(node.payrollNgn),
         String(node.spanOfControl),
         String(node.successionCoveragePct),
         String(node.attritionRiskPct),
@@ -407,8 +407,8 @@ export default function CompanyStructureClient() {
                     <DetailStat label="Direct Children" value={formatNumber(selectedNode.childCount)} />
                     <DetailStat label="Headcount" value={formatNumber(selectedNode.headcount)} />
                     <DetailStat label="Open Roles" value={formatNumber(selectedNode.openRoles)} />
-                    <DetailStat label="Budget" value={formatCurrency(selectedNode.budgetUsd)} />
-                    <DetailStat label="Payroll" value={formatCurrency(selectedNode.payrollUsd)} />
+                    <DetailStat label="Budget" value={formatCurrency(selectedNode.budgetNgn)} />
+                    <DetailStat label="Payroll" value={formatCurrency(selectedNode.payrollNgn)} />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

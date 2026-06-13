@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readEmployeeContractsFromDb } from '@/lib/dle-enterprise-db';
 import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 
 type Role =
@@ -2487,7 +2488,7 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
       contractStartDate: dateOnly(row.contractStartDate),
       contractEndDate: dateOnly(row.contractEndDate),
       exitDate: row.status === 'Terminated' || row.status === 'Resigned' || row.status === 'Retired' ? dateOnly(row.modifiedAt) : null,
-      exitReason: row.status === 'Terminated' ? 'Sage payroll terminated status' : null,
+      exitReason: row.status === 'Terminated' ? 'System status marked terminated' : null,
       rehireEligibility: null,
       workLocation: valueOrNull(row.workLocation || row.location),
       workMode: row.remoteWorker ? 'Remote' : 'Onsite',
@@ -2502,13 +2503,24 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
       jobGrade: valueOrNull(row.jobGrade),
       department: valueOrNull(row.department),
       division: valueOrNull(row.division),
+      unit: valueOrNull(row.projectSite || row.division),
       businessUnit: valueOrNull(row.businessUnit),
       costCenter: valueOrNull(row.costCenter),
+      location: valueOrNull(row.location || row.workLocation),
+      officeSite: valueOrNull(row.officeLocation || row.location || row.workLocation),
       projectSite: valueOrNull(row.projectSite),
+      currentProject: valueOrNull(row.projectSite),
+      projectName: valueOrNull(row.projectSite),
+      siteLocation: valueOrNull(row.location || row.workLocation),
       reportingManager: valueOrNull(row.managerName),
       functionalManager: valueOrNull(row.functionalManager),
       departmentHead: valueOrNull(row.departmentHead),
       hrBusinessPartner: valueOrNull(row.hrBusinessPartner),
+      assignmentType: valueOrNull(row.employmentType) || 'Permanent Assignment',
+      assignmentStatus: valueOrNull(row.status),
+      assignmentEffectiveDate: dateOnly(row.dateJoined),
+      assignmentStartDate: dateOnly(row.dateJoined),
+      assignmentEndDate: dateOnly(row.contractEndDate),
       roleProfile: valueOrNull(row.staffCategory || row.employeeCategory),
       jobDescription: valueOrNull(row.jobTitle) ? `Role imported from ${row.sourceSystem || 'DLE_Enterprise HRIS'}.` : null,
       keyResponsibilities: null,
@@ -2593,8 +2605,6 @@ const ensureRecordFromDb = async (employeeId: string) => {
   const rows = await readEmployeeDirectoryFromDb().catch(() => null);
   const found = rows?.find((row) => row.employeeCode.toLowerCase() === employeeId.toLowerCase() || row.employeeId.toLowerCase() === employeeId.toLowerCase());
   if (!found) return ensureRecord(employeeId);
-  const existing = store.get(found.employeeCode);
-  if (existing) return applyOverrides(found.employeeCode, stripSeededProfilePageData(found.employeeCode, existing));
   const record = applyOverrides(found.employeeCode, buildDbProfileRecord(found));
   store.set(found.employeeCode, record);
   return record;
@@ -4238,7 +4248,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string;
     const contracts = g.__dleHrisContracts;
     const byEmployee = g.__dleHrisContractsByEmployee;
     const ids = byEmployee?.get(employeeId) || [];
-    const rows = ids
+    const memoryRows = ids
       .map((id) => contracts?.get(id))
       .filter(Boolean)
       .map((c: any) => {
@@ -4261,8 +4271,34 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string;
           createdAt: String(c.createdAt || ''),
           updatedAt: String(c.updatedAt || ''),
         };
-      })
-      .slice(0, 250);
+      });
+    const dbRows = ((await readEmployeeContractsFromDb(employeeId)) || []).map((c: any) => {
+      const approvals = Array.isArray(c.approvals) ? c.approvals : [];
+      const lastApproved = approvals.find((a: any) => a && a.decision === 'Approved') || null;
+      return {
+        id: String(c.id || ''),
+        employeeId: String(c.employeeId || employeeId),
+        employeeName: String(c.employeeName || rec.profile.fullName),
+        contractReferenceNo: String(c.contractReferenceNo || ''),
+        contractType: String(c.contractType || ''),
+        startDate: String(c.startDate || ''),
+        endDate: c.endDate ? String(c.endDate) : null,
+        contractStatus: String(c.contractStatus || ''),
+        renewalStatus: String(c.renewalStatus || ''),
+        approvalStatus: String(c.approvalStatus || ''),
+        documentStatus: String(c.documentStatus || ''),
+        createdBy: String(c.createdBy || ''),
+        approvedBy: lastApproved ? String(lastApproved.by || '') : null,
+        createdAt: String(c.createdAt || ''),
+        updatedAt: String(c.updatedAt || ''),
+      };
+    });
+    const seen = new Set<string>();
+    const rows = [...memoryRows, ...dbRows].filter((row) => {
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    }).slice(0, 250);
     rec.audit.unshift(auditEntry('Contract viewed', role));
     return jsonOk(rows);
   }
@@ -4353,7 +4389,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (!perms.canViewProfile) return jsonErr(403, 'Permission denied');
   if (!perms.canEdit && resource[0] !== 'status') return jsonErr(403, 'Permission denied');
 
-  const rec = ensureRecord(employeeId);
+  const rec = await ensureRecordFromDb(employeeId);
   const { root, rest } = getResource(resource);
   const body = (await request.json().catch(() => null)) as any;
   if (!body) return jsonErr(400, 'Invalid JSON body');
@@ -5245,7 +5281,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   const perms = rolePermissions(role, employeeId, viewerEmployeeId);
   if (!perms.canViewProfile) return jsonErr(403, 'Permission denied');
 
-  const rec = ensureRecord(employeeId);
+  const rec = await ensureRecordFromDb(employeeId);
   const { root, rest } = getResource(resource);
   const body = (await request.json().catch(() => null)) as any;
   if (!body) return jsonErr(400, 'Invalid JSON body');
@@ -6526,7 +6562,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   if (!perms.canViewProfile) return jsonErr(403, 'Permission denied');
   if (!perms.canEdit) return jsonErr(403, 'Permission denied');
 
-  const rec = ensureRecord(employeeId);
+  const rec = await ensureRecordFromDb(employeeId);
   const { root, rest } = getResource(resource);
   const canOverride = role === 'Super Admin' || role === 'HR Director';
 

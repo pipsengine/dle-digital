@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 
 type Role =
   | 'Super Admin'
@@ -27,6 +28,10 @@ type AssignmentInsight = {
 const jsonOk = <T,>(data: T) => NextResponse.json({ status: 'success', data });
 const jsonErr = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 
+const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const uniqueSorted = (values: Array<string | null | undefined>) =>
+  Array.from(new Set(values.map(clean).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
 const getRole = (request: Request): Role => {
   const v = request.headers.get('x-hris-role');
   const all: Role[] = [
@@ -48,79 +53,58 @@ const getRole = (request: Request): Role => {
 
 const stores = () => {
   const g = globalThis as unknown as {
-    __dleHrisEmployees?: Map<string, any>;
     __dleHrisAssignmentRequests?: Map<string, any>;
-    __dleHrisAssignmentRequestsByEmployee?: Map<string, string[]>;
   };
-  if (!g.__dleHrisEmployees) g.__dleHrisEmployees = new Map();
   if (!g.__dleHrisAssignmentRequests) g.__dleHrisAssignmentRequests = new Map();
-  if (!g.__dleHrisAssignmentRequestsByEmployee) g.__dleHrisAssignmentRequestsByEmployee = new Map();
-  return { employees: g.__dleHrisEmployees, requests: g.__dleHrisAssignmentRequests, index: g.__dleHrisAssignmentRequestsByEmployee };
+  return { requests: g.__dleHrisAssignmentRequests };
 };
 
-const formOptions = () => ({
-  departments: ['Civil Engineering', 'Mechanical Engineering', 'Electrical & Instrumentation', 'Project Controls', 'HSE', 'Quality Assurance', 'Procurement', 'Finance', 'Human Capital', 'IT & Support', 'Legal & Compliance', 'Executive Office'],
-  businessUnits: ['Operations', 'Corporate Services', 'Projects', 'Commercial'],
-  divisions: ['Engineering', 'Operations', 'Corporate Services', 'Projects', 'Commercial'],
-  units: ['Projects West', 'Projects East', 'Maintenance', 'Construction', 'HSE & Compliance', 'Finance Ops', 'HR Ops', 'IT Service Desk', 'Procurement Ops'],
-  teams: ['Team A', 'Team B', 'Team C', 'Field Ops', 'Back Office', 'Planning', 'Scheduling', 'Site Support'],
-  costCenters: ['CC-ENG-001', 'CC-OPS-004', 'CC-HR-002', 'CC-FIN-003', 'CC-IT-005', 'CC-PRJ-006'],
-  locations: ['Lagos HQ', 'Port Harcourt', 'Warri Yard', 'Bonny Island', 'Remote'],
-  officeSites: ['HQ-01', 'HQ-02', 'PH-01', 'WR-01'],
-  projects: [
-    { name: 'Lekki Project', code: 'PRJ-LEK-001', location: 'Lagos', client: 'Client A' },
-    { name: 'NLNG Train 7', code: 'PRJ-NLNG-007', location: 'Bonny Island', client: 'NLNG' },
-    { name: 'Onshore Pipeline', code: 'PRJ-PL-003', location: 'Rivers', client: 'Client B' },
-    { name: 'Bridgeworks', code: 'PRJ-BR-002', location: 'Abuja', client: 'Client C' },
-  ],
-  projectSites: ['Site A', 'Site B', 'Site C', 'Yard West', 'Yard East'],
-  assignmentTypes: [
-    'Permanent Assignment',
-    'Temporary Assignment',
-    'Acting Assignment',
-    'Secondment',
-    'Project Assignment',
-    'Cross-Functional Assignment',
-    'Field Assignment',
-    'Remote Assignment',
-  ],
-  assignmentStatuses: ['Active', 'Pending Approval', 'Scheduled', 'Expired', 'Completed', 'Cancelled', 'Suspended'],
-  mobilizationStatuses: ['Not Assigned', 'Assigned', 'Mobilized', 'On Site', 'Temporarily Off Site', 'Demobilized', 'Completed', 'Cancelled'],
-  hseInductionStatuses: ['Not Started', 'Pending', 'Completed', 'Expired'],
+const readAssignmentEmployees = async () => (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+
+const assignmentTypes = [
+  'Permanent Assignment',
+  'Temporary Assignment',
+  'Acting Assignment',
+  'Secondment',
+  'Project Assignment',
+  'Cross-Functional Assignment',
+  'Field Assignment',
+  'Remote Assignment',
+];
+
+const formOptions = (employees: DleEmployeeDirectoryRow[]) => ({
+  departments: uniqueSorted(employees.map((employee) => employee.department)),
+  businessUnits: uniqueSorted(employees.map((employee) => employee.businessUnit)),
+  divisions: uniqueSorted(employees.map((employee) => employee.division)),
+  units: uniqueSorted(employees.map((employee) => employee.projectSite)),
+  teams: [],
+  costCenters: uniqueSorted(employees.map((employee) => employee.costCenter)),
+  locations: uniqueSorted(employees.flatMap((employee) => [employee.location, employee.workLocation])),
+  officeSites: uniqueSorted(employees.map((employee) => employee.officeLocation)),
+  projects: uniqueSorted(employees.map((employee) => employee.projectSite)).map((name) => ({ name, code: name, location: '', client: '' })),
+  projectSites: uniqueSorted(employees.map((employee) => employee.projectSite)),
+  assignmentTypes,
+  assignmentStatuses: uniqueSorted(employees.map((employee) => employee.status)),
+  mobilizationStatuses: [],
+  hseInductionStatuses: [],
 });
 
-const listEmployees = () => {
-  const s = stores();
-  const ids = Array.from(s.employees.keys()).slice(0, 200);
-  const fallback = Array.from({ length: 50 }).map((_, i) => `DLE-EMP-${String(i + 1).padStart(5, '0')}`);
-  const list = (ids.length ? ids : fallback).slice(0, 120);
-  return list.map((employeeId, idx) => ({
-    employeeId,
-    fullName: `Employee ${String(idx + 1).padStart(2, '0')}`,
-    currentDepartment: idx % 2 === 0 ? 'Projects' : 'Corporate Services',
-    currentUnit: idx % 3 === 0 ? 'Construction' : 'Maintenance',
-    currentManager: idx % 4 === 0 ? 'Department Head' : 'Line Manager',
-    location: idx % 2 === 0 ? 'Lagos HQ' : 'Port Harcourt',
-    employmentStatus: idx % 9 === 0 ? 'Suspended' : 'Active',
+const listEmployees = (employees: DleEmployeeDirectoryRow[]) =>
+  employees.map((employee) => ({
+    employeeId: employee.employeeCode,
+    fullName: employee.fullName,
+    currentDepartment: clean(employee.department) || 'Unassigned Department',
+    currentUnit: clean(employee.projectSite) || clean(employee.division) || '',
+    currentManager: clean(employee.managerName) || 'Unassigned',
+    location: clean(employee.location) || clean(employee.workLocation) || 'Unassigned Location',
+    employmentStatus: clean(employee.status) || 'Unknown',
   }));
-};
 
 const buildPdfBytes = (title: string, lines: string[]) => {
   const escapePdf = (s: string) => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-  const clean = (s: string) => escapePdf(s.replace(/\r?\n/g, ' ').slice(0, 170));
-  const fontSize = 10;
-  const lineHeight = 12;
-  const startY = 760;
-  const x = 40;
+  const cleanPdf = (s: string) => escapePdf(s.replace(/\r?\n/g, ' ').slice(0, 170));
   const all = [title, ...lines].slice(0, 55);
-  const streamParts: string[] = [];
-  streamParts.push(`BT /F1 ${fontSize} Tf ${x} ${startY} Td`);
-  for (let i = 0; i < all.length; i++) {
-    streamParts.push(`(${clean(all[i] || '')}) Tj`);
-    if (i !== all.length - 1) streamParts.push(`0 -${lineHeight} Td`);
-  }
-  streamParts.push('ET');
-  const stream = streamParts.join('\n');
+  const stream = [`BT /F1 10 Tf 40 760 Td`, ...all.flatMap((line, index) => [`(${cleanPdf(line || '')}) Tj`, index === all.length - 1 ? '' : '0 -12 Td']).filter(Boolean), 'ET'].join('\n');
 
   const encoder = new TextEncoder();
   const xref: number[] = [0];
@@ -133,14 +117,37 @@ const buildPdfBytes = (title: string, lines: string[]) => {
   pushObj('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
   pushObj('3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n');
   pushObj('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
-  const streamBytes = encoder.encode(stream);
-  pushObj(`5 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n${stream}\nendstream\nendobj\n`);
+  pushObj(`5 0 obj\n<< /Length ${encoder.encode(stream).length} >>\nstream\n${stream}\nendstream\nendobj\n`);
   const startXref = out.length;
   out += `xref\n0 ${xref.length}\n0000000000 65535 f \n`;
   for (let i = 1; i < xref.length; i++) out += `${String(xref[i]).padStart(10, '0')} 00000 n \n`;
   out += `trailer\n<< /Size ${xref.length} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
   return encoder.encode(out);
 };
+
+const exportRows = (employees: DleEmployeeDirectoryRow[], employeeId: string) =>
+  employees
+    .filter((employee) => (employeeId ? employee.employeeCode.toLowerCase() === employeeId.toLowerCase() : true))
+    .map((employee) => [
+      employee.employeeCode,
+      employee.fullName,
+      clean(employee.department),
+      clean(employee.division),
+      clean(employee.projectSite),
+      '',
+      clean(employee.businessUnit),
+      clean(employee.costCenter),
+      clean(employee.location) || clean(employee.workLocation),
+      clean(employee.officeLocation),
+      clean(employee.projectSite),
+      clean(employee.projectSite),
+      clean(employee.managerName),
+      clean(employee.functionalManager),
+      clean(employee.employmentType),
+      clean(employee.status),
+      employee.dateJoined || '',
+      employee.contractEndDate || '',
+    ]);
 
 export async function GET(request: Request, ctx: { params: Promise<{ action: string[] }> }) {
   const { action } = await ctx.params;
@@ -149,22 +156,22 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   const url = new URL(request.url);
 
   if (seg0 === 'form-options') {
+    const employees = await readAssignmentEmployees();
     const includeEmployees = url.searchParams.get('includeEmployees') === '1';
-    return jsonOk({ ...formOptions(), employees: includeEmployees ? listEmployees() : [] });
+    return jsonOk({ ...formOptions(employees), employees: includeEmployees ? listEmployees(employees) : [] });
   }
 
   if (seg0 === 'summary') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
-    const s = stores();
-    const totalEmployees = Math.max(50, s.employees.size);
-    const pendingRequests = Math.max(6, s.requests.size ? Math.floor(s.requests.size / 3) : 8);
+    const employees = await readAssignmentEmployees();
+    const activeRequests = Array.from(stores().requests.values()).filter((item: any) => !['Approved', 'Cancelled', 'Completed'].includes(String(item?.status || '')));
     return jsonOk({
-      totalEmployees,
-      pendingRequests,
-      overstaffedDepartments: 3,
-      understaffedUnits: 2,
-      costCenterMismatchFlags: 5,
-      projectAssignmentGaps: 7,
+      totalEmployees: employees.length,
+      pendingRequests: activeRequests.length,
+      overstaffedDepartments: 0,
+      understaffedUnits: employees.filter((employee) => !clean(employee.department)).length,
+      costCenterMismatchFlags: employees.filter((employee) => !clean(employee.costCenter)).length,
+      projectAssignmentGaps: employees.filter((employee) => !clean(employee.projectSite)).length,
       lastUpdatedAt: new Date().toISOString(),
     });
   }
@@ -172,16 +179,21 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   if (seg0 === 'ai-insights') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
     const employeeId = url.searchParams.get('employeeId');
+    const employees = await readAssignmentEmployees();
+    const employee = employeeId ? employees.find((item) => item.employeeCode.toLowerCase() === employeeId.toLowerCase()) : null;
     const out: AssignmentInsight[] = [];
-    const add = (severity: 'high' | 'medium' | 'low', title: string, confidence: number, recommendation: string, actionLabel: string, actionKey: string) =>
-      out.push({ id: `asg-ai-${employeeId || 'org'}-${Math.random().toString(16).slice(2)}`, severity, confidence, title, recommendation, actionLabel, action: actionKey });
+    const add = (severity: AssignmentInsight['severity'], title: string, confidence: number, recommendation: string, actionLabel: string, action: string) =>
+      out.push({ id: `asg-ai-${employeeId || 'org'}-${out.length + 1}`, severity, confidence, title, recommendation, actionLabel, action });
 
-    add('medium', 'Current department is above approved headcount by 8%', 0.73, 'Review headcount cap and consider reassignment or approved hiring exceptions.', 'Open Headcount', 'open_headcount');
-    add('high', '7 employees have no assigned unit/team', 0.82, 'Assign unit/team to improve approval routing and operational reporting.', 'Open Records', 'open_missing_unit');
-    add('medium', '5 cost-center mismatches detected vs department mapping', 0.78, 'Run payroll reconciliation and submit cost center correction requests.', 'Review Cost Centers', 'open_cost_center');
-    add('low', 'Project assignments expiring in next 30 days', 0.66, 'Prepare demobilization or next assignment to prevent expired active placements.', 'Review Projects', 'open_projects');
-
-    if (employeeId) add('medium', 'Department transfer requires HR Director approval', 0.7, 'Submit transfer request and ensure required stage approvals are completed before applying changes.', 'Open Workflow', 'open_workflow');
+    const missingUnit = employees.filter((item) => !clean(item.projectSite) && !clean(item.division)).length;
+    const missingCostCenter = employees.filter((item) => !clean(item.costCenter)).length;
+    const missingManager = employees.filter((item) => !clean(item.managerName)).length;
+    if (missingUnit) add('high', `${missingUnit} employees have no unit or project site`, 0.82, 'Complete unit or site assignment so approval routing and operational reporting stay accurate.', 'Review Records', 'open_missing_unit');
+    if (missingCostCenter) add('medium', `${missingCostCenter} employees have no cost center`, 0.78, 'Review payroll mappings and submit controlled cost center corrections where required.', 'Review Cost Centers', 'open_cost_center');
+    if (missingManager) add('medium', `${missingManager} employees have no reporting manager`, 0.76, 'Assign reporting managers before department or unit changes are approved.', 'Review Managers', 'open_managers');
+    if (employee && !clean(employee.department)) add('high', 'Employee department is unassigned', 0.86, 'Submit a department assignment request with an effective date and approver rationale.', 'Open Workflow', 'open_workflow');
+    if (employee && !clean(employee.managerName)) add('medium', 'Employee reporting manager is unassigned', 0.8, 'Assign a reporting manager as part of the change request.', 'Open Workflow', 'open_workflow');
+    if (!out.length) add('low', 'Assignment data is complete for current checks', 0.64, 'No department, manager, cost center, or project-site gaps were found in the current directory extract.', 'View Assignment', 'open_assignment');
     return jsonOk(out.slice(0, 12));
   }
 
@@ -191,50 +203,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
     const employeeId = url.searchParams.get('employeeId') || '';
     const stamp = new Date().toISOString().slice(0, 10);
     const fileBase = employeeId ? `assignment_${employeeId}_${stamp}` : `assignment_report_${stamp}`;
-
-    const header = [
-      'Employee ID',
-      'Employee Name',
-      'Department',
-      'Division',
-      'Unit',
-      'Team',
-      'Business Unit',
-      'Cost Center',
-      'Location',
-      'Office Site',
-      'Project',
-      'Project Site',
-      'Reporting Manager',
-      'Functional Manager',
-      'Assignment Type',
-      'Assignment Status',
-      'Effective Date',
-      'End Date',
-    ];
-    const employees = listEmployees().slice(0, 80);
-    const rows = employees
-      .filter((e) => (employeeId ? e.employeeId === employeeId : true))
-      .map((e, idx) => [
-        e.employeeId,
-        e.fullName,
-        idx % 2 === 0 ? 'Projects' : 'Corporate Services',
-        idx % 2 === 0 ? 'Projects' : 'Corporate Services',
-        idx % 3 === 0 ? 'Construction' : 'Maintenance',
-        idx % 4 === 0 ? 'Field Ops' : 'Back Office',
-        idx % 2 === 0 ? 'Operations' : 'Corporate Services',
-        idx % 2 === 0 ? 'CC-PRJ-006' : 'CC-HR-002',
-        e.location,
-        idx % 2 === 0 ? 'HQ-01' : 'PH-01',
-        idx % 2 === 0 ? 'NLNG Train 7' : 'Lekki Project',
-        idx % 2 === 0 ? 'Site A' : 'Site B',
-        e.currentManager,
-        idx % 3 === 0 ? 'Functional Manager' : '—',
-        idx % 2 === 0 ? 'Permanent Assignment' : 'Project Assignment',
-        'Active',
-        '2026-01-15',
-        '',
-      ]);
+    const header = ['Employee ID', 'Employee Name', 'Department', 'Division', 'Unit', 'Team', 'Business Unit', 'Cost Center', 'Location', 'Office Site', 'Project', 'Project Site', 'Reporting Manager', 'Functional Manager', 'Assignment Type', 'Assignment Status', 'Effective Date', 'End Date'];
+    const rows = exportRows((await readAssignmentEmployees()).slice(0, 500), employeeId);
 
     const csvCell = (v: string) => {
       const s = (v ?? '').replace(/\r?\n/g, ' ').trim();
@@ -242,12 +212,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
       return s;
     };
     if (format === 'xls' || format === 'excel') {
-      const html = `<!doctype html><html><head><meta charset="utf-8"/></head><body>
-        <table border="1">
-          <tr>${header.map((h) => `<th>${h}</th>`).join('')}</tr>
-          ${rows.map((r) => `<tr>${r.map((c) => `<td>${String(c ?? '')}</td>`).join('')}</tr>`).join('')}
-        </table>
-      </body></html>`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"/></head><body><table border="1"><tr>${header.map((h) => `<th>${h}</th>`).join('')}</tr>${rows.map((r) => `<tr>${r.map((c) => `<td>${String(c ?? '')}</td>`).join('')}</tr>`).join('')}</table></body></html>`;
       return new NextResponse(html, {
         headers: {
           'content-type': 'application/vnd.ms-excel;charset=utf-8',
@@ -256,15 +221,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
       });
     }
     if (format === 'pdf') {
-      const lines: string[] = [];
-      lines.push(employeeId ? `Employee: ${employeeId}` : 'Assignment Report');
-      lines.push(`Generated: ${new Date().toISOString()}`);
-      lines.push('');
-      lines.push(`Records: ${rows.length}`);
-      lines.push('');
-      for (const r of rows.slice(0, 28)) lines.push(`${r[0]} • ${r[1]} • ${r[2]} • ${r[4]} • ${r[7]} • ${r[8]}`);
-      const bytes = buildPdfBytes('DLE HRIS — Assignment Report', lines);
-      return new NextResponse(bytes, {
+      const lines = [employeeId ? `Employee: ${employeeId}` : 'Assignment Report', `Generated: ${new Date().toISOString()}`, '', `Records: ${rows.length}`, '', ...rows.slice(0, 28).map((r) => `${r[0]} | ${r[1]} | ${r[2]} | ${r[4]} | ${r[7]} | ${r[8]}`)];
+      return new NextResponse(buildPdfBytes('DLE HRIS - Assignment Report', lines), {
         headers: {
           'content-type': 'application/pdf',
           'content-disposition': `attachment; filename="${fileBase}.pdf"`,
@@ -282,4 +240,3 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
 
   return jsonErr(404, 'Not found');
 }
-

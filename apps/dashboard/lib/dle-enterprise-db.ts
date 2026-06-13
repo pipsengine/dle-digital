@@ -91,6 +91,56 @@ export type DleEmployeeDirectoryRow = {
   trainingCompliance: 'Compliant' | 'Overdue' | 'At Risk';
 };
 
+export type DleContractDocumentRow = {
+  id: string;
+  category: string;
+  name: string;
+  version: number;
+  mimeType: string;
+  sizeBytes: number;
+  signatureStatus: 'Missing' | 'Unsigned' | 'Signed';
+  legalReviewStatus: 'Not Required' | 'Pending' | 'Approved' | 'Rejected';
+  expiryDate: string | null;
+  status: 'Active' | 'Archived';
+  uploadedAt: string;
+  uploadedBy: string;
+};
+
+export type DleEmployeeContractRow = {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  contractReferenceNo: string;
+  contractType: string;
+  contractCategory: string;
+  contractStatus: string;
+  workflowStatus: string;
+  startDate: string;
+  endDate: string | null;
+  probationApplicable: boolean;
+  probationStartDate: string | null;
+  probationEndDate: string | null;
+  confirmationDueDate: string | null;
+  department: string | null;
+  jobTitle: string | null;
+  jobGrade: string | null;
+  workLocation: string | null;
+  reportingManager: string | null;
+  hrOfficer: string | null;
+  renewalStatus: string;
+  approvalStatus: 'Not Started' | 'In Progress' | 'Approved' | 'Rejected';
+  documentStatus: 'Missing' | 'Partial' | 'Complete';
+  lastAmendmentAt: string | null;
+  terms: Record<string, unknown>;
+  documents: DleContractDocumentRow[];
+  approvals: any[];
+  audit: any[];
+  createdBy: string;
+  createdAt: string;
+  updatedBy: string;
+  updatedAt: string;
+};
+
 export type SagePayrollEmployeeImportRow = {
   employeeId: number;
   employeeCode: string;
@@ -569,8 +619,6 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       v.preferred_name,
       v.employment_status,
       v.employment_type,
-      sourceRecord.source_system,
-      sourceRecord.source_employee_id,
       pinfo.title,
       pinfo.first_name,
       pinfo.middle_name,
@@ -617,15 +665,6 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       emp.shift_pattern,
       emp.contract_end_date,
       emp.expatriate_status,
-      payroll.payroll_group,
-      payroll.salary_grade,
-      payroll.benefit_group,
-      payroll.pay_currency,
-      payroll.payment_run,
-      payroll.payment_type,
-      payroll.period_salary,
-      payroll.annual_salary,
-      payroll.setup_assigned_to_payroll,
       ec.emergency_contact_count,
       doc.document_count
     FROM [hris].[EmployeeMasterView] v
@@ -633,15 +672,6 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
     LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeeContactInfo] contact ON contact.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = v.employee_id
-    LEFT JOIN [hris].[EmployeePayrollSetup] payroll ON payroll.employee_id = v.employee_id
-    OUTER APPLY (
-      SELECT TOP (1)
-        src.source_system,
-        src.source_employee_id
-      FROM [hris].[EmployeeSourceRecords] src
-      WHERE src.employee_id = v.employee_id
-      ORDER BY src.imported_at DESC, src.employee_source_record_id DESC
-    ) sourceRecord
     OUTER APPLY (
       SELECT COUNT_BIG(*) AS emergency_contact_count
       FROM [hris].[EmployeeEmergencyContacts] c
@@ -732,24 +762,247 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       emergencyContactCount,
       documentCount,
       hasManagerAssigned: Boolean(str(row.reporting_manager)),
-      payrollSource: str(row.payroll_group) || 'DLE_Enterprise',
-      payrollGroup: str(row.payroll_group),
-      salaryGrade: str(row.salary_grade),
-      benefitGroup: str(row.benefit_group),
-      payCurrency: str(row.pay_currency),
-      paymentRun: str(row.payment_run),
-      paymentType: str(row.payment_type),
-      periodSalary: numOrNull(row.period_salary),
-      annualSalary: numOrNull(row.annual_salary),
-      setupAssignedToPayroll: Boolean(row.setup_assigned_to_payroll),
-      sourceSystem: str(row.source_system) || 'DLE_Enterprise',
-      sourceEmployeeId: str(row.source_employee_id),
+      payrollSource: '',
+      payrollGroup: '',
+      salaryGrade: '',
+      benefitGroup: '',
+      payCurrency: '',
+      paymentRun: '',
+      paymentType: '',
+      periodSalary: null,
+      annualSalary: null,
+      setupAssignedToPayroll: false,
+      sourceSystem: 'DLE_Enterprise HRIS',
+      sourceEmployeeId: '',
       createdAt: isoDateTime(row.created_at),
       modifiedAt: isoDateTime(row.modified_at),
       aiRiskScore,
       trainingCompliance: aiRiskScore >= 70 ? 'Overdue' : aiRiskScore >= 40 ? 'At Risk' : 'Compliant',
     };
   });
+};
+
+const contractTypeFromEmployment = (employmentType: string, jobTitle: string, staffCategory: string) => {
+  const v = `${employmentType} ${jobTitle} ${staffCategory}`.toLowerCase();
+  if (v.includes('nysc')) return 'NYSC Placement';
+  if (v.includes('industrial')) return 'Industrial Training';
+  if (v.includes('consult')) return 'Consultancy Contract';
+  if (v.includes('outsourced')) return 'Outsourced Staff Contract';
+  if (v.includes('expatriate')) return 'Expatriate Contract';
+  if (v.includes('daily') || v.includes('lumpsum') || v.includes('contract')) return 'Project-Based Contract';
+  if (v.includes('temporary') || v.includes('intern')) return 'Temporary Contract';
+  return 'Permanent Employment';
+};
+
+const contractStatusFromDates = (endDate: string | null, employmentStatus: string) => {
+  const s = employmentStatus.toLowerCase();
+  if (s.includes('terminated') || s.includes('resigned') || s.includes('retired')) return 'Terminated';
+  if (!endDate) return 'Active';
+  const endMs = new Date(`${endDate}T00:00:00.000Z`).getTime();
+  if (!Number.isFinite(endMs)) return 'Active';
+  const days = Math.ceil((endMs - Date.now()) / (24 * 3600 * 1000));
+  if (days < 0) return 'Expired';
+  if (days <= 30) return 'Due for Renewal';
+  return 'Active';
+};
+
+const contractDocumentCategory = (category: string, fileName: string) => {
+  const v = `${category} ${fileName}`.toLowerCase();
+  if (v.includes('renewal')) return 'Renewal Letter';
+  if (v.includes('amend')) return 'Amendment Letter';
+  if (v.includes('offer')) return 'Offer Letter';
+  if (v.includes('accept') || v.includes('signed')) return 'Signed Acceptance Copy';
+  if (v.includes('legal')) return 'Legal Review Document';
+  if (v.includes('termination')) return 'Termination Letter';
+  return 'Employment Contract';
+};
+
+const contractDocumentStatus = (docs: DleContractDocumentRow[]): DleEmployeeContractRow['documentStatus'] => {
+  if (docs.length === 0) return 'Missing';
+  const hasContract = docs.some((d) => d.status === 'Active' && d.category === 'Employment Contract');
+  const hasSigned = docs.some((d) => d.status === 'Active' && (d.signatureStatus === 'Signed' || d.category === 'Signed Acceptance Copy'));
+  return hasContract && hasSigned ? 'Complete' : 'Partial';
+};
+
+const defaultContractTerms = (row: any, durationMonths: number | null) => ({
+  durationMonths,
+  workingHours: str(row.shift_pattern) ? `${str(row.shift_pattern)} shift` : null,
+  workMode: str(row.work_mode) || 'Onsite',
+  noticePeriodDays: null,
+  renewalClause: row.contract_end_date ? 'Renewal subject to HR approval, business need, and documented performance review.' : null,
+  terminationClause: 'Termination subject to DLE policy, statutory requirements, and approved exit workflow.',
+  confidentialityClause: 'Employee must protect DLE confidential information, project records, client data, and operational documents.',
+  nonCompeteClause: null,
+  probationClause: row.probation_end_date ? 'Probation applies until the recorded probation end date.' : null,
+  benefitsEligibility: str(row.employee_category) || str(row.staff_category) || null,
+  leaveEligibility: 'Based on employment category and HR policy.',
+  medicalEligibility: 'Based on employment category and HR policy.',
+  pensionEligibility: contractTypeFromEmployment(str(row.employment_type), str(row.job_title), str(row.staff_category)) === 'Permanent Employment' ? 'Eligible subject to statutory rules' : 'Subject to contract terms',
+  allowancesEligibility: 'Subject to contract terms and approved assignment.',
+  overtimeEligibility: 'Subject to role, shift, and line-manager approval.',
+  projectAssignmentClause: str(row.project_site) ? `Assigned to ${str(row.project_site)} unless reassigned through HR workflow.` : null,
+  hseComplianceRequirement: 'Must comply with DLE HSE rules, site induction, PPE, and mandatory training.',
+  travelRequirement: str(row.work_location) || str(row.office_location) || null,
+});
+
+export const readEmployeeContractsFromDb = async (employeeCode?: string): Promise<DleEmployeeContractRow[] | null> => {
+  const p = await pool();
+  if (!p) return null;
+  const req = p.request().input('employee_code', sql.NVarChar(50), employeeCode ? employeeCode.trim().toUpperCase() : null);
+  const rs = await req.query(`
+    SELECT
+      v.employee_id,
+      v.employee_code,
+      v.full_name,
+      v.employment_status,
+      v.employment_type,
+      v.date_joined,
+      v.work_mode,
+      v.work_location,
+      v.job_title,
+      v.job_grade,
+      v.department,
+      v.project_site,
+      v.reporting_manager,
+      v.created_at,
+      v.modified_at,
+      j.office_location,
+      j.hr_business_partner,
+      emp.staff_category,
+      emp.employee_category,
+      emp.probation_start_date,
+      emp.probation_end_date,
+      emp.confirmation_due_date,
+      emp.contract_start_date,
+      emp.contract_end_date,
+      emp.shift_pattern
+    FROM [hris].[EmployeeMasterView] v
+    LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = v.employee_id
+    LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = v.employee_id
+    WHERE (@employee_code IS NULL OR UPPER(v.employee_code) = @employee_code)
+    ORDER BY v.employee_code;
+  `);
+
+  const rows = rs.recordset || [];
+  if (rows.length === 0) return [];
+  const ids = rows.map((r: any) => Number(r.employee_id)).filter((n: number) => Number.isFinite(n));
+  const docsByEmployee = new Map<number, DleContractDocumentRow[]>();
+
+  if (ids.length > 0) {
+    const docReq = p.request();
+    ids.forEach((id: number, idx: number) => docReq.input(`id${idx}`, sql.BigInt, id));
+    const docRs = await docReq.query(`
+      SELECT
+        employee_id,
+        document_id,
+        document_category,
+        file_name,
+        mime_type,
+        size_bytes,
+        expires_at,
+        document_status,
+        verified_at,
+        verified_by,
+        created_at,
+        created_by
+      FROM [hris].[EmployeeDocuments]
+      WHERE employee_id IN (${ids.map((_, idx) => `@id${idx}`).join(',')})
+        AND (
+          LOWER(document_category) LIKE '%contract%'
+          OR LOWER(document_category) LIKE '%offer%'
+          OR LOWER(document_category) LIKE '%agreement%'
+          OR LOWER(file_name) LIKE '%contract%'
+          OR LOWER(file_name) LIKE '%offer%'
+          OR LOWER(file_name) LIKE '%agreement%'
+          OR LOWER(file_name) LIKE '%accept%'
+        )
+      ORDER BY employee_id, created_at DESC, document_id DESC;
+    `);
+
+    for (const d of docRs.recordset || []) {
+      const employeeId = Number(d.employee_id);
+      const category = contractDocumentCategory(str(d.document_category), str(d.file_name));
+      const statusRaw = str(d.document_status).toLowerCase();
+      const doc: DleContractDocumentRow = {
+        id: `db-doc-${String(d.document_id)}`,
+        category,
+        name: str(d.file_name) || `${category}.pdf`,
+        version: 1,
+        mimeType: str(d.mime_type) || 'application/octet-stream',
+        sizeBytes: Number(d.size_bytes || 0),
+        signatureStatus: statusRaw === 'verified' || category === 'Signed Acceptance Copy' ? 'Signed' : 'Unsigned',
+        legalReviewStatus: category === 'Legal Review Document' ? (statusRaw === 'rejected' ? 'Rejected' : statusRaw === 'verified' ? 'Approved' : 'Pending') : 'Not Required',
+        expiryDate: isoDate(d.expires_at) || null,
+        status: statusRaw === 'expired' || statusRaw === 'rejected' ? 'Archived' : 'Active',
+        uploadedAt: isoDateTime(d.created_at) || new Date().toISOString(),
+        uploadedBy: str(d.created_by) || str(d.verified_by) || 'DLE_Enterprise HRIS',
+      };
+      docsByEmployee.set(employeeId, [...(docsByEmployee.get(employeeId) || []), doc]);
+    }
+  }
+
+  return rows.map((row: any) => {
+    const employeeCode = str(row.employee_code).toUpperCase();
+    const startDate = isoDate(row.contract_start_date) || isoDate(row.date_joined) || '';
+    const endDate = isoDate(row.contract_end_date) || null;
+    const contractType = contractTypeFromEmployment(str(row.employment_type), str(row.job_title), str(row.staff_category));
+    const contractStatus = contractStatusFromDates(endDate, str(row.employment_status));
+    const docs = docsByEmployee.get(Number(row.employee_id)) || [];
+    const startMs = startDate ? new Date(`${startDate}T00:00:00.000Z`).getTime() : NaN;
+    const endMs = endDate ? new Date(`${endDate}T00:00:00.000Z`).getTime() : NaN;
+    const durationMonths = Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(1, Math.round((endMs - startMs) / (30.4375 * 24 * 3600 * 1000))) : null;
+    const createdAt = isoDateTime(row.created_at) || new Date().toISOString();
+    const updatedAt = isoDateTime(row.modified_at) || createdAt;
+
+    return {
+      id: `db-contract-${employeeCode}`,
+      employeeId: employeeCode,
+      employeeName: str(row.full_name) || employeeCode,
+      contractReferenceNo: `DLE-HRIS-${employeeCode}`,
+      contractType,
+      contractCategory: str(row.staff_category) || str(row.employee_category) || 'Standard',
+      contractStatus,
+      workflowStatus: contractStatus === 'Expired' ? 'Expired' : contractStatus === 'Terminated' ? 'Terminated' : 'Active',
+      startDate,
+      endDate,
+      probationApplicable: Boolean(row.probation_start_date || row.probation_end_date || row.confirmation_due_date),
+      probationStartDate: isoDate(row.probation_start_date) || null,
+      probationEndDate: isoDate(row.probation_end_date) || null,
+      confirmationDueDate: isoDate(row.confirmation_due_date) || null,
+      department: str(row.department) || null,
+      jobTitle: str(row.job_title) || null,
+      jobGrade: str(row.job_grade) || null,
+      workLocation: str(row.work_location) || str(row.office_location) || null,
+      reportingManager: str(row.reporting_manager) || null,
+      hrOfficer: str(row.hr_business_partner) || null,
+      renewalStatus: contractStatus === 'Due for Renewal' ? 'Renewal Required' : contractStatus === 'Expired' ? 'Overdue' : endDate ? 'Monitored' : 'Not Required',
+      approvalStatus: 'Approved' as const,
+      documentStatus: contractDocumentStatus(docs),
+      lastAmendmentAt: null,
+      terms: defaultContractTerms(row, durationMonths),
+      documents: docs,
+      approvals: [],
+      audit: [
+        {
+          id: `db-aud-${employeeCode}-loaded`,
+          at: updatedAt,
+          action: 'Contract loaded from DLE_Enterprise HRIS employment records',
+          performedBy: 'DLE_Enterprise HRIS',
+          reason: 'Derived from EmployeeEmploymentInfo and EmployeeMasterView',
+        },
+      ],
+      createdBy: 'DLE_Enterprise HRIS',
+      createdAt,
+      updatedBy: 'DLE_Enterprise HRIS',
+      updatedAt,
+    };
+  });
+};
+
+export const readEmployeeContractFromDb = async (contractId: string): Promise<DleEmployeeContractRow | null> => {
+  const id = contractId.startsWith('db-contract-') ? contractId.slice('db-contract-'.length) : contractId;
+  const rows = await readEmployeeContractsFromDb(id);
+  return rows?.[0] || null;
 };
 
 export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmployeeImportRow[]) => {

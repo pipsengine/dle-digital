@@ -46,7 +46,7 @@ type Payload = {
 
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const healthTone = (status: HealthStatus) => {
   if (status === 'Critical') return 'bg-red-50 text-red-700 border-red-200';
@@ -165,7 +165,7 @@ export default function JobTitlesClient() {
         'Succession Coverage %',
         'Attrition Risk %',
         'Internal Mobility %',
-        'Benchmark Salary USD',
+        'Benchmark Salary NGN',
       ],
       ...visibleTitles.map((title) => [
         title.code,
@@ -180,7 +180,7 @@ export default function JobTitlesClient() {
         String(title.successionCoveragePct),
         String(title.attritionRiskPct),
         String(title.internalMobilityPct),
-        String(title.benchmarkSalaryUsd),
+        String(title.benchmarkSalaryNgn),
       ]),
     ];
 
@@ -352,7 +352,7 @@ export default function JobTitlesClient() {
                     <DetailStat label="Open Roles" value={formatNumber(selectedTitle.openPositions)} />
                     <DetailStat label="Departments" value={formatNumber(selectedTitle.departmentCount)} />
                     <DetailStat label="Locations" value={formatNumber(selectedTitle.locationCount)} />
-                    <DetailStat label="Benchmark Salary" value={formatCurrency(selectedTitle.benchmarkSalaryUsd)} />
+                    <DetailStat label="Benchmark Salary" value={formatCurrency(selectedTitle.benchmarkSalaryNgn)} />
                     <DetailStat label="Internal Mobility" value={`${selectedTitle.internalMobilityPct}%`} />
                   </div>
 

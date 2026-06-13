@@ -276,13 +276,13 @@ const HeaderButton = ({
 const Modal = ({ open, onClose, children }: { open: boolean; onClose: () => void; children: React.ReactNode }) => (
   <AnimatePresence>
     {open ? (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm" onClick={onClose}>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="fixed inset-0 z-50 overflow-y-auto bg-black/30 p-2 backdrop-blur-sm sm:p-4" onClick={onClose}>
         <motion.div
           initial={{ opacity: 0, y: 10, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 10, scale: 0.98 }}
           transition={{ duration: 0.16 }}
-          className="mx-auto mt-10 w-[96%] max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden"
+          className="mx-auto my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl sm:my-6 sm:max-h-[calc(100dvh-3rem)]"
           onClick={(e) => e.stopPropagation()}
         >
           {children}
@@ -335,6 +335,14 @@ const statusPill = (s: string) => {
   if (s === 'Draft' || s === 'Submitted' || s.includes('Pending')) return { border: 'border-amber-200', bg: 'bg-amber-50', fg: 'text-amber-800' };
   if (s === 'Rejected' || s === 'Cancelled' || s === 'Expired') return { border: 'border-red-200', bg: 'bg-red-50', fg: 'text-red-800' };
   return { border: 'border-slate-200', bg: 'bg-slate-100', fg: 'text-slate-700' };
+};
+
+const metricCardStyle = (status: string) => {
+  if (status === 'Active' || status === 'Approved' || status === 'Configured' || status === 'Clear') return 'border-emerald-200 bg-emerald-50/70';
+  if (status === 'Missing' || status === 'Attention' || status === 'Rejected' || status === 'Cancelled' || status === 'Expired') return 'border-rose-200 bg-rose-50/70';
+  if (status === 'Draft' || status === 'Submitted' || status.includes('Pending') || status === 'Scheduled' || status === 'Temporary') return 'border-amber-200 bg-amber-50/70';
+  if (status === 'Optional' || status === 'Not set') return 'border-slate-200 bg-slate-50/80';
+  return 'border-sky-100 bg-sky-50/60';
 };
 
 const nodeTone = (lvl: OrgChartNode['level']) => {
@@ -449,55 +457,138 @@ function BulkManagerReassignmentModal({
   onClose,
   role,
   viewerEmployeeId,
+  employees,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   role: Role;
   viewerEmployeeId?: string;
+  employees: EmployeeOption[];
   onCreated: (requestId: string) => void;
 }) {
   const [currentManager, setCurrentManager] = useState('');
   const [newManager, setNewManager] = useState('');
   const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState('');
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const supervisorOptions = useMemo(
+    () => Array.from(new Set(employees.flatMap((e) => [e.fullName, e.employeeId, e.currentManager]).filter((v): v is string => Boolean(v)))).sort((a, b) => a.localeCompare(b)),
+    [employees],
+  );
+  const employeeMatches = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase();
+    return employees
+      .filter((e) => {
+        const managerMatch = !currentManager.trim() || String(e.currentManager || '').toLowerCase() === currentManager.trim().toLowerCase();
+        const searchMatch =
+          !q ||
+          [e.employeeId, e.fullName, e.department, e.jobTitle, e.currentManager, e.location, e.businessUnit]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(q));
+        return managerMatch && searchMatch;
+      })
+      .slice(0, 80);
+  }, [currentManager, employeeSearch, employees]);
+  const selectedSet = useMemo(() => new Set(selectedEmployeeIds), [selectedEmployeeIds]);
+  const visibleSelectedCount = employeeMatches.filter((e) => selectedSet.has(e.employeeId)).length;
+  const allVisibleSelected = employeeMatches.length > 0 && visibleSelectedCount === employeeMatches.length;
+  const impactedCount = selectedEmployeeIds.length || employees.filter((e) => currentManager.trim() && String(e.currentManager || '').toLowerCase() === currentManager.trim().toLowerCase()).length;
   return (
     <Modal open={open} onClose={onClose}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Users className="w-5 h-5" />
           </span>
           <div>
-            <div className="text-sm font-extrabold text-slate-900">Bulk Manager Reassignment</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Create a bulk reassignment draft with AI validation.</div>
+            <div className="text-sm font-extrabold text-slate-900">Bulk Supervisor Reassignment</div>
+            <div className="text-xs text-slate-500 font-semibold mt-1">Move multiple employees from one current manager/supervisor to one new manager/supervisor.</div>
           </div>
         </div>
         <button type="button" onClick={onClose} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+          <div className="text-xs font-extrabold text-sky-900">How this works</div>
+          <div className="mt-1 text-xs font-semibold leading-5 text-sky-800">
+            For employee codes beginning with C, treat this as supervisor assignment. Select a current manager/supervisor, choose a new manager/supervisor, then optionally pick specific employees below. If no employees are selected, the draft will include all employees currently under the selected manager/supervisor.
+          </div>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-[11px] font-extrabold text-slate-600">Current Manager</div>
-            <input value={currentManager} onChange={(e) => setCurrentManager(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <div className="text-[11px] font-extrabold text-slate-600">Current Manager / Supervisor</div>
+            <input value={currentManager} onChange={(e) => { setCurrentManager(e.target.value); setSelectedEmployeeIds([]); }} list="bulk-supervisor-options" placeholder="Search all employees or current supervisor name" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-[11px] font-extrabold text-slate-600">New Manager</div>
-            <input value={newManager} onChange={(e) => setNewManager(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <div className="text-[11px] font-extrabold text-slate-600">New Manager / Supervisor</div>
+            <input value={newManager} onChange={(e) => setNewManager(e.target.value)} list="bulk-supervisor-options" placeholder="Search all employees to select supervisor" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
+          <datalist id="bulk-supervisor-options">
+            {supervisorOptions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Effective Date</div>
-            <input value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Reason</div>
             <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="text-sm font-extrabold text-slate-900">Employees to Reassign</div>
+              <div className="mt-1 text-xs font-semibold text-slate-500">
+                {selectedEmployeeIds.length ? `${selectedEmployeeIds.length} selected employee${selectedEmployeeIds.length === 1 ? '' : 's'}` : `${impactedCount} employee${impactedCount === 1 ? '' : 's'} will be included if none are selected`}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setSelectedEmployeeIds((prev) => (allVisibleSelected ? prev.filter((id) => !employeeMatches.some((e) => e.employeeId === id)) : Array.from(new Set([...prev, ...employeeMatches.map((e) => e.employeeId)]))))}
+                disabled={!employeeMatches.length}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {allVisibleSelected ? 'Clear Visible' : 'Select Visible'}
+              </button>
+              <button type="button" onClick={() => setSelectedEmployeeIds([])} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50">
+                Clear Selection
+              </button>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-slate-500" />
+            <input value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} placeholder="Search all employees by ID, name, department, job title, supervisor..." className="w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400" />
+          </div>
+          <div className="mt-4 max-h-[min(360px,42dvh)] space-y-2 overflow-y-auto pr-1">
+            {employeeMatches.map((e) => (
+              <label key={e.employeeId} className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 hover:bg-slate-100">
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(e.employeeId)}
+                  onChange={(event) =>
+                    setSelectedEmployeeIds((prev) => (event.target.checked ? Array.from(new Set([...prev, e.employeeId])) : prev.filter((id) => id !== e.employeeId)))
+                  }
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                />
+                <span className="min-w-0">
+                  <span className="block text-xs font-extrabold text-slate-900">{e.employeeId} · {e.fullName}</span>
+                  <span className="mt-1 block text-xs font-semibold text-slate-600">{e.jobTitle || 'Unassigned'} · {e.department || 'Unassigned'} · Manager/Supervisor: {e.currentManager || 'Not assigned'}</span>
+                </span>
+              </label>
+            ))}
+            {!employeeMatches.length ? <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-600">No employees match this manager/search.</div> : null}
+          </div>
+        </div>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" onClick={onClose} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
             Cancel
           </button>
@@ -512,7 +603,7 @@ function BulkManagerReassignmentModal({
                   role,
                   viewerEmployeeId,
                   headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify({ currentManager, newManager, effectiveDate, reason }),
+                  body: JSON.stringify({ currentManager, newManager, effectiveDate, reason, employeeIds: selectedEmployeeIds }),
                 });
                 onCreated(res.requestId);
               } finally {
@@ -742,7 +833,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
             tone="secondary"
             icon={BadgeCheck}
           />
-          <HeaderButton onClick={() => setBulkOpen(true)} label="Bulk Manager Reassignment" tone="secondary" icon={Users} />
+          <HeaderButton onClick={() => setBulkOpen(true)} label="Bulk Supervisor Reassignment" tone="secondary" icon={Users} />
           <HeaderButton
             onClick={() => {
               setTimeout(() => orgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
@@ -802,26 +893,26 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
 
   const selectorModal = (
     <Modal open={selectorOpen} onClose={() => setSelectorOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Search className="w-5 h-5" />
           </span>
           <div>
             <div className="text-sm font-extrabold text-slate-900">Employee Selector</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Search by ID, name, department, job title, current manager, location, business unit.</div>
+            <div className="text-xs text-slate-500 font-semibold mt-1">Search by ID, name, department, job title, current manager/supervisor, location, business unit.</div>
           </div>
         </div>
         <button type="button" onClick={() => setSelectorOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
         <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white w-full">
           <Search className="w-4 h-4 text-slate-500" />
           <input value={selectorQuery} onChange={(e) => setSelectorQuery(e.target.value)} placeholder="Search employees..." className="w-full text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent" />
         </div>
-        <div className="max-h-[420px] overflow-auto rounded-2xl border border-slate-200">
+        <div className="max-h-[min(420px,55dvh)] overflow-auto rounded-2xl border border-slate-200">
           <table className="min-w-[900px] w-full text-left bg-white">
             <thead className="bg-slate-50 border-b border-slate-100">
               <tr>
@@ -870,8 +961,8 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
 
   const changeModal = (
     <Modal open={changeOpen} onClose={() => setChangeOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-dle-blue/10 border border-slate-200/60 flex items-center justify-center text-dle-blue">
             <ArrowRightLeft className="w-5 h-5" />
           </span>
@@ -884,7 +975,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 space-y-4">
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Change Type</div>
@@ -898,11 +989,11 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">Effective Date</div>
-            <input value={draft.effectiveDate} onChange={(e) => setDraft((d) => ({ ...d, effectiveDate: e.target.value }))} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <input type="date" value={draft.effectiveDate} onChange={(e) => setDraft((d) => ({ ...d, effectiveDate: e.target.value }))} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="text-[11px] font-extrabold text-slate-600">End Date</div>
-            <input value={draft.endDate} onChange={(e) => setDraft((d) => ({ ...d, endDate: e.target.value }))} placeholder="Optional" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+            <input type="date" value={draft.endDate} onChange={(e) => setDraft((d) => ({ ...d, endDate: e.target.value }))} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -975,7 +1066,80 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
               Add Assignment
             </button>
           </div>
-          <div className="mt-4 overflow-auto rounded-2xl border border-slate-200">
+          <div className="mt-4 space-y-3 md:hidden">
+            {draft.delegations.length ? (
+              draft.delegations.map((d, idx) => (
+                <div key={d.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-slate-900">Delegation {idx + 1}</div>
+                      <div className="mt-1 text-[11px] font-semibold text-slate-500">{d.status}</div>
+                    </div>
+                    <button type="button" onClick={() => setDraft((cur) => ({ ...cur, delegations: cur.delegations.filter((_, i) => i !== idx) }))} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white hover:bg-slate-50">
+                      <X className="h-4 w-4 text-slate-600" />
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3">
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-slate-600">Type</span>
+                      <select value={d.assignmentType} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, assignmentType: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800">
+                        {(formOptions.data?.delegationAssignmentTypes || []).map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-slate-600">Assigned Employee</span>
+                      <input value={d.assignedEmployee} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, assignedEmployee: e.target.value } : x)) }))} list="employee-name-options" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-slate-600">Role</span>
+                      <input value={d.delegatedRole} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, delegatedRole: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
+                    </label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="text-[11px] font-extrabold text-slate-600">Start</span>
+                        <input type="date" value={d.startDate} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, startDate: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-extrabold text-slate-600">End</span>
+                        <input type="date" value={d.endDate} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, endDate: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
+                      </label>
+                    </div>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-slate-600">Scope</span>
+                      <select value={d.approvalScope} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, approvalScope: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800">
+                        {(formOptions.data?.delegationScopes || []).map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-slate-600">Status</span>
+                      <select value={d.status} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, status: e.target.value as ReportingDelegation['status'] } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800">
+                        {(['Active', 'Scheduled', 'Expired', 'Cancelled'] as ReportingDelegation['status'][]).map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-extrabold text-slate-600">Reason</span>
+                      <input value={d.delegationReason} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, delegationReason: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
+                    </label>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-600">No draft delegations.</div>
+            )}
+          </div>
+          <div className="mt-4 hidden overflow-auto rounded-2xl border border-slate-200 md:block">
             <table className="min-w-[980px] w-full text-left bg-white">
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
@@ -1035,6 +1199,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
                       </td>
                       <td className="px-4 py-2">
                         <input
+                          type="date"
                           value={d.startDate}
                           onChange={(e) =>
                             setDraft((cur) => ({
@@ -1047,6 +1212,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
                       </td>
                       <td className="px-4 py-2">
                         <input
+                          type="date"
                           value={d.endDate}
                           onChange={(e) =>
                             setDraft((cur) => ({
@@ -1127,7 +1293,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
             </table>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
           <button type="button" onClick={() => setChangeOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
             Cancel
           </button>
@@ -1171,8 +1337,8 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
 
   const exportModal = (
     <Modal open={exportOpen} onClose={() => setExportOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Download className="w-5 h-5" />
           </span>
@@ -1185,7 +1351,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 overflow-y-auto p-4 sm:grid-cols-2 sm:p-6">
         {['csv', 'xls', 'pdf', 'png'].map((fmt) => (
           <a
             key={fmt}
@@ -1201,8 +1367,8 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
 
   const auditModal = (
     <Modal open={auditOpen} onClose={() => setAuditOpen(false)}>
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
             <Fingerprint className="w-5 h-5" />
           </span>
@@ -1215,7 +1381,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
           <X className="w-4 h-4 text-slate-600" />
         </button>
       </div>
-      <div className="p-6">
+      <div className="overflow-y-auto p-4 sm:p-6">
         {auditLogs.status === 'loading' ? <div className="text-sm text-slate-600 font-semibold">Loading…</div> : null}
         {auditLogs.status === 'error' ? <div className="text-sm text-slate-600 font-semibold">{auditLogs.error}</div> : null}
         {auditLogs.status === 'ready' ? (
@@ -1283,14 +1449,14 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
             ].map((c) => {
               const st = statusPill(c.status);
               return (
-                <div key={c.title} className="rounded-2xl border border-slate-200/60 bg-white p-4">
+                <div key={c.title} className={`rounded-2xl border p-4 ${metricCardStyle(String(c.status))}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[11px] font-extrabold text-slate-600">{c.title}</div>
                       <div className="text-sm font-extrabold text-slate-900 mt-1 truncate">{String(c.value || '—')}</div>
                       <div className="text-[11px] text-slate-500 font-semibold mt-2 truncate">{c.detail}</div>
                     </div>
-                    <span className="w-10 h-10 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-700">
+                    <span className={`w-10 h-10 rounded-2xl border flex items-center justify-center ${st.border} ${st.bg} ${st.fg}`}>
                       <Users className="w-5 h-5" />
                     </span>
                   </div>
@@ -1320,7 +1486,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
               {payload.aiInsights.slice(0, 8).map((i) => {
                 const st = severityStyle(i.severity);
                 return (
-                  <div key={i.id} className={`rounded-2xl border ${st.border} bg-white p-4`}>
+                  <div key={i.id} className={`rounded-2xl border ${st.border} ${st.bg} p-4`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -1682,6 +1848,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
         onClose={() => setBulkOpen(false)}
         role={role}
         viewerEmployeeId={viewerEmployeeId}
+        employees={employees}
         onCreated={(requestId) => {
           setBulkOpen(false);
           setToast({ title: 'Bulk draft created', detail: requestId, tone: 'ok' });
@@ -1693,7 +1860,7 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
       <AnimatePresence>
         {toast ? (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.16 }} className="fixed bottom-6 right-6 z-50">
-            <div className={`w-[380px] rounded-2xl border shadow-lg p-4 bg-white ${toast.tone === 'err' ? 'border-red-200' : toast.tone === 'warn' ? 'border-amber-200' : 'border-slate-200'}`}>
+            <div className={`w-[calc(100vw-2rem)] max-w-[380px] rounded-2xl border bg-white p-4 shadow-lg ${toast.tone === 'err' ? 'border-red-200' : toast.tone === 'warn' ? 'border-amber-200' : 'border-slate-200'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm font-extrabold text-slate-900">{toast.title}</div>

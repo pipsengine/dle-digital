@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -62,7 +63,6 @@ type Employee = {
   id: string;
   employeeId: string;
   employeeCode?: string;
-  employeeDbId?: number;
   fullName: string;
   preferredName?: string;
   title?: string;
@@ -116,7 +116,6 @@ type Employee = {
   contractStartDate?: string;
   yearsOfService: number;
   lastPromotion?: string;
-  aiRiskScore: number;
   trainingCompliance: 'Compliant' | 'Overdue' | 'At Risk';
   performanceRating?: 'A' | 'B' | 'C' | 'D';
   contractEndDate?: string;
@@ -124,28 +123,8 @@ type Employee = {
   emergencyContactCount?: number;
   documentCount?: number;
   hasManagerAssigned: boolean;
-  payrollSource?: string;
-  payrollGroup?: string;
-  salaryGrade?: string;
-  benefitGroup?: string;
-  payCurrency?: string;
-  paymentRun?: string;
-  paymentType?: string;
-  periodSalary?: number | null;
-  annualSalary?: number | null;
-  setupAssignedToPayroll?: boolean;
-  sourceSystem?: string;
-  sourceEmployeeId?: string;
-  sourceDraftId?: string;
   createdAt?: string;
   modifiedAt?: string;
-  sageEmployeeId?: number;
-  sageEmployeeCode?: string;
-  sageEntityCode?: string;
-  sageCompanyCode?: string;
-  sageCompanyName?: string;
-  sageStatusCode?: string;
-  sageStatusName?: string;
 };
 
 type EmployeeDirectoryPayload = {
@@ -214,11 +193,6 @@ const formatDateTimeUtc = (iso: string) => {
 
 const numberFmt = new Intl.NumberFormat('en-GB');
 const formatNumber = (n: number) => numberFmt.format(n);
-const formatMoney = (value?: number | null, currency?: string) => {
-  if (value == null || !Number.isFinite(value)) return '';
-  const suffix = currency ? ` ${currency}` : '';
-  return `${formatNumber(Number(value.toFixed(2)))}${suffix}`;
-};
 
 const statusStyle = (status: EmploymentStatus) => {
   switch (status) {
@@ -250,13 +224,6 @@ const statusStyle = (status: EmploymentStatus) => {
   }
 };
 
-const riskStyle = (score: number) => {
-  if (score >= 80) return { fg: 'text-red-700', bg: 'bg-red-600/10' };
-  if (score >= 60) return { fg: 'text-amber-700', bg: 'bg-amber-600/10' };
-  if (score >= 35) return { fg: 'text-blue-700', bg: 'bg-blue-600/10' };
-  return { fg: 'text-emerald-700', bg: 'bg-emerald-600/10' };
-};
-
 const trainingStyle = (s: Employee['trainingCompliance']) => {
   if (s === 'Compliant') return { fg: 'text-emerald-700', bg: 'bg-emerald-600/10', icon: CheckCircle2 };
   if (s === 'At Risk') return { fg: 'text-amber-700', bg: 'bg-amber-600/10', icon: CircleAlert };
@@ -274,8 +241,7 @@ type SortKey =
   | 'location'
   | 'status'
   | 'dateJoined'
-  | 'yearsOfService'
-  | 'aiRiskScore';
+  | 'yearsOfService';
 
 type ColumnKey =
   | 'employee'
@@ -286,17 +252,13 @@ type ColumnKey =
   | 'manager'
   | 'location'
   | 'employment'
-  | 'employmentDates'
   | 'status'
   | 'contact'
   | 'address'
-  | 'payroll'
   | 'records'
   | 'joined'
   | 'yos'
   | 'promotion'
-  | 'source'
-  | 'risk'
   | 'actions';
 
 type ColumnDef = {
@@ -316,17 +278,13 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { key: 'manager', label: 'Manager', defaultVisible: true, widthClass: 'min-w-[200px]' },
   { key: 'location', label: 'Work Location / Site', defaultVisible: true, widthClass: 'min-w-[220px]' },
   { key: 'employment', label: 'Employment Type', defaultVisible: true, widthClass: 'min-w-[210px]' },
-  { key: 'employmentDates', label: 'Employment Dates', defaultVisible: true, widthClass: 'min-w-[240px]' },
   { key: 'status', label: 'Status', defaultVisible: true, widthClass: 'min-w-[170px]' },
   { key: 'contact', label: 'Official Contact', defaultVisible: true, widthClass: 'min-w-[250px]' },
   { key: 'address', label: 'Address', defaultVisible: true, widthClass: 'min-w-[260px]' },
-  { key: 'payroll', label: 'Payroll Setup', defaultVisible: true, widthClass: 'min-w-[220px]' },
   { key: 'records', label: 'Records', defaultVisible: true, widthClass: 'min-w-[170px]' },
   { key: 'joined', label: 'Date Joined', defaultVisible: true, widthClass: 'min-w-[140px]' },
   { key: 'yos', label: 'Years', defaultVisible: true, widthClass: 'min-w-[110px]' },
-  { key: 'source', label: 'System Source', defaultVisible: true, widthClass: 'min-w-[180px]' },
   { key: 'promotion', label: 'Last Promotion', defaultVisible: false, widthClass: 'min-w-[160px]' },
-  { key: 'risk', label: 'AI Risk', defaultVisible: true, widthClass: 'min-w-[140px]' },
   { key: 'actions', label: 'Actions', defaultVisible: true, widthClass: 'min-w-[120px]' },
 ];
 
@@ -637,6 +595,7 @@ function DrawerSection({ title, children }: { title: string; children: React.Rea
 }
 
 export default function EmployeeDirectoryClient({ initialNow }: { initialNow: string }) {
+  const router = useRouter();
   const nowMs = useMemo(() => new Date(initialNow).getTime(), [initialNow]);
   const nowStamp = useMemo(() => formatTimeUtc(initialNow), [initialNow]);
 
@@ -658,7 +617,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
     { name: 'All Employees', filters: {} },
     { name: 'Contract Expiring (≤ 30 days)', filters: { contractExpiry: ['≤30'] } },
     { name: 'Missing Emergency Contacts', filters: { emergencyContacts: ['Missing'] } },
-    { name: 'High AI Risk (≥ 80)', filters: { aiRisk: ['≥80'] } },
   ]);
   const [activePreset, setActivePreset] = useState('All Employees');
 
@@ -685,7 +643,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
     trainingCompliance: new Set(),
     performanceRating: new Set(),
     emergencyContacts: new Set(),
-    aiRisk: new Set(),
   });
 
   const [audit, setAudit] = useState<AuditEvent[]>(() => [
@@ -860,13 +817,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
         if (emergency.has('Complete') && !e.emergencyContactsComplete) return false;
       }
 
-      const aiRisk = filters.aiRisk;
-      if (aiRisk.size > 0) {
-        if (aiRisk.has('≥80') && e.aiRiskScore < 80) return false;
-        if (aiRisk.has('60-79') && (e.aiRiskScore < 60 || e.aiRiskScore > 79)) return false;
-        if (aiRisk.has('<60') && e.aiRiskScore >= 60) return false;
-      }
-
       const years = filters.yearsOfService;
       if (years.size > 0) {
         const y = e.yearsOfService;
@@ -960,8 +910,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
             return cmpStr(a.dateJoined, b.dateJoined);
           case 'yearsOfService':
             return cmpNum(a.yearsOfService, b.yearsOfService);
-          case 'aiRiskScore':
-            return cmpNum(a.aiRiskScore, b.aiRiskScore);
           default:
             return 0;
         }
@@ -1032,6 +980,21 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       },
       ...prev,
     ]);
+  };
+
+  const openEmployeeProfile = (e: Employee) => {
+    setAudit((prev) => [
+      {
+        id: crypto.randomUUID(),
+        type: 'employee.profile.open',
+        at: new Date().toISOString(),
+        actorRole: role,
+        message: `Full profile opened for ${e.employeeId}`,
+        employeeId: e.employeeId,
+      },
+      ...prev,
+    ]);
+    router.push(`/hris/employees/employee-profile/${encodeURIComponent(e.employeeId)}`);
   };
 
   const closeEmployee = () => setDrawerEmployee(null);
@@ -1127,7 +1090,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
             </div>
             <div className="text-xs text-slate-500 font-semibold mt-0.5">
               Code: {e.employeeCode || e.employeeId}
-              {e.employeeDbId ? <span className="ml-1 text-slate-400">DB #{e.employeeDbId}</span> : null}
             </div>
           </div>
         </div>
@@ -1196,14 +1158,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
           <div className="text-xs text-slate-500 font-semibold mt-0.5">{e.shift ? `${e.shift} shift` : 'Standard schedule'}</div>
         </div>
       );
-    if (col === 'employmentDates')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800">Joined: {formatDate(e.dateJoined)}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">Probation: {e.probationStartDate || 'N/A'} to {e.probationEndDate || 'N/A'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">Confirm due: {e.confirmationDueDate ? formatDate(e.confirmationDueDate) : 'Not set'}</div>
-        </div>
-      );
     if (col === 'status') return <StatusBadge status={e.status} />;
     if (col === 'contact')
       return (
@@ -1221,17 +1175,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
           <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.residentialAddress || e.permanentAddress || 'No address recorded'}</div>
         </div>
       );
-    if (col === 'payroll')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{e.payrollGroup || e.payrollSource || 'Not assigned'} {e.payCurrency ? <span className="text-slate-500">/ {e.payCurrency}</span> : null}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.paymentRun || e.paymentType || 'No pay run'} {e.salaryGrade ? <span>/ {e.salaryGrade}</span> : null}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{formatMoney(e.periodSalary, e.payCurrency) || e.benefitGroup || 'No salary record'}</div>
-          <div className={`text-[11px] font-extrabold mt-1 ${e.setupAssignedToPayroll ? 'text-emerald-700' : 'text-amber-700'}`}>
-            {e.setupAssignedToPayroll ? 'Assigned to payroll' : 'Payroll pending'}
-          </div>
-        </div>
-      );
     if (col === 'records')
       return (
         <div className="text-sm">
@@ -1244,18 +1187,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       );
     if (col === 'joined') return <div className="text-sm font-extrabold text-slate-800">{formatDate(e.dateJoined)}</div>;
     if (col === 'yos') return <div className="text-sm font-extrabold text-slate-800">{e.yearsOfService}y</div>;
-    if (col === 'source') return (
-      <div className="text-sm">
-        <div className="font-extrabold text-slate-800 truncate">{e.sourceSystem || 'DLE_Enterprise'}</div>
-        <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.sourceDraftId ? `Draft ${e.sourceDraftId}` : e.sourceEmployeeId || 'System record'}</div>
-      </div>
-    );
     if (col === 'promotion') return <div className="text-sm font-extrabold text-slate-800">{e.lastPromotion ? formatDate(e.lastPromotion) : '—'}</div>;
-    if (col === 'risk') {
-      if (!permissions.canViewRisk) return <span className="text-sm font-extrabold text-slate-400">—</span>;
-      const r = riskStyle(e.aiRiskScore);
-      return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold ${r.bg} ${r.fg}`}>{e.aiRiskScore}</span>;
-    }
     if (col === 'actions')
       return (
         <EmployeeActionsMenu employee={e} canChangeStatus={permissions.canChangeStatus} onQuickView={() => openEmployee(e)} />
@@ -1284,7 +1216,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       { key: 'yearsOfService', label: 'Years of Service', options: ['0-1', '2-5', '6-10', '11+'], searchable: false },
       { key: 'contractExpiry', label: 'Contract Expiry', options: ['≤14', '≤30'], searchable: false },
       { key: 'emergencyContacts', label: 'Emergency Contacts', options: ['Missing', 'Complete'], searchable: false },
-      { key: 'aiRisk', label: 'AI Risk', options: ['≥80', '60-79', '<60'], searchable: false },
       { key: 'jobGrade', label: 'Job Grade', options: ['JG-01', 'JG-02', 'JG-03', 'JG-04', 'JG-05', 'JG-06', 'JG-07', 'JG-08'], searchable: true },
       { key: 'designation', label: 'Designation', options: ['Engineer', 'Supervisor', 'Technician', 'Officer', 'Manager', 'Director'], searchable: true },
       { key: 'gender', label: 'Gender', options: ['Male', 'Female', 'Prefer not to say'], searchable: false },
@@ -1683,7 +1614,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
 
               {sortButton('fullName', 'Name')}
               {sortButton('department', 'Department')}
-              {sortButton('aiRiskScore', 'AI Risk')}
             </div>
           </div>
 
@@ -1793,7 +1723,12 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                 </thead>
                 <tbody>
                   {pageRows.map((e) => (
-                    <tr key={e.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={e.id}
+                      onDoubleClick={() => openEmployeeProfile(e)}
+                      className="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                      title="Double-click to open employee profile"
+                    >
                       {visibleColumns.map((c) => (
                         <td key={c.key} className={`px-4 py-3 align-top ${c.widthClass || ''}`}>
                           {renderCell(c.key, e)}
@@ -1820,7 +1755,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
         {view === 'grid' && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {pageRows.map((e) => {
-              const r = riskStyle(e.aiRiskScore);
               const t = trainingStyle(e.trainingCompliance);
               const TrainingIcon = t.icon;
               return (
@@ -1854,12 +1788,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                       <div className={`inline-flex items-center gap-2 mt-1 text-[11px] font-extrabold px-2 py-1 rounded-full ${t.bg} ${t.fg}`}>
                         <TrainingIcon className="w-4 h-4" />
                         {e.trainingCompliance}
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                      <div className="text-[11px] font-extrabold text-slate-600">AI Risk</div>
-                      <div className={`inline-flex items-center mt-1 text-[11px] font-extrabold px-2 py-1 rounded-full ${r.bg} ${r.fg}`}>
-                        {permissions.canViewRisk ? e.aiRiskScore : '—'}
                       </div>
                     </div>
                   </div>

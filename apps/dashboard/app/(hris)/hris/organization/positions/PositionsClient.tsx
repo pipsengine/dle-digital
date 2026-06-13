@@ -90,7 +90,7 @@ export default function PositionsClient({
   const [statusFilter, setStatusFilter] = useState<'All' | string>('All');
   const [criticalityFilter, setCriticalityFilter] = useState<'All' | string>('All');
   const [healthFilter, setHealthFilter] = useState<'All' | HealthStatus>('All');
-  const [sortBy, setSortBy] = useState<'openDays' | 'benchmarkSalaryUsd' | 'successionCoveragePct' | 'attritionRiskPct'>('openDays');
+  const [sortBy, setSortBy] = useState<'openDays' | 'benchmarkSalaryNgn' | 'successionCoveragePct' | 'attritionRiskPct'>('openDays');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState({
     code: '',
@@ -106,7 +106,7 @@ export default function PositionsClient({
     positionStatus: 'Vacant',
     incumbentName: '',
     incumbentEmployeeId: '',
-    benchmarkSalaryUsd: '0',
+    benchmarkSalaryNgn: '0',
     fte: '1',
     criticality: 'Core',
     successionCoveragePct: '70',
@@ -174,7 +174,7 @@ export default function PositionsClient({
 
     const sorted = [...filtered];
     sorted.sort((a, b) => {
-      if (sortBy === 'benchmarkSalaryUsd') return b.benchmarkSalaryUsd - a.benchmarkSalaryUsd;
+      if (sortBy === 'benchmarkSalaryNgn') return b.benchmarkSalaryNgn - a.benchmarkSalaryNgn;
       if (sortBy === 'successionCoveragePct') return b.successionCoveragePct - a.successionCoveragePct;
       if (sortBy === 'attritionRiskPct') return b.attritionRiskPct - a.attritionRiskPct;
       return b.openDays - a.openDays;
@@ -208,7 +208,7 @@ export default function PositionsClient({
         String(position.successionCoveragePct),
         String(position.attritionRiskPct),
         String(position.approvalCoveragePct),
-        String(position.benchmarkSalaryUsd),
+        String(position.benchmarkSalaryNgn),
       ]),
     ];
 
@@ -243,7 +243,7 @@ export default function PositionsClient({
       positionStatus: form.positionStatus as PositionRecord['positionStatus'],
       incumbentName: form.incumbentName || null,
       incumbentEmployeeId: form.incumbentEmployeeId || null,
-      benchmarkSalaryUsd: Number(form.benchmarkSalaryUsd),
+      benchmarkSalaryNgn: Number(form.benchmarkSalaryNgn),
       fte: Number(form.fte),
       criticality: form.criticality as PositionRecord['criticality'],
       successionCoveragePct: Number(form.successionCoveragePct),
@@ -282,7 +282,7 @@ export default function PositionsClient({
         positionStatus: 'Vacant',
         incumbentName: '',
         incumbentEmployeeId: '',
-        benchmarkSalaryUsd: '0',
+        benchmarkSalaryNgn: '0',
         fte: '1',
         criticality: 'Core',
         successionCoveragePct: '70',
@@ -362,7 +362,7 @@ export default function PositionsClient({
               <SelectField label="Position Type" value={form.positionType} onChange={(value) => setForm((prev) => ({ ...prev, positionType: value }))} options={['Permanent', 'Contract', 'Project', 'Temporary']} />
               <SelectField label="Position Status" value={form.positionStatus} onChange={(value) => setForm((prev) => ({ ...prev, positionStatus: value }))} options={['Filled', 'Vacant', 'Frozen', 'Under Review']} />
               <SelectField label="Criticality" value={form.criticality} onChange={(value) => setForm((prev) => ({ ...prev, criticality: value }))} options={['Critical', 'Core', 'Support']} />
-              <Field label="Benchmark Salary (NGN)" type="number" value={form.benchmarkSalaryUsd} onChange={(value) => setForm((prev) => ({ ...prev, benchmarkSalaryUsd: value }))} />
+              <Field label="Benchmark Salary (NGN)" type="number" value={form.benchmarkSalaryNgn} onChange={(value) => setForm((prev) => ({ ...prev, benchmarkSalaryNgn: value }))} />
               <Field label="FTE" type="number" value={form.fte} onChange={(value) => setForm((prev) => ({ ...prev, fte: value }))} />
               <Field label="Succession Coverage %" type="number" value={form.successionCoveragePct} onChange={(value) => setForm((prev) => ({ ...prev, successionCoveragePct: value }))} />
               <Field label="Attrition Risk %" type="number" value={form.attritionRiskPct} onChange={(value) => setForm((prev) => ({ ...prev, attritionRiskPct: value }))} />
@@ -450,10 +450,10 @@ export default function PositionsClient({
           <Select
             value={sortBy}
             onChange={(value) => setSortBy(value as typeof sortBy)}
-            options={['openDays', 'benchmarkSalaryUsd', 'successionCoveragePct', 'attritionRiskPct']}
+            options={['openDays', 'benchmarkSalaryNgn', 'successionCoveragePct', 'attritionRiskPct']}
             labels={{
               openDays: 'Sort: Open Days',
-              benchmarkSalaryUsd: 'Sort: Salary',
+              benchmarkSalaryNgn: 'Sort: Salary',
               successionCoveragePct: 'Sort: Succession',
               attritionRiskPct: 'Sort: Attrition',
             }}
@@ -555,7 +555,7 @@ export default function PositionsClient({
                     <DetailStat label="Criticality" value={selectedPosition.criticality} />
                     <DetailStat label="Incumbent" value={selectedPosition.incumbentName || 'Unassigned'} />
                     <DetailStat label="Employee ID" value={selectedPosition.incumbentEmployeeId || '—'} />
-                    <DetailStat label="Benchmark Salary" value={formatCurrency(selectedPosition.benchmarkSalaryUsd)} />
+                    <DetailStat label="Benchmark Salary" value={formatCurrency(selectedPosition.benchmarkSalaryNgn)} />
                     <DetailStat label="Replacement Priority" value={selectedPosition.replacementPriority} />
                   </div>
 

@@ -27,7 +27,7 @@ type WorkforcePlanningRole = {
   incumbentName: string | null;
   openDays: number;
   fte: number;
-  benchmarkSalaryUsd: number;
+  benchmarkSalaryNgn: number;
   healthStatus: HealthStatus;
 };
 

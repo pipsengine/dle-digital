@@ -23,7 +23,7 @@ type WorkforcePlanningRole = {
   incumbentName: string | null;
   openDays: number;
   fte: number;
-  benchmarkSalaryUsd: number;
+  benchmarkSalaryNgn: number;
   healthStatus: HealthStatus;
 };
 
@@ -47,8 +47,8 @@ type WorkforcePlanRecord = {
   successionCoveragePct: number;
   attritionRiskPct: number;
   approvalCoveragePct: number;
-  payrollRunRateUsd: number;
-  openBudgetUsd: number;
+  payrollRunRateNgn: number;
+  openBudgetNgn: number;
   standardizationPct: number;
   healthStatus: HealthStatus;
   planningPriority: 'Immediate' | 'Planned' | 'Monitor';
@@ -75,7 +75,7 @@ type WorkforcePlanningPayload = {
     vacancyRatePct: number;
     criticalGapRoles: number;
     immediateBackfills: number;
-    openBudgetUsd: number;
+    openBudgetNgn: number;
     avgSuccessionCoverage: number;
     avgAttritionRisk: number;
     pendingRequests: number;
@@ -159,7 +159,7 @@ const getRecommendedAction = (priority: WorkforcePlanRecord['planningPriority'])
 };
 
 const buildProjection = (plan: WorkforcePlanRecord, requestType: WorkforceRequestType, requestedFte: number) => {
-  const averageRoleCost = plan.approvedFte ? plan.payrollRunRateUsd / Math.max(plan.filledFte, 1) : 0;
+  const averageRoleCost = plan.approvedFte ? plan.payrollRunRateNgn / Math.max(plan.filledFte, 1) : 0;
 
   if (requestType === 'Add Headcount') {
     const projectedApprovedFte = round1(plan.approvedFte + requestedFte);
@@ -169,7 +169,7 @@ const buildProjection = (plan: WorkforcePlanRecord, requestType: WorkforceReques
       projectedApprovedFte,
       projectedFilledFte,
       projectedGapFte,
-      incrementalBudgetUsd: Math.round(averageRoleCost * requestedFte),
+      incrementalBudgetNgn: Math.round(averageRoleCost * requestedFte),
       impactSummary: `Adds ${requestedFte} FTE to the approved structure and lifts target filled capacity to ${projectedFilledFte} FTE when the request is fully actioned.`,
     };
   }
@@ -182,7 +182,7 @@ const buildProjection = (plan: WorkforcePlanRecord, requestType: WorkforceReques
       projectedApprovedFte,
       projectedFilledFte,
       projectedGapFte,
-      incrementalBudgetUsd: Math.round(averageRoleCost * requestedFte),
+      incrementalBudgetNgn: Math.round(averageRoleCost * requestedFte),
       impactSummary: `Backfills up to ${requestedFte} FTE from the current gap and reduces the unresolved demand to ${projectedGapFte} FTE.`,
     };
   }
@@ -195,7 +195,7 @@ const buildProjection = (plan: WorkforcePlanRecord, requestType: WorkforceReques
       projectedApprovedFte,
       projectedFilledFte,
       projectedGapFte,
-      incrementalBudgetUsd: Math.round(averageRoleCost * requestedFte * 0.6),
+      incrementalBudgetNgn: Math.round(averageRoleCost * requestedFte * 0.6),
       impactSummary: `Introduces temporary cover for ${requestedFte} FTE and reduces short-term delivery risk while permanent action is completed.`,
     };
   }
@@ -204,7 +204,7 @@ const buildProjection = (plan: WorkforcePlanRecord, requestType: WorkforceReques
     projectedApprovedFte: plan.approvedFte,
     projectedFilledFte: plan.filledFte,
     projectedGapFte: plan.openDemandFte,
-    incrementalBudgetUsd: 0,
+    incrementalBudgetNgn: 0,
     impactSummary: 'Triggers a structure review without changing approved FTE until redesign decisions are approved.',
   };
 };
@@ -247,8 +247,8 @@ const buildPlanRecord = (groupKey: string, positions: PositionRecord[]): Workfor
   const successionCoveragePct = average(positions.map((position) => position.successionCoveragePct));
   const attritionRiskPct = average(positions.map((position) => position.attritionRiskPct));
   const approvalCoveragePct = average(positions.map((position) => position.approvalCoveragePct));
-  const payrollRunRateUsd = Math.round(filled.reduce((sum, position) => sum + position.benchmarkSalaryUsd, 0));
-  const openBudgetUsd = Math.round(openDemand.reduce((sum, position) => sum + position.benchmarkSalaryUsd, 0));
+  const payrollRunRateNgn = Math.round(filled.reduce((sum, position) => sum + position.benchmarkSalaryNgn, 0));
+  const openBudgetNgn = Math.round(openDemand.reduce((sum, position) => sum + position.benchmarkSalaryNgn, 0));
   const standardizationPct = approvedPositions ? round1((positions.filter((position) => position.standardPosition).length / approvedPositions) * 100) : 0;
   const healthStatus = resolveHealth({ vacancyRatePct, criticalGapRoles, successionCoveragePct, attritionRiskPct, reviewFte });
   const planningPriority = getPlanningPriority({ criticalGapRoles, vacancyRatePct, immediateBackfills, reviewFte });
@@ -269,8 +269,8 @@ const buildPlanRecord = (groupKey: string, positions: PositionRecord[]): Workfor
     successionCoveragePct,
     attritionRiskPct,
     approvalCoveragePct,
-    payrollRunRateUsd,
-    openBudgetUsd,
+    payrollRunRateNgn,
+    openBudgetNgn,
     standardizationPct,
     healthStatus,
     planningPriority,
@@ -302,7 +302,7 @@ const buildPlanRecord = (groupKey: string, positions: PositionRecord[]): Workfor
         incumbentName: position.incumbentName,
         openDays: position.openDays,
         fte: position.fte,
-        benchmarkSalaryUsd: position.benchmarkSalaryUsd,
+        benchmarkSalaryNgn: position.benchmarkSalaryNgn,
         healthStatus: position.healthStatus,
       })),
   };
@@ -337,7 +337,7 @@ const buildPayload = async (request: Request): Promise<WorkforcePlanningPayload>
   const vacancyRatePct = totalApprovedFte ? round1((totalOpenDemandFte / totalApprovedFte) * 100) : 0;
   const criticalGapRoles = plans.reduce((sum, plan) => sum + plan.criticalGapRoles, 0);
   const immediateBackfills = plans.reduce((sum, plan) => sum + plan.immediateBackfills, 0);
-  const openBudgetUsd = Math.round(plans.reduce((sum, plan) => sum + plan.openBudgetUsd, 0));
+  const openBudgetNgn = Math.round(plans.reduce((sum, plan) => sum + plan.openBudgetNgn, 0));
   const avgSuccessionCoverage = average(plans.map((plan) => plan.successionCoveragePct));
   const avgAttritionRisk = average(plans.map((plan) => plan.attritionRiskPct));
 
@@ -386,7 +386,7 @@ const buildPayload = async (request: Request): Promise<WorkforcePlanningPayload>
       vacancyRatePct,
       criticalGapRoles,
       immediateBackfills,
-      openBudgetUsd,
+      openBudgetNgn,
       avgSuccessionCoverage,
       avgAttritionRisk,
       pendingRequests: requests.filter((request) => request.status === 'Submitted' || request.status === 'Under Review').length,
@@ -477,7 +477,7 @@ export async function POST(request: Request) {
     projectedApprovedFte: projection.projectedApprovedFte,
     projectedFilledFte: projection.projectedFilledFte,
     projectedGapFte: projection.projectedGapFte,
-    incrementalBudgetUsd: projection.incrementalBudgetUsd,
+    incrementalBudgetNgn: projection.incrementalBudgetNgn,
     status: 'Submitted',
     createdAt: new Date().toISOString(),
   };

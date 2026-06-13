@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+
 type Role =
   | 'Super Admin'
   | 'HR Director'
@@ -68,24 +70,45 @@ const addToIndex = (employeeId: string, requestId: string) => {
   if (!ids.includes(requestId)) s.index.set(employeeId, [requestId, ...ids].slice(0, 120));
 };
 
-const listEmployees = () => {
-  const s = stores();
-  const ids = Array.from(s.employees.keys()).slice(0, 200);
-  const fallback = Array.from({ length: 50 }).map((_, i) => `DLE-EMP-${String(i + 1).padStart(5, '0')}`);
-  const list = (ids.length ? ids : fallback).slice(0, 120);
-  return list.map((employeeId, idx) => ({
-    employeeId,
-    fullName: `Employee ${String(idx + 1).padStart(2, '0')}`,
-    department: idx % 2 === 0 ? 'Projects' : 'Corporate Services',
-    jobTitle: idx % 3 === 0 ? 'Engineer' : idx % 3 === 1 ? 'Officer' : 'Supervisor',
-    currentManager: idx % 4 === 0 ? 'Line Manager' : 'Department Head',
-    location: idx % 2 === 0 ? 'Lagos HQ' : 'Port Harcourt',
-    businessUnit: idx % 2 === 0 ? 'Operations' : 'Corporate Services',
-    employmentStatus: idx % 9 === 0 ? 'Suspended' : 'Active',
-  }));
+type ReportingEmployeeOption = {
+  employeeId: string;
+  fullName: string;
+  department: string;
+  jobTitle: string;
+  currentManager: string;
+  location: string;
+  businessUnit: string;
+  employmentStatus: string;
+  functionalManager: string;
+  departmentHead: string;
+  hrBusinessPartner: string;
 };
 
-const formOptions = () => ({
+const uniqueSorted = (values: Array<string | undefined | null>) =>
+  Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+const readRows = async () => (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+
+const toEmployeeOption = (row: DleEmployeeDirectoryRow): ReportingEmployeeOption => ({
+  employeeId: row.employeeId,
+  fullName: row.fullName,
+  department: row.department,
+  jobTitle: row.jobTitle,
+  currentManager: row.managerName || '',
+  location: row.location,
+  businessUnit: row.businessUnit,
+  employmentStatus: row.status,
+  functionalManager: row.functionalManager || '',
+  departmentHead: row.departmentHead || '',
+  hrBusinessPartner: row.hrBusinessPartner || '',
+});
+
+const listEmployees = async () => {
+  const rows = await readRows();
+  return rows.map(toEmployeeOption);
+};
+
+const formOptions = (rows: DleEmployeeDirectoryRow[]) => ({
   changeTypes: [
     'Manager Change',
     'Functional Manager Change',
@@ -114,9 +137,9 @@ const formOptions = () => ({
     'Project supervisor',
     'Alternate approver',
   ],
-  departments: ['Civil Engineering', 'Mechanical Engineering', 'Electrical & Instrumentation', 'Project Controls', 'HSE', 'Quality Assurance', 'Procurement', 'Finance', 'Human Capital', 'IT & Support', 'Legal & Compliance', 'Executive Office'],
-  businessUnits: ['Operations', 'Corporate Services', 'Projects', 'Commercial'],
-  locations: ['Lagos HQ', 'Port Harcourt', 'Warri Yard', 'Bonny Island', 'Remote'],
+  departments: uniqueSorted(rows.map((row) => row.department)),
+  businessUnits: uniqueSorted(rows.map((row) => row.businessUnit)),
+  locations: uniqueSorted(rows.flatMap((row) => [row.location, row.workLocation, row.officeLocation])),
 });
 
 const buildPdfBytes = (title: string, lines: string[]) => {
@@ -170,21 +193,27 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
 
   if (seg0 === 'form-options') {
     const includeEmployees = url.searchParams.get('includeEmployees') === '1';
-    return jsonOk({ ...formOptions(), employees: includeEmployees ? listEmployees() : [] });
+    const rows = await readRows();
+    return jsonOk({ ...formOptions(rows), employees: includeEmployees ? rows.map(toEmployeeOption) : [] });
   }
 
   if (seg0 === 'summary') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
+    const rows = await readRows();
     const s = stores();
-    const totalEmployees = Math.max(50, s.employees.size);
-    const pendingChanges = Math.max(6, s.requests.size ? Math.floor(s.requests.size / 2) : 10);
+    const totalEmployees = rows.length;
+    const pendingChanges = Array.from(s.requests.values()).filter((req: any) => req && !['Approved', 'Cancelled', 'Completed'].includes(String(req.status || ''))).length;
+    const missingManagers = rows.filter((row) => !row.managerName).length;
+    const approvalChainGaps = rows.filter((row) => !row.managerName || !row.departmentHead || !row.hrBusinessPartner).length;
+    const circularRiskFlags = rows.filter((row) => row.managerName && row.managerName.toLowerCase() === row.fullName.toLowerCase()).length;
     return jsonOk({
       totalEmployees,
       pendingChanges,
-      missingManagers: 4,
-      approvalChainGaps: 3,
-      delegationExpiringSoon: 2,
-      circularRiskFlags: 1,
+      missingManagers,
+      approvalChainGaps,
+      delegationExpiringSoon: 0,
+      circularRiskFlags,
+      uniqueManagers: uniqueSorted(rows.map((row) => row.managerName)).length,
       lastUpdatedAt: new Date().toISOString(),
     });
   }
@@ -192,16 +221,27 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   if (seg0 === 'ai-insights') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
     const employeeId = url.searchParams.get('employeeId') || '';
+    const rows = await readRows();
+    const row = employeeId ? rows.find((item) => item.employeeId.toLowerCase() === employeeId.toLowerCase() || item.employeeCode.toLowerCase() === employeeId.toLowerCase()) : null;
+    const missingManagers = rows.filter((item) => !item.managerName).length;
+    const wideManagers = Array.from(
+      rows.reduce((map, item) => {
+        const key = item.managerName || '';
+        if (!key) return map;
+        map.set(key, (map.get(key) || 0) + 1);
+        return map;
+      }, new Map<string, number>()),
+    ).filter(([, count]) => count > 12);
     const out: ReportingInsight[] = [];
     const add = (severity: Severity, title: string, confidence: number, recommendation: string, actionLabel: string, actionKey: string) =>
       out.push({ id: `rep-ai-${employeeId || 'org'}-${Math.random().toString(16).slice(2)}`, severity, confidence, title, recommendation, actionLabel, action: actionKey });
 
-    add('high', 'Approval chain has a missing second-level approver', 0.84, 'Assign department head or level 2 approver to remove routing blockage.', 'Open Chain', 'open_approval_chain');
-    add('medium', 'Manager has exceeded recommended span of control', 0.72, 'Review team size and consider reassignment or adding supervisor layers.', 'Review Manager', 'open_manager');
-    add('medium', 'Delegated approver expires in 3 days', 0.74, 'Extend delegation or configure fallback approver.', 'Review Delegation', 'open_delegation');
-    add('low', 'Project reporting line conflicts with department reporting line', 0.66, 'Validate matrix reporting and ensure org chart edges are correct.', 'Open Org Chart', 'open_org_chart');
-
-    if (employeeId) add('high', 'Circular reporting risk detected', 0.86, 'Block circular reporting and resubmit corrected hierarchy.', 'Resolve', 'open_request');
+    if (row && !row.managerName) add('high', 'Direct reporting manager is missing', 0.88, 'Assign a direct manager to restore approval routing and accountability.', 'Assign Manager', 'open_request');
+    if (row && !row.departmentHead) add('medium', 'Department head is missing', 0.76, 'Assign department head coverage for escalation and departmental approvals.', 'Open Chain', 'open_approval_chain');
+    if (row && row.managerName && row.managerName.toLowerCase() === row.fullName.toLowerCase()) add('high', 'Circular reporting risk detected', 0.9, 'Employee cannot report to self. Submit a corrected manager assignment.', 'Resolve', 'open_request');
+    if (missingManagers > 0) add('high', `${missingManagers} employee${missingManagers === 1 ? '' : 's'} without direct managers`, 0.82, 'Review unassigned reporting lines and route manager assignment requests.', 'Open Records', 'open_manager');
+    if (wideManagers.length > 0) add('medium', `${wideManagers.length} manager${wideManagers.length === 1 ? '' : 's'} above span threshold`, 0.72, 'Review span of control and consider supervisor layers where teams are too large.', 'Review Manager', 'open_manager');
+    if (out.length === 0) add('low', 'Reporting lines are within expected controls', 0.64, 'No urgent manager, department head, or circular reporting exceptions were detected.', 'Review Org Chart', 'open_org_chart');
     return jsonOk(out.slice(0, 12));
   }
 
@@ -231,27 +271,27 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
       'Status',
       'Reason',
     ];
-    const employees = listEmployees().slice(0, 80);
+    const employees = (await listEmployees()).slice(0, 1000);
     const rows = employees
       .filter((e) => (employeeId ? e.employeeId === employeeId : true))
-      .map((e, idx) => [
+      .map((e) => [
         e.employeeId,
         e.fullName,
         e.currentManager,
-        idx % 3 === 0 ? 'Functional Manager' : '',
-        'Department Head',
-        idx % 2 === 0 ? 'Unit Head' : 'Unit Head',
-        idx % 2 === 0 ? 'Business Unit Head' : 'Business Unit Head',
-        idx % 2 === 0 ? 'Project Manager' : '',
-        idx % 2 === 0 ? 'Site Supervisor' : '',
-        idx % 2 === 0 ? 'Matrix Manager' : '',
-        idx % 4 === 0 ? 'Dotted Manager' : '',
-        'HRBP',
-        idx % 6 === 0 ? 'Delegated Approver' : '',
-        '2026-02-01',
+        e.functionalManager,
+        e.departmentHead,
+        '',
+        '',
+        '',
+        '',
+        e.functionalManager,
+        '',
+        e.hrBusinessPartner,
+        '',
+        '',
         '',
         'Active',
-        'Baseline reporting line',
+        'System database reporting line',
       ]);
 
     if (format === 'xls' || format === 'excel') {
@@ -285,7 +325,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
       });
     }
     if (format === 'png') {
-      return jsonErr(501, 'PNG export is not available in this demo build');
+      return jsonErr(501, 'PNG export is not available for this report format.');
     }
 
     const csv = [header, ...rows].map((r) => r.map((c) => csvCell(String(c ?? ''))).join(',')).join('\n');
@@ -311,29 +351,37 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
   const currentManager = typeof body?.currentManager === 'string' ? body.currentManager.trim() : '';
   const newManager = typeof body?.newManager === 'string' ? body.newManager.trim() : '';
   const employeeIds = Array.isArray(body?.employeeIds) ? (body.employeeIds as any[]).filter((x) => typeof x === 'string').map((x) => x.trim()).filter(Boolean) : [];
-  if (!currentManager) return jsonErr(400, 'Current manager is required');
-  if (!newManager) return jsonErr(400, 'New manager is required');
-  if (newManager.toLowerCase().includes('inactive')) return jsonErr(400, 'Cannot assign to inactive manager');
+  if (!currentManager) return jsonErr(400, 'Current manager/supervisor is required');
+  if (!newManager) return jsonErr(400, 'New manager/supervisor is required');
+  if (newManager.toLowerCase().includes('inactive')) return jsonErr(400, 'Cannot assign to inactive manager/supervisor');
 
   const s = stores();
-  const candidates = listEmployees().filter((e) => e.currentManager === currentManager).map((e) => e.employeeId);
+  const employees = await listEmployees();
+  const resolveSupervisor = (value: string) => {
+    const needle = value.trim().toLowerCase();
+    const match = employees.find((e) => e.employeeId.toLowerCase() === needle || e.fullName.toLowerCase() === needle);
+    return match?.fullName || value.trim();
+  };
+  const currentSupervisor = resolveSupervisor(currentManager);
+  const newSupervisor = resolveSupervisor(newManager);
+  const candidates = employees.filter((e) => e.currentManager === currentManager || e.currentManager === currentSupervisor).map((e) => e.employeeId);
   const impacted = (employeeIds.length ? employeeIds : candidates).slice(0, 250);
-  if (impacted.length === 0) return jsonErr(400, 'No employees found for the selected current manager');
+  if (impacted.length === 0) return jsonErr(400, 'No employees found for the selected current manager/supervisor');
 
   const now = new Date().toISOString();
   const requestId = `repreq-bulk-${Math.random().toString(16).slice(2)}`;
   const req = {
     id: requestId,
     employeeId: 'BULK',
-    employeeName: 'Bulk Manager Reassignment',
+    employeeName: 'Bulk Supervisor Reassignment',
     changeType: 'Bulk Manager Reassignment',
     status: 'Draft',
     effectiveDate: typeof body?.effectiveDate === 'string' && body.effectiveDate.trim() ? body.effectiveDate.trim() : now.slice(0, 10),
     endDate: null,
-    reason: typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : `Bulk reassignment from ${currentManager} to ${newManager}`,
+    reason: typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : `Bulk reassignment from ${currentSupervisor} to ${newSupervisor}`,
     notes: typeof body?.notes === 'string' && body.notes.trim() ? body.notes.trim() : null,
-    previousValues: { directManager: currentManager },
-    newValues: { directManager: newManager },
+    previousValues: { directManager: currentSupervisor },
+    newValues: { directManager: newSupervisor },
     delegations: [],
     supportingDocuments: [],
     approvals: [],

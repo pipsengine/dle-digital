@@ -8,11 +8,15 @@ import {
   Building2,
   Download,
   Layers3,
-  MapPin,
+  Pencil,
+  Plus,
   RefreshCcw,
   Search,
   ShieldCheck,
+  Save,
+  Trash2,
   Users,
+  X,
 } from 'lucide-react';
 import type { DepartmentRecord, HealthStatus, StructureInsight } from '@/lib/organization-data';
 
@@ -42,9 +46,47 @@ type Payload = {
   insights: StructureInsight[];
 };
 
+type DepartmentsClientProps = {
+  initialPayload?: Payload | null;
+  initialError?: string | null;
+};
+
+type DepartmentForm = {
+  id?: string;
+  name: string;
+  code: string;
+  parentName: string;
+  leader: string;
+  location: string;
+  healthStatus: HealthStatus;
+  openRoles: string;
+  budgetNgn: string;
+  spanOfControl: string;
+  successionCoveragePct: string;
+  attritionRiskPct: string;
+  costCenter: string;
+  description: string;
+};
+
+const emptyForm: DepartmentForm = {
+  name: '',
+  code: '',
+  parentName: '',
+  leader: '',
+  location: '',
+  healthStatus: 'Healthy',
+  openRoles: '0',
+  budgetNgn: '0',
+  spanOfControl: '0',
+  successionCoveragePct: '0',
+  attritionRiskPct: '0',
+  costCenter: '',
+  description: '',
+};
+
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(value);
 
 const healthTone = (status: HealthStatus) => {
   if (status === 'Critical') return 'bg-red-50 text-red-700 border-red-200';
@@ -58,16 +100,21 @@ const insightTone = (severity: StructureInsight['severity']) => {
   return 'border-emerald-200 bg-emerald-50';
 };
 
-export default function DepartmentsClient() {
-  const [payload, setPayload] = useState<Payload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export default function DepartmentsClient({ initialPayload = null, initialError = null }: DepartmentsClientProps) {
+  const [payload, setPayload] = useState<Payload | null>(initialPayload);
+  const [loading, setLoading] = useState(!initialPayload && !initialError);
+  const [error, setError] = useState<string | null>(initialError);
   const [query, setQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<'All' | string>('All');
   const [healthFilter, setHealthFilter] = useState<'All' | HealthStatus>('All');
   const [parentUnitFilter, setParentUnitFilter] = useState<'All' | string>('All');
   const [sortBy, setSortBy] = useState<'headcount' | 'openRoles' | 'successionCoveragePct' | 'attritionRiskPct'>('headcount');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
+  const [form, setForm] = useState<DepartmentForm>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -87,8 +134,10 @@ export default function DepartmentsClient() {
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    if (initialPayload || initialError) return;
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [initialPayload, initialError]);
 
   const departments = payload?.departments || [];
 
@@ -129,8 +178,110 @@ export default function DepartmentsClient() {
     return visibleDepartments.find((department) => department.id === selectedId) || visibleDepartments[0] || null;
   }, [visibleDepartments, selectedId]);
 
+  const openCreate = () => {
+    setFormMode('create');
+    setForm(emptyForm);
+    setActionError(null);
+    setModalOpen(true);
+  };
+
+  const openEdit = (department: DepartmentRecord) => {
+    setSelectedId(department.id);
+    setFormMode('edit');
+    setForm({
+      id: department.id,
+      name: department.name,
+      code: department.code,
+      parentName: department.parentName || '',
+      leader: department.leader,
+      location: department.location,
+      healthStatus: department.healthStatus,
+      openRoles: String(department.openRoles),
+      budgetNgn: String(department.budgetNgn),
+      spanOfControl: String(department.spanOfControl),
+      successionCoveragePct: String(department.successionCoveragePct),
+      attritionRiskPct: String(department.attritionRiskPct),
+      costCenter: department.costCenter,
+      description: department.description,
+    });
+    setActionError(null);
+    setModalOpen(true);
+  };
+
+  const requestPayload = () => ({
+    ...form,
+    openRoles: Number(form.openRoles || 0),
+    budgetNgn: Number(form.budgetNgn || 0),
+    spanOfControl: Number(form.spanOfControl || 0),
+    successionCoveragePct: Number(form.successionCoveragePct || 0),
+    attritionRiskPct: Number(form.attritionRiskPct || 0),
+  });
+
+  const applyPayload = (data: Payload) => {
+    setPayload(data);
+    setSelectedId((prev) => (prev && data.departments.some((department) => department.id === prev) ? prev : data.departments[0]?.id || null));
+  };
+
+  const saveDepartment = async () => {
+    setSaving(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/hris/organization/departments', {
+        method: formMode === 'create' ? 'POST' : 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(requestPayload()),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to save department');
+      applyPayload(json.data as Payload);
+      setModalOpen(false);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Unable to save department');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteDepartment = async () => {
+    if (!form.id || !window.confirm('Delete this department? Departments with assigned employees cannot be deleted.')) return;
+    setSaving(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/hris/organization/departments?id=${encodeURIComponent(form.id)}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to delete department');
+      applyPayload(json.data as Payload);
+      setModalOpen(false);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Unable to delete department');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const syncFromEmployees = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/hris/organization/departments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh-from-system' }),
+      });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to sync departments');
+      applyPayload(json.data as Payload);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to sync departments');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (!selectedDepartment && visibleDepartments.length) setSelectedId(visibleDepartments[0].id);
+    if (selectedDepartment || !visibleDepartments.length) return;
+    const timer = window.setTimeout(() => setSelectedId(visibleDepartments[0].id), 0);
+    return () => window.clearTimeout(timer);
   }, [selectedDepartment, visibleDepartments]);
 
   const exportCsv = () => {
@@ -149,8 +300,8 @@ export default function DepartmentsClient() {
         'Team Headcount',
         'Succession Coverage %',
         'Attrition Risk %',
-        'Budget USD',
-        'Payroll USD',
+        'Budget NGN',
+        'Payroll NGN',
         'Cost Center',
       ],
       ...visibleDepartments.map((department) => [
@@ -166,8 +317,8 @@ export default function DepartmentsClient() {
         String(department.teamHeadcount),
         String(department.successionCoveragePct),
         String(department.attritionRiskPct),
-        String(department.budgetUsd),
-        String(department.payrollUsd),
+        String(department.budgetNgn),
+        String(department.payrollNgn),
         department.costCenter,
       ]),
     ];
@@ -235,19 +386,38 @@ export default function DepartmentsClient() {
             }}
           />
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setQuery('');
-            setLocationFilter('All');
-            setHealthFilter('All');
-            setParentUnitFilter('All');
-            setSortBy('headcount');
-          }}
-          className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          Reset Filters
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-dle-blue text-white text-xs font-semibold hover:bg-dle-blue/90"
+          >
+            <Plus className="w-4 h-4" />
+            New Department
+          </button>
+          <button
+            type="button"
+            onClick={() => void syncFromEmployees()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCcw className="w-4 h-4" />
+            Sync
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              setLocationFilter('All');
+              setHealthFilter('All');
+              setParentUnitFilter('All');
+              setSortBy('headcount');
+            }}
+            className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Reset Filters
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[0.95fr_1.05fr] gap-6">
@@ -274,6 +444,7 @@ export default function DepartmentsClient() {
                     key={department.id}
                     type="button"
                     onClick={() => setSelectedId(department.id)}
+                    onDoubleClick={() => openEdit(department)}
                     className={`w-full text-left rounded-2xl border p-4 transition-colors ${active ? 'border-dle-blue/30 bg-dle-blue/5' : 'border-slate-200 hover:bg-slate-50'}`}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -312,11 +483,21 @@ export default function DepartmentsClient() {
               {selectedDepartment ? (
                 <div className="space-y-5">
                   <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold">{selectedDepartment.code}</span>
-                      <span className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${healthTone(selectedDepartment.healthStatus)}`}>
-                        {selectedDepartment.healthStatus}
-                      </span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold">{selectedDepartment.code}</span>
+                        <span className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${healthTone(selectedDepartment.healthStatus)}`}>
+                          {selectedDepartment.healthStatus}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openEdit(selectedDepartment)}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Edit
+                      </button>
                     </div>
                     <h3 className="text-xl font-bold text-slate-900 mt-3">{selectedDepartment.name}</h3>
                     <p className="text-sm text-slate-500 mt-1">{selectedDepartment.description}</p>
@@ -332,8 +513,8 @@ export default function DepartmentsClient() {
                     <DetailStat label="Cost Center" value={selectedDepartment.costCenter} />
                     <DetailStat label="Headcount" value={formatNumber(selectedDepartment.headcount)} />
                     <DetailStat label="Open Roles" value={formatNumber(selectedDepartment.openRoles)} />
-                    <DetailStat label="Budget" value={formatCurrency(selectedDepartment.budgetUsd)} />
-                    <DetailStat label="Payroll" value={formatCurrency(selectedDepartment.payrollUsd)} />
+                    <DetailStat label="Budget" value={formatCurrency(selectedDepartment.budgetNgn)} />
+                    <DetailStat label="Payroll" value={formatCurrency(selectedDepartment.payrollNgn)} />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -416,7 +597,12 @@ export default function DepartmentsClient() {
             </thead>
             <tbody>
               {visibleDepartments.map((department) => (
-                <tr key={department.id} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedId(department.id)}>
+                <tr
+                  key={department.id}
+                  className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                  onClick={() => setSelectedId(department.id)}
+                  onDoubleClick={() => openEdit(department)}
+                >
                   <td className="px-4 py-3">
                     <div className="text-sm font-semibold text-slate-900">{department.name}</div>
                     <div className="text-xs text-slate-500">{department.code}</div>
@@ -438,6 +624,102 @@ export default function DepartmentsClient() {
           </table>
         </div>
       </div>
+
+      {modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
+          <div className="w-full max-w-4xl max-h-[92vh] overflow-hidden rounded-2xl bg-white shadow-2xl border border-slate-200">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-slate-900">{formMode === 'create' ? 'New Department' : 'Edit Department'}</div>
+                <div className="text-xs text-slate-500 mt-1">Maintain department ownership, location, controls, and operating indicators.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="w-9 h-9 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 inline-flex items-center justify-center"
+                aria-label="Close department editor"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto max-h-[calc(92vh-145px)]">
+              {actionError ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">{actionError}</div> : null}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Department Name" value={form.name} onChange={(value) => setForm((prev) => ({ ...prev, name: value }))} required />
+                <FormField
+                  label="Department Code"
+                  value={form.code}
+                  onChange={(value) => setForm((prev) => ({ ...prev, code: value.toUpperCase() }))}
+                  disabled={formMode === 'edit'}
+                  required
+                />
+                <FormField label="Parent Unit" value={form.parentName} onChange={(value) => setForm((prev) => ({ ...prev, parentName: value }))} />
+                <FormField label="Leader" value={form.leader} onChange={(value) => setForm((prev) => ({ ...prev, leader: value }))} />
+                <FormField label="Location" value={form.location} onChange={(value) => setForm((prev) => ({ ...prev, location: value }))} />
+                <FormField label="Cost Center" value={form.costCenter} onChange={(value) => setForm((prev) => ({ ...prev, costCenter: value }))} />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-slate-600">Health Status</span>
+                  <Select
+                    value={form.healthStatus}
+                    onChange={(value) => setForm((prev) => ({ ...prev, healthStatus: value as HealthStatus }))}
+                    options={['Healthy', 'Needs Attention', 'Critical']}
+                  />
+                </label>
+                <NumberField label="Open Roles" value={form.openRoles} onChange={(value) => setForm((prev) => ({ ...prev, openRoles: value }))} />
+                <NumberField label="Budget NGN" value={form.budgetNgn} onChange={(value) => setForm((prev) => ({ ...prev, budgetNgn: value }))} />
+                <NumberField label="Span Of Control" value={form.spanOfControl} onChange={(value) => setForm((prev) => ({ ...prev, spanOfControl: value }))} />
+                <NumberField label="Succession Coverage %" value={form.successionCoveragePct} onChange={(value) => setForm((prev) => ({ ...prev, successionCoveragePct: value }))} min={0} max={100} />
+                <NumberField label="Attrition Risk %" value={form.attritionRiskPct} onChange={(value) => setForm((prev) => ({ ...prev, attritionRiskPct: value }))} min={0} max={100} />
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-xs font-semibold text-slate-600">Description</span>
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                    rows={4}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 resize-none focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50">
+              <div>
+                {formMode === 'edit' ? (
+                  <button
+                    type="button"
+                    onClick={() => void deleteDepartment()}
+                    disabled={saving}
+                    className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-red-200 bg-white text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(false)}
+                  disabled={saving}
+                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveDepartment()}
+                  disabled={saving || !form.name.trim() || !form.code.trim()}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-dle-blue text-xs font-semibold text-white hover:bg-dle-blue/90 disabled:opacity-60"
+                >
+                  <Save className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Save Department'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </PageTemplate>
   );
 }
@@ -447,21 +729,44 @@ function MetricCard({
   label,
   value,
   detail,
+  tone,
 }: {
   icon: any;
   label: string;
   value: string;
   detail: string;
+  tone?: 'blue' | 'cyan' | 'indigo' | 'slate' | 'emerald' | 'amber';
 }) {
+  const inferredTone =
+    tone ||
+    ({
+      Departments: 'blue',
+      Headcount: 'cyan',
+      'Open Roles': 'indigo',
+      Teams: 'slate',
+      Succession: 'emerald',
+      'Attrition Risk': 'amber',
+    }[label] as NonNullable<typeof tone>) ||
+    'blue';
+  const styles = {
+    blue: 'from-sky-50 to-white border-sky-100 text-sky-700 bg-sky-100',
+    cyan: 'from-cyan-50 to-white border-cyan-100 text-cyan-700 bg-cyan-100',
+    indigo: 'from-indigo-50 to-white border-indigo-100 text-indigo-700 bg-indigo-100',
+    slate: 'from-slate-50 to-white border-slate-200 text-slate-700 bg-slate-100',
+    emerald: 'from-emerald-50 to-white border-emerald-100 text-emerald-700 bg-emerald-100',
+    amber: 'from-amber-50 to-white border-amber-100 text-amber-700 bg-amber-100',
+  }[inferredTone];
+  const [gradientFrom, gradientTo, border, text, iconBg] = styles.split(' ');
+
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+    <div className={`bg-gradient-to-br ${gradientFrom} ${gradientTo} rounded-2xl shadow-sm border ${border} p-4`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
           <div className="text-2xl font-bold text-slate-900 mt-1">{value}</div>
           <div className="text-xs text-slate-500 mt-2">{detail}</div>
         </div>
-        <span className="w-10 h-10 rounded-2xl bg-dle-blue/10 text-dle-blue flex items-center justify-center">
+        <span className={`w-10 h-10 rounded-2xl ${iconBg} ${text} flex items-center justify-center`}>
           <Icon className="w-5 h-5" />
         </span>
       </div>
@@ -471,7 +776,7 @@ function MetricCard({
 
 function DetailStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+    <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-3">
       <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
       <div className="text-sm font-semibold text-slate-900 mt-1">{value}</div>
     </div>
@@ -490,15 +795,78 @@ function ProgressCard({
   display?: string;
 }) {
   const styles = tone === 'emerald' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-blue-500';
+  const cardBg =
+    tone === 'emerald'
+      ? 'from-emerald-50 to-white border-emerald-100'
+      : tone === 'amber'
+        ? 'from-amber-50 to-white border-amber-100'
+        : 'from-blue-50 to-white border-blue-100';
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <div className={`rounded-2xl border bg-gradient-to-br ${cardBg} p-4`}>
       <div className="text-xs font-semibold text-slate-600">{label}</div>
       <div className="text-lg font-bold text-slate-900 mt-1">{display || `${value}%`}</div>
       <div className="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
         <div className={`h-full rounded-full ${styles}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
       </div>
     </div>
+  );
+}
+
+function FormField({
+  label,
+  value,
+  onChange,
+  disabled,
+  required,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  required?: boolean;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="text-xs font-semibold text-slate-600">
+        {label}
+        {required ? <span className="text-red-600"> *</span> : null}
+      </span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-dle-blue/20 disabled:bg-slate-100 disabled:text-slate-500"
+      />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <label className="space-y-1">
+      <span className="text-xs font-semibold text-slate-600">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-dle-blue/20"
+      />
+    </label>
   );
 }
 
