@@ -6,15 +6,15 @@ services:
     image: dle-digital-dashboard:latest
     container_name: dle-digital-dashboard
     ports:
-      - "3000:3000"
+      - "3010:3010"
     volumes:
       - ./apps/dashboard/data:/app/apps/dashboard/data
     environment:
       NODE_ENV: production
-      PORT: 3000
+      PORT: 3010
       HOSTNAME: 0.0.0.0
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      APP_URL: ${APP_URL:-http://localhost:3000}
+      APP_URL: ${APP_URL:-http://localhost:3010}
       BIOMETRIC_DB_HOST: ${BIOMETRIC_DB_HOST:-192.168.5.5}
       BIOMETRIC_DB_PORT: ${BIOMETRIC_DB_PORT:-3306}
       BIOMETRIC_DB_NAME: ${BIOMETRIC_DB_NAME:-unis}

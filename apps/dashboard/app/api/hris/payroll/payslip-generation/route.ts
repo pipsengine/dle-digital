@@ -6,7 +6,7 @@ import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-emplo
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
-import { activeLoansVersion, calculateLoanRecovery, generateLoanInputs, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
+import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayslipStatus = 'Ready' | 'Review' | 'Blocked';
@@ -94,12 +94,13 @@ const statusFrom = (issues: string[]): PayslipStatus => {
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, batches] = await Promise.all([
+  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
     readPayrollPensionConfig(),
     readStatutoryFundsConfig(),
     readPayrollLoansConfig(),
+    readPayrollLoanApplications(),
     readBatches(),
   ]);
   const taxVersion = activeTaxVersion(taxConfig);
@@ -109,18 +110,22 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) throw new Error('One or more payroll configuration versions are missing.');
 
   const currentBatch = batches.find((batch) => batch.period === requestedPeriod) || null;
-  const loanInputs = new Map(generateLoanInputs(employeeSource.employees, loansVersion).map((input) => [input.employee.employeeId, input]));
+  const loanInputs = loanInputsFromApplications(employeeSource.employees, loanApplications).reduce((map, input) => {
+    const current = map.get(input.employee.employeeId) || [];
+    current.push(input);
+    map.set(input.employee.employeeId, current);
+    return map;
+  }, new Map<string, ReturnType<typeof loanInputsFromApplications>>());
   const payslips = employeeSource.employees.map((employee) => {
     const amounts = payrollAmounts(employee);
     const tax = calculatePayrollTax(payrollInputFromEmployee(employee), taxVersion);
     const pension = calculatePension(pensionInputFromEmployee(employee), pensionVersion);
     const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length), fundsVersion);
-    const loanInput = loanInputs.get(employee.employeeId);
-    const loan = loanInput ? calculateLoanRecovery(loanInput, loansVersion) : null;
+    const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
     const paye = roundMoney(tax.monthlyPaye);
     const pensionEmployee = roundMoney(pension.employeeContribution);
     const statutoryEmployee = roundMoney(funds.employeeDeductions);
-    const loanRecovery = roundMoney(loan?.payrollRecovery || 0);
+    const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
     const totalDeductions = roundMoney(paye + pensionEmployee + statutoryEmployee + loanRecovery);
     const netPay = roundMoney(Math.max(0, amounts.grossPay - totalDeductions));
     const issues = [
@@ -131,7 +136,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       ...!activeEmployee(employee) ? ['Employee is not payroll active'] : [],
       ...pension.issues.filter((issue) => issue.includes('missing') || issue.includes('not payroll active')).map((issue) => `Pension: ${issue}`),
       ...funds.issues.map((issue) => `Statutory: ${issue}`),
-      ...loan?.issues.filter((issue) => issue.includes('missing') || issue.includes('disabled')).map((issue) => `Loan: ${issue}`) || [],
+      ...loans.flatMap((loan) => loan.issues.filter((issue) => issue.includes('missing') || issue.includes('disabled')).map((issue) => `Loan: ${issue}`)),
     ];
     const status = statusFrom(issues);
     const deliveryStatus: DeliveryStatus = currentBatch?.status === 'Released' && status !== 'Blocked' ? 'Released' : currentBatch ? status === 'Blocked' ? 'Withheld' : 'Generated' : 'Draft';

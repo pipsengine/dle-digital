@@ -1,7 +1,7 @@
 'use client';
 
 import { Search, Bell, Menu } from 'lucide-react';
-import Image from 'next/image';
+import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
 
 export function Header({ 
   toggleSidebar
@@ -9,8 +9,8 @@ export function Header({
   toggleSidebar: () => void; 
 }) {
   return (
-    <header className="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-6 sticky top-0 z-30">
-      <div className="flex items-center gap-4 flex-1">
+    <header className="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-3 sm:px-6 sticky top-0 z-30">
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <button onClick={toggleSidebar} className="p-2 -ml-2 text-slate-500 hover:text-slate-900 lg:hidden">
           <Menu className="w-5 h-5" />
         </button>
@@ -25,28 +25,20 @@ export function Header({
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-3 lg:gap-4">
         <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-dle-green/10 text-dle-green rounded-full text-xs font-medium">
           <div className="w-2 h-2 rounded-full bg-dle-green animate-pulse"></div>
           Systems Optimal
         </div>
 
-        <button className="relative w-9 h-9 flex items-center justify-center text-slate-500 hover:bg-slate-50 rounded-full transition-colors">
+        <button className="relative hidden h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-50 min-[360px]:flex">
           <Bell className="w-5 h-5" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-dle-red border-2 border-white"></span>
         </button>
 
-        <div className="h-6 w-px bg-slate-200 mx-1"></div>
+        <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block"></div>
 
-        <button className="flex items-center gap-2 pl-2">
-          <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden relative">
-            <Image src="https://picsum.photos/seed/dle-exec/100/100" alt="Executive User" fill referrerPolicy="no-referrer" className="object-cover" />
-          </div>
-          <div className="hidden md:flex flex-col items-start leading-tight">
-            <span className="text-sm font-medium text-slate-900">Engr. Adeoye</span>
-            <span className="text-xs text-slate-500 font-mono">EXEC-DIR</span>
-          </div>
-        </button>
+        <EnterpriseUserProfile context="enterprise" />
       </div>
     </header>
   );

@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BadgeCheck, Banknote, Building2, Download, FileText, Home, RefreshCcw, Save, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Banknote, Building2, Download, FileText, Home, RefreshCcw, Search, Settings2, ShieldCheck, Users, WalletCards, X } from 'lucide-react';
 
 type Role = 'Payroll Officer' | 'Finance Controller' | 'HR Director' | 'HR Manager' | 'Executive Management' | 'Auditor' | 'Employee';
 type Tone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
@@ -92,10 +92,8 @@ export default function StatutoryFundsClient({ initialNow }: { initialNow: strin
   const [role, setRole] = useState<Role>('Payroll Officer');
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
-  const [configDraft, setConfigDraft] = useState('');
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState('All');
   const [status, setStatus] = useState('All');
@@ -120,11 +118,6 @@ export default function StatutoryFundsClient({ initialNow }: { initialNow: strin
     void load();
   }, [role]);
 
-  useEffect(() => {
-    if (!payload) return;
-    setConfigDraft(JSON.stringify({ schemaVersion: 1, country: 'NG', jurisdiction: payload.config.jurisdiction, activeVersionId: payload.config.activeVersionId, versions: payload.config.versions, audit: payload.config.audit || [] }, null, 2));
-  }, [payload?.config.activeVersionId]);
-
   const canViewMoney = Boolean(payload?.permissions.canViewMoney);
   const version = payload?.config.activeVersion;
   const lastLoaded = payload?.generatedAt || initialNow;
@@ -138,24 +131,6 @@ export default function StatutoryFundsClient({ initialNow }: { initialNow: strin
       return [record.employeeId, record.fullName, record.department, record.payrollGroup].some((value) => String(value || '').toLowerCase().includes(q));
     });
   }, [group, payload?.records, query, status]);
-
-  const saveCurrentConfig = async () => {
-    if (!payload?.permissions.canConfigure) return;
-    setSaving(true);
-    setToast('');
-    try {
-      const config = JSON.parse(configDraft);
-      const res = await fetch('/api/hris/payroll/nhf-nsitf-itf', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hris-role': role }, body: JSON.stringify({ config }) });
-      const json = (await res.json()) as ApiResponse<{ updated: boolean }>;
-      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to save statutory funds configuration');
-      setToast('NHF/NSITF/ITF configuration saved and audit trail updated.');
-      await load();
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : 'Unable to save statutory funds configuration');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const exportCsv = () => {
     window.location.href = '/api/hris/payroll/nhf-nsitf-itf?format=csv';
@@ -181,7 +156,6 @@ export default function StatutoryFundsClient({ initialNow }: { initialNow: strin
         <div className="flex flex-wrap items-center gap-2">
           <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none">{['Payroll Officer', 'Finance Controller', 'HR Director', 'HR Manager', 'Executive Management', 'Auditor', 'Employee'].map((item) => <option key={item}>{item}</option>)}</select>
           <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-extrabold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"><RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />{loading ? 'Refreshing' : 'Refresh'}</button>
-          <button type="button" onClick={saveCurrentConfig} disabled={!payload?.permissions.canConfigure || saving} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"><Save className="h-4 w-4" />{saving ? 'Saving' : 'Save Config'}</button>
           <button type="button" onClick={exportCsv} disabled={!payload?.permissions.canExport} className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-extrabold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"><Download className="h-4 w-4" />Export</button>
         </div>
       </div>
@@ -272,10 +246,6 @@ export default function StatutoryFundsClient({ initialNow }: { initialNow: strin
             ))}
           </div>
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-700">{version?.notes}</div>
-          <div className="mt-4">
-            <label className="text-xs font-black uppercase tracking-normal text-slate-500">Policy Configuration JSON</label>
-            <textarea value={configDraft} onChange={(e) => setConfigDraft(e.target.value)} disabled={!payload?.permissions.canConfigure} className="mt-2 min-h-[260px] w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs font-semibold text-slate-800 outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20 disabled:cursor-not-allowed disabled:text-slate-400" />
-          </div>
         </section>
       )}
 

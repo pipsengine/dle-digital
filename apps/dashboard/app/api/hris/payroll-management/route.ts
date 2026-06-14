@@ -5,16 +5,21 @@ import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPa
 
 type Role =
   | 'Super Admin'
+  | 'System Administrator'
   | 'HR Director'
   | 'HR Manager'
   | 'HR Officer'
   | 'Payroll Officer'
+  | 'Payroll Supervisor'
   | 'Finance Controller'
+  | 'Finance Manager'
+  | 'CFO'
+  | 'Executive Director'
   | 'Executive Management'
   | 'Auditor'
   | 'Employee';
 
-type PayrollRunStatus = 'Draft' | 'Validation' | 'Ready for Approval' | 'Approved' | 'Locked' | 'Posted';
+type PayrollRunStatus = 'Draft' | 'Open' | 'Validation' | 'Ready for Approval' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Revision Requested' | 'Locked' | 'Posted' | 'Closed' | 'Reopened' | 'Cancelled' | 'Published';
 
 type PayrollRun = {
   id: string;
@@ -30,6 +35,24 @@ type PayrollRun = {
   approvedBy: string | null;
   lockedAt: string | null;
   postedAt: string | null;
+  closedAt?: string | null;
+  reopenedAt?: string | null;
+  reopenedBy?: string | null;
+  reopenReason?: string | null;
+};
+
+type PayrollAuditEntry = {
+  id: string;
+  at: string;
+  user: string;
+  role: Role;
+  action: string;
+  record: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  reason?: string | null;
+  comment?: string | null;
+  ip?: string | null;
 };
 
 const jsonOk = <T,>(data: T) => NextResponse.json({ status: 'success', data });
@@ -41,17 +64,19 @@ const compact = (value: unknown) => String(value || '').trim();
 
 const getRole = (request: Request): Role => {
   const value = request.headers.get('x-hris-role');
-  const roles: Role[] = ['Super Admin', 'HR Director', 'HR Manager', 'HR Officer', 'Payroll Officer', 'Finance Controller', 'Executive Management', 'Auditor', 'Employee'];
+  const roles: Role[] = ['Super Admin', 'System Administrator', 'HR Director', 'HR Manager', 'HR Officer', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager', 'CFO', 'Executive Director', 'Executive Management', 'Auditor', 'Employee'];
   return roles.includes(value as Role) ? (value as Role) : 'Payroll Officer';
 };
 
 const permissions = (role: Role) => {
-  const canViewMoney = ['Super Admin', 'HR Director', 'HR Manager', 'Payroll Officer', 'Finance Controller', 'Executive Management', 'Auditor'].includes(role);
-  const canManageRun = ['Super Admin', 'HR Director', 'Payroll Officer', 'Finance Controller'].includes(role);
-  const canApprove = ['Super Admin', 'HR Director', 'Finance Controller', 'Executive Management'].includes(role);
-  const canPost = ['Super Admin', 'Payroll Officer', 'Finance Controller'].includes(role);
+  const canViewMoney = ['Super Admin', 'System Administrator', 'HR Director', 'HR Manager', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager', 'CFO', 'Executive Director', 'Executive Management', 'Auditor'].includes(role);
+  const canManageRun = ['Super Admin', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager'].includes(role);
+  const canApprove = ['Super Admin', 'HR Director', 'HR Manager', 'Finance Controller', 'Finance Manager', 'CFO', 'Executive Director', 'Executive Management'].includes(role);
+  const canPost = ['Super Admin', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager'].includes(role);
+  const canConfigure = ['Super Admin', 'System Administrator'].includes(role);
+  const canReopen = ['Super Admin', 'CFO', 'Executive Director'].includes(role);
   const canExport = role !== 'Employee';
-  return { canViewMoney, canManageRun, canApprove, canPost, canExport };
+  return { canViewMoney, canManageRun, canApprove, canPost, canConfigure, canReopen, canExport };
 };
 
 const runStore = (() => {
@@ -59,6 +84,18 @@ const runStore = (() => {
   if (!g.__dlePayrollRuns) g.__dlePayrollRuns = new Map();
   return g.__dlePayrollRuns;
 })();
+
+const auditStore = (() => {
+  const g = globalThis as unknown as { __dlePayrollAudit?: PayrollAuditEntry[] };
+  if (!g.__dlePayrollAudit) g.__dlePayrollAudit = [];
+  return g.__dlePayrollAudit;
+})();
+
+const logAudit = (request: Request, entry: Omit<PayrollAuditEntry, 'id' | 'at' | 'ip'>) => {
+  const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || null;
+  auditStore.unshift({ id: `aud-${Date.now()}-${Math.random().toString(16).slice(2)}`, at: nowIso(), ip, ...entry });
+  if (auditStore.length > 300) auditStore.length = 300;
+};
 
 const monthPeriod = () => {
   const d = new Date();
@@ -263,6 +300,16 @@ const buildPayload = async (request: Request) => {
       { id: 'approval', label: 'Segregated Approval', status: Array.from(runStore.values())[0]?.status || 'Draft', tone: 'violet' },
       { id: 'audit', label: 'Payroll Audit Trail', status: 'Enabled', tone: 'cyan' },
     ],
+    workflow: {
+      currentStatus: Array.from(runStore.values())[0]?.status || 'Draft',
+      nextOwner: blocked.length ? 'Payroll Officer' : Array.from(runStore.values())[0]?.status === 'Approved' ? 'Finance Manager' : 'Finance Manager / CFO',
+      blockedActions: [
+        ...(blocked.length ? ['Approval is blocked until validation exceptions are resolved.'] : []),
+        ...(!Array.from(runStore.values())[0]?.approvedAt ? ['Payslip publishing, bank schedule generation, and journal posting require payroll approval.'] : []),
+      ],
+      approvalStage: blocked.length ? 'Validation' : Array.from(runStore.values())[0]?.approvedAt ? 'Approved' : 'Awaiting Approval',
+    },
+    auditTrail: auditStore.slice(0, 50),
   };
 };
 
@@ -293,6 +340,7 @@ const csv = (records: any[]) => {
 export async function GET(request: Request) {
   const payload = await buildPayload(request);
   const url = new URL(request.url);
+  if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: auditStore.slice(0, 200) });
   if (url.searchParams.get('format') === 'csv') {
     if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
     return new Response(csv(payload.records), {
@@ -312,14 +360,18 @@ export async function POST(request: Request) {
   const action = compact(body.action);
   const runId = compact(body.runId) || `payroll-${monthPeriod()}`;
   const existing = runStore.get(runId);
+  const actor = compact(body.actor) || role;
+  const reason = compact(body.reason);
+  const comment = compact(body.comment);
 
   if (action === 'create-run') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
     const payload = await buildPayload(request);
+    if (payload.summary.blockedEmployees > 0) return jsonErr(409, 'Cannot process payroll while employees without valid payroll setup are blocked.');
     const run: PayrollRun = {
       id: runId,
       period: payload.period,
-      status: payload.summary.blockedEmployees ? 'Validation' : 'Ready for Approval',
+      status: 'Ready for Approval',
       employeeCount: payload.summary.payrollEligible,
       grossPay: payload.summary.grossPay,
       deductions: payload.summary.deductions,
@@ -330,30 +382,87 @@ export async function POST(request: Request) {
       approvedBy: null,
       lockedAt: null,
       postedAt: null,
+      closedAt: null,
+      reopenedAt: null,
+      reopenedBy: null,
+      reopenReason: null,
     };
     runStore.set(run.id, run);
+    logAudit(request, { user: actor, role, action: 'create-run', record: run.id, oldValue: null, newValue: run.status, reason, comment });
     return jsonOk({ run });
   }
 
   if (!existing) return jsonErr(404, 'Payroll run not found');
+  const before = existing.status;
+
+  if (['approve-run', 'post-run', 'lock-run', 'close-period'].includes(action) && existing.status === 'Closed') {
+    return jsonErr(409, 'Closed payroll periods cannot be edited without approved reopening.');
+  }
+
   if (action === 'approve-run') {
     if (!perms.canApprove) return jsonErr(403, 'Permission denied');
+    if (existing.createdBy === role) return jsonErr(409, 'Self-approval is not allowed.');
+    const payload = await buildPayload(request);
+    if (payload.summary.exceptionCount > 0) return jsonErr(409, 'Cannot approve payroll while validation exceptions are unresolved.');
+    if (!['Ready for Approval', 'Submitted', 'Under Review', 'Validation'].includes(existing.status)) return jsonErr(409, `Cannot approve payroll from ${existing.status}.`);
     existing.status = 'Approved';
     existing.approvedAt = nowIso();
     existing.approvedBy = role;
+    logAudit(request, { user: actor, role, action: 'approve-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
     return jsonOk({ run: existing });
   }
   if (action === 'lock-run') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
+    if (existing.status !== 'Approved') return jsonErr(409, 'Payroll results can only be locked after approval.');
     existing.status = 'Locked';
     existing.lockedAt = nowIso();
+    logAudit(request, { user: actor, role, action: 'lock-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
     return jsonOk({ run: existing });
   }
   if (action === 'post-run') {
     if (!perms.canPost) return jsonErr(403, 'Permission denied');
+    if (!['Approved', 'Locked'].includes(existing.status)) return jsonErr(409, 'Payroll journal cannot be posted before payroll approval.');
     existing.status = 'Posted';
     existing.postedAt = nowIso();
+    logAudit(request, { user: actor, role, action: 'post-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
     return jsonOk({ run: existing });
+  }
+  if (action === 'submit-run') {
+    if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
+    if (!['Ready for Approval', 'Validation', 'Draft', 'Open'].includes(existing.status)) return jsonErr(409, `Cannot submit payroll from ${existing.status}.`);
+    existing.status = 'Submitted';
+    logAudit(request, { user: actor, role, action: 'submit-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'reject-run' || action === 'request-revision') {
+    if (!perms.canApprove) return jsonErr(403, 'Permission denied');
+    existing.status = action === 'reject-run' ? 'Rejected' : 'Revision Requested';
+    logAudit(request, { user: actor, role, action, record: existing.id, oldValue: before, newValue: existing.status, reason: reason || 'Approval decision', comment });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'close-period') {
+    if (!perms.canManageRun && !perms.canApprove) return jsonErr(403, 'Permission denied');
+    if (existing.status !== 'Posted') return jsonErr(409, 'Period closing requires payroll approval, payslips, bank schedule, journal posting, and statutory schedules.');
+    existing.status = 'Closed';
+    existing.closedAt = nowIso();
+    existing.lockedAt = existing.lockedAt || nowIso();
+    logAudit(request, { user: actor, role, action: 'close-period', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'reopen-period') {
+    if (!perms.canReopen) return jsonErr(403, 'Only CFO, Executive Director, or Super Admin can reopen closed payroll periods.');
+    if (existing.status !== 'Closed') return jsonErr(409, 'Only closed periods can be reopened.');
+    if (!reason) return jsonErr(400, 'Reopening requires a reason.');
+    existing.status = 'Reopened';
+    existing.reopenedAt = nowIso();
+    existing.reopenedBy = role;
+    existing.reopenReason = reason;
+    logAudit(request, { user: actor, role, action: 'reopen-period', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
+    return jsonOk({ run: existing });
+  }
+  if (action) {
+    logAudit(request, { user: actor, role, action, record: runId, oldValue: null, newValue: 'Logged', reason, comment });
+    return jsonOk({ run: existing, logged: true });
   }
   return jsonErr(400, 'Unsupported payroll action');
 }

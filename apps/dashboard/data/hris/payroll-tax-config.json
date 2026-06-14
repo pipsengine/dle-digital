@@ -121,7 +121,7 @@
         {
           "id": "employee-loan",
           "label": "Employee Loan Deductions",
-          "enabled": true,
+          "enabled": false,
           "preTax": false,
           "calculationBasis": "percent_of_monthly_base_annualized",
           "rate": 0.015,

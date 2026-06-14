@@ -9,6 +9,13 @@ export type PayrollEmployeeSource = {
   warning: string | null;
 };
 
+type EmployeeSourceCache = {
+  value?: PayrollEmployeeSource;
+  expiresAt: number;
+  staleUntil: number;
+  pending?: Promise<PayrollEmployeeSource>;
+};
+
 export const payrollDataSourceInfo = (source: PayrollEmployeeSource) => ({
   source: source.source,
   databaseAvailable: source.databaseAvailable,
@@ -25,6 +32,33 @@ const resolveDashboardRoot = () => {
 const DATA_ROOT = path.join(resolveDashboardRoot(), 'data', 'hris');
 const str = (value: unknown) => String(value || '').trim();
 const moneyFromRate = (rate: number) => (Number.isFinite(rate) && rate > 0 ? rate * 22 : 0);
+const EMPLOYEE_SOURCE_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_CACHE_MS || 60000);
+const EMPLOYEE_SOURCE_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_STALE_MS || 900000);
+const EMPLOYEE_SOURCE_FALLBACK_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_CACHE_MS || 10000);
+const EMPLOYEE_SOURCE_FALLBACK_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_STALE_MS || 60000);
+const EMPLOYEE_SOURCE_DB_TIMEOUT_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_DB_TIMEOUT_MS || 5000);
+let employeeSourceCache: EmployeeSourceCache | null = null;
+
+const cacheWindow = (source: PayrollEmployeeSource) => {
+  if (source.databaseAvailable) {
+    return { expiresIn: EMPLOYEE_SOURCE_CACHE_MS, staleFor: EMPLOYEE_SOURCE_STALE_MS };
+  }
+  return { expiresIn: EMPLOYEE_SOURCE_FALLBACK_CACHE_MS, staleFor: EMPLOYEE_SOURCE_FALLBACK_STALE_MS };
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 
 const emptyEmployee = (employeeId: string, fullName: string): DleEmployeeDirectoryRow => ({
   id: employeeId,
@@ -137,9 +171,9 @@ const readCachedPayrollEmployees = async () => {
   return Array.from(byEmployee.values());
 };
 
-export const readPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
+const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
   try {
-    const employees = await readEmployeeDirectoryFromDb();
+    const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
     if (employees?.length) {
       return { employees, source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
     }
@@ -154,4 +188,39 @@ export const readPayrollEmployees = async (): Promise<PayrollEmployeeSource> => 
     databaseAvailable: false,
     warning: 'DLE_Enterprise HRIS database is not available. Showing local cached payroll data until the database connection is restored.',
   };
+};
+
+export const readPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
+  const now = Date.now();
+  if (employeeSourceCache?.value && employeeSourceCache.expiresAt > now) return employeeSourceCache.value;
+
+  if (employeeSourceCache?.value && employeeSourceCache.staleUntil > now) {
+    if (!employeeSourceCache.pending) {
+      const staleValue = employeeSourceCache.value;
+      const pending = loadPayrollEmployees()
+        .then((value) => {
+          const window = cacheWindow(value);
+          employeeSourceCache = { value, expiresAt: Date.now() + window.expiresIn, staleUntil: Date.now() + window.staleFor };
+          return value;
+        })
+        .catch(() => {
+          const window = cacheWindow(staleValue);
+          employeeSourceCache = { value: staleValue, expiresAt: Date.now() + window.expiresIn, staleUntil: Date.now() + window.staleFor };
+          return staleValue;
+        });
+      employeeSourceCache.pending = pending;
+      pending.catch(() => undefined);
+    }
+    return employeeSourceCache.value;
+  }
+
+  if (employeeSourceCache?.pending) return employeeSourceCache.pending;
+
+  const pending = loadPayrollEmployees().then((value) => {
+    const window = cacheWindow(value);
+    employeeSourceCache = { value, expiresAt: Date.now() + window.expiresIn, staleUntil: Date.now() + window.staleFor };
+    return value;
+  });
+  employeeSourceCache = { value: employeeSourceCache?.value, expiresAt: 0, staleUntil: 0, pending };
+  return pending;
 };

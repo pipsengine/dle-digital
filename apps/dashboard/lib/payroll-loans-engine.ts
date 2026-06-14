@@ -42,12 +42,29 @@ export type LoanInput = {
   employee: DleEmployeeDirectoryRow;
   monthlyBasePay: number;
   monthlyAllowances: number;
+  applicationId: string;
   productId: string;
   principal: number;
   outstandingBalance: number;
   tenorMonths: number;
   installmentsPaid: number;
   approvalStatus: 'Draft' | 'Submitted' | 'Approved' | 'Active' | 'Paused' | 'Closed' | 'Rejected';
+  purpose?: string;
+  requestedAt?: string;
+};
+export type LoanApplication = {
+  id: string;
+  employeeId: string;
+  productId: string;
+  principal: number;
+  outstandingBalance: number;
+  tenorMonths: number;
+  installmentsPaid: number;
+  approvalStatus: LoanInput['approvalStatus'];
+  purpose: string;
+  requestedAt: string;
+  updatedAt: string;
+  audit: Array<Record<string, unknown>>;
 };
 
 const resolveDashboardRoot = () => {
@@ -57,6 +74,7 @@ const resolveDashboardRoot = () => {
 };
 
 const CONFIG_PATH = path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-loans-config.json');
+const APPLICATIONS_PATH = path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-loan-applications.json');
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
 
@@ -70,6 +88,20 @@ export const writePayrollLoansConfig = async (config: LoansConfig, actor: string
   await mkdir(path.dirname(CONFIG_PATH), { recursive: true });
   await writeFile(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
   return next;
+};
+
+export const readPayrollLoanApplications = async (): Promise<LoanApplication[]> => {
+  try {
+    const parsed = JSON.parse(await readFile(APPLICATIONS_PATH, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+export const writePayrollLoanApplications = async (applications: LoanApplication[]) => {
+  await mkdir(path.dirname(APPLICATIONS_PATH), { recursive: true });
+  await writeFile(APPLICATIONS_PATH, JSON.stringify(applications, null, 2), 'utf8');
 };
 
 export const activeLoansVersion = (config: LoansConfig, asOf = new Date().toISOString()) => {
@@ -105,12 +137,38 @@ export const generateLoanInputs = (employees: DleEmployeeDirectoryRow[], version
         employee,
         monthlyBasePay: amounts.monthlyBasePay,
         monthlyAllowances: amounts.monthlyAllowances,
+        applicationId: `generated-${employee.employeeId}-${product.id}`,
         productId: product.id,
         principal: roundMoney(principal),
         outstandingBalance: roundMoney(outstandingBalance),
         tenorMonths,
         installmentsPaid,
         approvalStatus: approvalStatus as LoanInput['approvalStatus'],
+      };
+    })
+    .filter(Boolean) as LoanInput[];
+};
+
+export const loanInputsFromApplications = (employees: DleEmployeeDirectoryRow[], applications: LoanApplication[]): LoanInput[] => {
+  const employeesById = new Map(employees.map((employee) => [employee.employeeId, employee]));
+  return applications
+    .map((application) => {
+      const employee = employeesById.get(application.employeeId);
+      if (!employee) return null;
+      const amounts = payrollAmountFromEmployee(employee);
+      return {
+        employee,
+        monthlyBasePay: amounts.monthlyBasePay,
+        monthlyAllowances: amounts.monthlyAllowances,
+        applicationId: application.id,
+        productId: application.productId,
+        principal: roundMoney(application.principal),
+        outstandingBalance: roundMoney(application.outstandingBalance),
+        tenorMonths: Math.max(1, Number(application.tenorMonths || 1)),
+        installmentsPaid: Math.max(0, Number(application.installmentsPaid || 0)),
+        approvalStatus: application.approvalStatus,
+        purpose: application.purpose,
+        requestedAt: application.requestedAt,
       };
     })
     .filter(Boolean) as LoanInput[];

@@ -6,7 +6,7 @@ import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-emplo
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
-import { activeLoansVersion, calculateLoanRecovery, generateLoanInputs, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
+import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type RunStatus = 'Draft' | 'Calculated' | 'Submitted' | 'Finance Approved' | 'HR Approved' | 'Locked' | 'Posted' | 'Rejected';
@@ -101,12 +101,13 @@ const statusFromIssues = (issues: string[]): RecordStatus => {
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, runs] = await Promise.all([
+  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, runs] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
     readPayrollPensionConfig(),
     readStatutoryFundsConfig(),
     readPayrollLoansConfig(),
+    readPayrollLoanApplications(),
     readRuns(),
   ]);
 
@@ -116,18 +117,22 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   const loansVersion = activeLoansVersion(loansConfig);
   if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) throw new Error('One or more active payroll configuration versions are missing.');
 
-  const loanInputs = new Map(generateLoanInputs(employeeSource.employees, loansVersion).map((input) => [input.employee.employeeId, input]));
+  const loanInputs = loanInputsFromApplications(employeeSource.employees, loanApplications).reduce((map, input) => {
+    const current = map.get(input.employee.employeeId) || [];
+    current.push(input);
+    map.set(input.employee.employeeId, current);
+    return map;
+  }, new Map<string, ReturnType<typeof loanInputsFromApplications>>());
   const records = employeeSource.employees.map((employee) => {
     const amounts = payrollAmounts(employee);
     const tax = calculatePayrollTax(payrollInputFromEmployee(employee), taxVersion);
     const pension = calculatePension(pensionInputFromEmployee(employee), pensionVersion);
     const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length), fundsVersion);
-    const loanInput = loanInputs.get(employee.employeeId);
-    const loan = loanInput ? calculateLoanRecovery(loanInput, loansVersion) : null;
+    const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
     const paye = tax.monthlyPaye;
     const employeePension = pension.employeeContribution;
     const statutoryEmployee = funds.employeeDeductions;
-    const loanRecovery = loan?.payrollRecovery || 0;
+    const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
     const otherDeductions = 0;
     const totalDeductions = roundMoney(paye + employeePension + statutoryEmployee + loanRecovery + otherDeductions);
     const netPay = roundMoney(Math.max(0, amounts.grossPay - totalDeductions));
@@ -143,7 +148,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       ...!activeStatus(employee.status) ? ['Employee is not payroll active'] : [],
       ...pension.issues.filter((issue) => issue !== 'RSA PIN is not on file' && issue !== 'PFA provider is not assigned').map((issue) => `Pension: ${issue}`),
       ...funds.issues.map((issue) => `Statutory: ${issue}`),
-      ...loan?.issues.filter((issue) => issue !== 'Loan is not approved for payroll recovery').map((issue) => `Loan: ${issue}`) || [],
+      ...loans.flatMap((loan) => loan.issues.filter((issue) => issue !== 'Loan is not approved for payroll recovery').map((issue) => `Loan: ${issue}`)),
       ...deductionRatio > 45 ? ['Deduction ratio exceeds 45% control threshold'] : [],
       ...netPay <= 0 && amounts.grossPay > 0 ? ['Net pay is zero after deductions'] : [],
     ];

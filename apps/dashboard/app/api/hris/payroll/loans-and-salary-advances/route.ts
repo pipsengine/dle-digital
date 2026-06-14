@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { activeLoansVersion, calculateLoanRecovery, generateLoanInputs, readPayrollLoansConfig, writePayrollLoansConfig, type LoansConfig } from '@/lib/payroll-loans-engine';
+import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig, writePayrollLoansConfig, type LoansConfig } from '@/lib/payroll-loans-engine';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 
@@ -46,14 +46,14 @@ const maskMoney = (record: any) => ({
 const buildPayload = async (request: Request) => {
   const role = getRole(request);
   const perms = permissions(role);
-  const [employeeSource, config] = await Promise.all([readPayrollEmployees(), readPayrollLoansConfig()]);
+  const [employeeSource, config, applications] = await Promise.all([readPayrollEmployees(), readPayrollLoansConfig(), readPayrollLoanApplications()]);
   const version = activeLoansVersion(config);
   if (!version) throw new Error('No active loans and salary advances configuration is available.');
-  const loanInputs = generateLoanInputs(employeeSource.employees, version);
+  const loanInputs = loanInputsFromApplications(employeeSource.employees, applications);
   const records = loanInputs.map((input) => {
     const computed = calculateLoanRecovery(input, version);
     return {
-      id: `${input.employee.employeeId}-${input.productId}`,
+      id: input.applicationId,
       employeeId: input.employee.employeeId,
       fullName: input.employee.fullName,
       department: input.employee.department,
@@ -68,6 +68,8 @@ const buildPayload = async (request: Request) => {
       productName: computed.product?.label || input.productId,
       productType: computed.product?.type || 'Loan',
       approvalStatus: input.approvalStatus,
+      purpose: input.purpose || '',
+      requestedAt: input.requestedAt || null,
       principal: input.principal,
       outstandingBalance: input.outstandingBalance,
       tenorMonths: input.tenorMonths,
@@ -103,7 +105,7 @@ const buildPayload = async (request: Request) => {
   const period = monthPeriod();
   return {
     generatedAt: new Date().toISOString(),
-    source: 'Configurable payroll loans and salary advances engine',
+    source: 'Employee-submitted loans and salary advances',
     dataSource: payrollDataSourceInfo(employeeSource),
     period,
     periodLabel: periodLabel(period),

@@ -5,9 +5,26 @@ import ExecutiveHRDashboardClient from './ExecutiveHRDashboardClient';
 
 export const dynamic = 'force-dynamic';
 
+const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T | null> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 export default async function ExecutiveHRDashboard() {
-  const employees = (await readPayrollEmployees()).employees;
-  const attendance = await readLiveDailyAttendance().catch(() => null);
+  const [employeeSource, attendance] = await Promise.all([
+    readPayrollEmployees(),
+    withTimeout(readLiveDailyAttendance().catch(() => null), Number(process.env.HRIS_DASHBOARD_ATTENDANCE_TIMEOUT_MS || 350)),
+  ]);
+  const employees = employeeSource.employees;
   return (
     <HRISDashboardLayout>
       <ExecutiveHRDashboardClient employees={employees} attendanceRecords={attendance?.records || []} attendanceDate={attendance?.attendanceDate || null} generatedAt={new Date().toISOString()} />
