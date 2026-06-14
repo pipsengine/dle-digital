@@ -255,7 +255,8 @@ const calculateOvertime = (firstPunch: string | null, lastPunch: string | null) 
   const last = minutesFromTime(lastPunch);
   if (first === null || last === null || first === last) return 0;
   const span = last >= first ? last - first : last + 1440 - first;
-  return Math.round(Math.max(0, span / 60 - 9) * 10) / 10;
+  const paidHours = span / 60 > 8 ? span / 60 - 1 : span / 60;
+  return Math.round(Math.max(0, paidHours - 8) * 10) / 10;
 };
 
 const resolveLiveAttendanceDateRaw = async (requestedDate?: string) => {

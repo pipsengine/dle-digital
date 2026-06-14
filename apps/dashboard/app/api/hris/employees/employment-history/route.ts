@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -265,6 +266,57 @@ const ensureSeedData = () => {
 
 const parseCsv = (v: string | null) => (v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
 
+const dbHistoryRows = async (): Promise<EmploymentHistoryItem[]> => {
+  try {
+    const employeeSource = await readPayrollEmployees();
+    const employees = employeeSource.employees;
+    if (!employees.length) return [];
+    return employees
+      .map((employee: any) => {
+        const employeeId = String(employee.employeeId || employee.employeeCode || '').trim();
+        if (!employeeId) return null;
+        const dateJoined = String(employee.dateJoined || employee.contractStartDate || employee.createdAt || '').trim();
+        const effectiveDate = dateJoined ? (dateJoined.includes('T') ? dateJoined : `${dateJoined}T00:00:00.000Z`) : new Date().toISOString();
+        const status = String(employee.status || employee.employmentStatus || 'Active').trim() || 'Active';
+        const row: EmploymentHistoryItem = {
+          id: `db-hist-${employeeId}-employment-baseline`,
+          referenceNo: `DB-HIST-${employeeId}`,
+          employeeId,
+          employeeName: String(employee.fullName || employee.name || employeeId),
+          businessUnit: employee.businessUnit || null,
+          location: employee.location || employee.workLocation || employee.officeLocation || employee.projectSite || null,
+          eventType: 'Onboarding',
+          eventDate: effectiveDate,
+          effectiveDate,
+          previousDepartment: null,
+          newDepartment: employee.department || null,
+          previousJobTitle: null,
+          newJobTitle: employee.jobTitle || employee.designation || null,
+          previousGrade: null,
+          newGrade: employee.jobGrade || null,
+          previousManager: null,
+          newManager: employee.managerName || employee.currentManager || employee.reportingManager || null,
+          previousLocation: null,
+          newLocation: employee.location || employee.workLocation || employee.officeLocation || employee.projectSite || null,
+          previousStatus: null,
+          newStatus: status,
+          reason: 'Current employment baseline sourced from DLE_Enterprise HRIS.',
+          notes: 'Read-only baseline generated from the live employee directory until audited lifecycle events are recorded.',
+          approvalStatus: 'Approved',
+          approvalId: null,
+          approvedBy: 'DLE_Enterprise HRIS',
+          approvedAt: effectiveDate,
+          createdBy: 'DLE_Enterprise HRIS',
+          createdAt: effectiveDate,
+        };
+        return row;
+      })
+      .filter((row): row is EmploymentHistoryItem => Boolean(row));
+  } catch {
+    return [];
+  }
+};
+
 export async function GET(request: Request) {
   ensureSeedData();
   const role = getRole(request);
@@ -294,7 +346,9 @@ export async function GET(request: Request) {
   const fromMs = from ? new Date(`${from}T00:00:00.000Z`).getTime() : null;
   const toMs = to ? new Date(`${to}T23:59:59.999Z`).getTime() : null;
 
-  let rows = Array.from(store.values());
+  const manualRows = Array.from(store.values());
+  const manualEmployeeIds = new Set(manualRows.map((row) => row.employeeId));
+  let rows = [...manualRows, ...(await dbHistoryRows()).filter((row) => !manualEmployeeIds.has(row.employeeId))];
 
   if (!perms.canViewAll) {
     if (!perms.canViewOwn) return jsonErr(403, 'Permission denied');
@@ -355,7 +409,8 @@ export async function GET(request: Request) {
   }
 
   rows.sort((a, b) => (a.effectiveDate < b.effectiveDate ? 1 : -1));
+  const total = rows.length;
   rows = rows.slice(0, limit);
 
-  return jsonOk({ items: rows, total: rows.length, permissions: { ...perms, canCreate: perms.canViewAll && perms.canCreate, canApprove: perms.canViewAll && perms.canApprove, canExport: perms.canExport } });
+  return jsonOk({ items: rows, total, permissions: { ...perms, canCreate: perms.canViewAll && perms.canCreate, canApprove: perms.canViewAll && perms.canApprove, canExport: perms.canExport } });
 }

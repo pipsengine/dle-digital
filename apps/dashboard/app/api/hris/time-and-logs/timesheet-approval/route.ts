@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getUiPermissions, resolveAccessContext } from '@/lib/hris-access';
 import {
   advanceTimesheetWorkflow,
+  normalizePaidWorkHours,
   normalizeTimesheetStatus,
   readTimesheetData,
   readTimesheetPayrollUpdates,
@@ -69,8 +70,8 @@ const buildPayload = async (request: Request) => {
       payrollAcknowledgedAt: header.payrollAcknowledgedAt || payrollUpdate?.acknowledgedAt || null,
       payrollAcknowledgedBy: header.payrollAcknowledgedBy || payrollUpdate?.acknowledgedBy || null,
       totalEmployees: headerLines.length,
-      totalHours: round1(headerLines.reduce((sum, line) => sum + line.totalHours, 0)),
-      attendanceHours: round1(headerLines.reduce((sum, line) => sum + line.attendanceDuration, 0)),
+      totalHours: round1(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.totalHours), 0)),
+      attendanceHours: round1(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.attendanceDuration), 0)),
       idleHours: round1(headerLines.reduce((sum, line) => sum + line.idleHours, 0)),
       submittedAt: header.submittedAt,
       lastSyncAt: header.lastSyncAt,

@@ -1,22 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AnimatePresence, motion } from 'motion/react';
 import {
   BadgeCheck,
-  ChevronRight,
+  Check,
   Download,
+  Eye,
   FileUp,
-  Fingerprint,
   Mail,
+  Pencil,
   Phone,
+  Plus,
   RefreshCcw,
   Search,
   ShieldCheck,
-  Sparkles,
+  Star,
   Trash2,
-  UserPlus,
+  UserRoundCheck,
   Users,
   X,
 } from 'lucide-react';
@@ -35,11 +36,8 @@ type Role =
   | 'Executive Management';
 
 type Severity = 'high' | 'medium' | 'low';
-
 type VerificationStatus = 'Unverified' | 'Pending Verification' | 'Verified' | 'Rejected' | 'Update Required' | 'Expired Verification';
-
 type EvidenceStatus = 'Missing' | 'Uploaded' | 'Verified' | 'Rejected';
-
 type PreferredContactMethod =
   | 'Phone Confirmation'
   | 'SMS Confirmation'
@@ -49,17 +47,6 @@ type PreferredContactMethod =
   | 'HR Manual Verification'
   | 'Compliance Review'
   | 'Other';
-
-type NextOfKinBeneficiary = {
-  isBeneficiary: boolean;
-  beneficiaryPercentage: number | null;
-  benefitCategory: string | null;
-  nominationDate: string | null;
-  nominationStatus: 'Draft' | 'Pending HR Review' | 'Approved' | 'Rejected';
-  approvedBy: string | null;
-  approvalDate: string | null;
-  notes: string | null;
-};
 
 type NextOfKinEvidence = {
   id: string;
@@ -72,6 +59,17 @@ type NextOfKinEvidence = {
   verifiedAt?: string | null;
   verifiedBy?: string | null;
   notes?: string | null;
+};
+
+type NextOfKinBeneficiary = {
+  isBeneficiary: boolean;
+  beneficiaryPercentage: number | null;
+  benefitCategory: string | null;
+  nominationDate: string | null;
+  nominationStatus: 'Draft' | 'Pending HR Review' | 'Approved' | 'Rejected';
+  approvedBy: string | null;
+  approvalDate: string | null;
+  notes: string | null;
 };
 
 type NextOfKinRecord = {
@@ -106,6 +104,26 @@ type NextOfKinRecord = {
   updatedBy: string;
 };
 
+type EmployeeOption = {
+  employeeId: string;
+  employeeCode?: string;
+  fullName: string;
+  department?: string;
+  jobTitle?: string;
+  status?: string;
+  currentManager?: string;
+  managerName?: string;
+  location?: string;
+  workLocation?: string;
+  businessUnit?: string;
+};
+
+type EmployeeDirectoryPayload = {
+  source: string;
+  syncedAt: string;
+  employees: EmployeeOption[];
+};
+
 type AIInsight = {
   id: string;
   severity: Severity;
@@ -116,150 +134,20 @@ type AIInsight = {
   action: string;
 };
 
-type EmployeeOption = {
-  employeeId: string;
-  fullName: string;
-  department?: string;
-  jobTitle?: string;
-  currentManager?: string;
-  location?: string;
-  businessUnit?: string;
+type AuditRow = {
+  id: string;
+  at: string;
+  action: string;
+  performedBy: string;
+  reason?: string;
+  oldValue?: string;
+  newValue?: string;
 };
 
-type ReportingLineFormOptions = { employees: EmployeeOption[] };
-
-type ApiState<T> = { status: 'idle' | 'loading' | 'ready' | 'error'; data?: T; error?: string };
-
-const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
-const pad2 = (n: number) => String(n).padStart(2, '0');
-const formatNumber = (n: number) => new Intl.NumberFormat('en-GB').format(n);
-
-const formatDateUtc = (isoOrDate: string) => {
-  const s = isoOrDate?.includes('T') ? isoOrDate : `${isoOrDate}T00:00:00.000Z`;
-  const d = new Date(s);
-  if (!Number.isFinite(d.getTime())) return '—';
-  return `${pad2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-};
-
-const formatDateTimeUtc = (iso: string) => {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '—';
-  return `${pad2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} UTC`;
-};
-
-const validateEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-const validatePhone = (s: string) => /^[+]?[\d\s()-]{7,20}$/.test(s.trim());
-
-const statusPill = (s: string) => {
-  const v = (s || '').toLowerCase();
-  if (v.includes('verified') || v.includes('approved') || v.includes('ready')) return { border: 'border-emerald-200', bg: 'bg-emerald-50', fg: 'text-emerald-800' };
-  if (v.includes('pending') || v.includes('uploaded') || v.includes('partially') || v.includes('required')) return { border: 'border-amber-200', bg: 'bg-amber-50', fg: 'text-amber-800' };
-  if (v.includes('rejected') || v.includes('expired') || v.includes('not ready') || v.includes('missing')) return { border: 'border-red-200', bg: 'bg-red-50', fg: 'text-red-800' };
-  return { border: 'border-slate-200', bg: 'bg-slate-100', fg: 'text-slate-700' };
-};
-
-const severityStyle = (s: Severity) => {
-  if (s === 'high') return { border: 'border-red-200', bg: 'bg-red-50', fg: 'text-red-800' };
-  if (s === 'medium') return { border: 'border-amber-200', bg: 'bg-amber-50', fg: 'text-amber-800' };
-  return { border: 'border-emerald-200', bg: 'bg-emerald-50', fg: 'text-emerald-800' };
-};
-
-async function apiFetchEmployee<T>(employeeId: string, resource: string, init: RequestInit & { role: Role; viewerEmployeeId?: string }) {
-  const res = await fetch(`/api/hris/employees/${encodeURIComponent(employeeId)}/${resource}`, {
-    ...init,
-    headers: {
-      ...(init.headers || {}),
-      'x-hris-role': init.role,
-      ...(init.viewerEmployeeId ? { 'x-hris-employee-id': init.viewerEmployeeId } : {}),
-    },
-  });
-  const json = (await res.json().catch(() => null)) as { status?: string; data?: T; error?: string } | null;
-  if (!res.ok || !json || json.status !== 'success') throw new Error(json?.error || 'Request failed');
-  return json.data as T;
-}
-
-async function apiFetchModule<T>(path: string, init: RequestInit & { role: Role; viewerEmployeeId?: string }) {
-  const res = await fetch(path, {
-    ...init,
-    headers: {
-      ...(init.headers || {}),
-      'x-hris-role': init.role,
-      ...(init.viewerEmployeeId ? { 'x-hris-employee-id': init.viewerEmployeeId } : {}),
-    },
-  });
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('application/json')) {
-    const json = (await res.json().catch(() => null)) as { status?: string; data?: T; error?: string } | null;
-    if (!res.ok || !json || json.status !== 'success') throw new Error(json?.error || 'Request failed');
-    return json.data as T;
-  }
-  if (!res.ok) throw new Error('Request failed');
-  return (null as unknown) as T;
-}
-
-const Card = ({ children, className }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-white border border-slate-200/60 rounded-2xl shadow-sm ${className || ''}`}>{children}</div>
-);
-
-const Pill = ({ label }: { label: string }) => (
-  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-extrabold">{label}</span>
-);
-
-const Modal = ({ open, onClose, children, maxW }: { open: boolean; onClose: () => void; children: React.ReactNode; maxW?: string }) => (
-  <AnimatePresence>
-    {open ? (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }} className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm" onClick={onClose}>
-        <motion.div
-          initial={{ opacity: 0, y: 10, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 10, scale: 0.98 }}
-          transition={{ duration: 0.16 }}
-          className={`mx-auto mt-10 w-[96%] ${maxW || 'max-w-5xl'} rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {children}
-        </motion.div>
-      </motion.div>
-    ) : null}
-  </AnimatePresence>
-);
-
-const HeaderButton = ({ onClick, label, tone, icon: Icon, disabled }: { onClick: () => void; label: string; tone: 'primary' | 'secondary' | 'dark'; icon: any; disabled?: boolean }) => {
-  const cls =
-    tone === 'primary'
-      ? 'bg-dle-blue text-white hover:bg-dle-blue/90'
-      : tone === 'dark'
-        ? 'bg-slate-900 text-white hover:bg-slate-800'
-        : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
-  return (
-    <button type="button" disabled={disabled} onClick={onClick} className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold transition-colors disabled:opacity-60 disabled:pointer-events-none ${cls}`}>
-      <Icon className="w-4 h-4" />
-      {label}
-    </button>
-  );
-};
-
-const computeReadiness = (records: NextOfKinRecord[]) => {
-  const primary = records.find((r) => r.isPrimary) || null;
-  const hasPrimary = Boolean(primary);
-  const hasVerified = records.some((r) => r.verificationStatus === 'Verified');
-  const hasEvidence = records.some((r) => r.evidenceStatus === 'Uploaded' || r.evidenceStatus === 'Verified');
-  const hasBeneficiary = records.some((r) => r.beneficiary?.isBeneficiary);
-  const hasAddress = records.some((r) => Boolean((r.residentialAddress || '').trim()) || Boolean((r.city || '').trim()) || Boolean((r.state || '').trim()) || Boolean((r.country || '').trim()));
-  const verifiedRecent = (() => {
-    const last = records
-      .map((r) => r.lastVerifiedAt)
-      .filter(Boolean)
-      .map((x) => new Date(String(x)).getTime())
-      .filter((t) => Number.isFinite(t))
-      .sort((a, b) => b - a)[0];
-    if (!last) return false;
-    return Date.now() - last < 365 * 24 * 3600 * 1000;
-  })();
-  const checks = [hasPrimary, hasVerified, hasEvidence, hasAddress, verifiedRecent, hasBeneficiary];
-  const score = Math.round((checks.filter(Boolean).length / checks.length) * 100);
-  const state = score >= 85 ? 'Ready' : score >= 55 ? 'Partially Ready' : score >= 35 ? 'Requires Update' : 'Not Ready';
-  return { score, state, primary, hasPrimary, hasVerified, hasEvidence, hasAddress, verifiedRecent, hasBeneficiary };
+type ApiState<T> = {
+  loading: boolean;
+  data: T;
+  error: string | null;
 };
 
 type Draft = {
@@ -286,9 +174,32 @@ type Draft = {
   notes: string;
 };
 
+type EvidenceDraft = {
+  evidenceType: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: string;
+  markVerified: boolean;
+  notes: string;
+};
+
+type BeneficiaryDraft = {
+  isBeneficiary: boolean;
+  beneficiaryPercentage: string;
+  benefitCategory: string;
+  notes: string;
+};
+
+const ROLES: Role[] = ['HR Manager', 'HR Officer', 'HR Director', 'Compliance Officer', 'Auditor', 'Employee', 'Super Admin'];
+const RELATIONSHIPS = ['Spouse', 'Father', 'Mother', 'Brother', 'Sister', 'Son', 'Daughter', 'Guardian', 'Partner', 'Friend', 'Other'];
+const CONTACT_METHODS: PreferredContactMethod[] = ['Phone Confirmation', 'SMS Confirmation', 'Email Confirmation', 'Document Review', 'Employee Declaration', 'HR Manual Verification', 'Compliance Review', 'Other'];
+const EVIDENCE_TYPES = ['Marriage Certificate', 'Birth Certificate', 'Court Affidavit', 'Government ID', 'Employee Declaration Form', 'HR Verified Declaration', 'Other Supporting Document'];
+const BENEFIT_CATEGORIES = ['Death Benefit', 'Insurance Benefit', 'Gratuity', 'Pension Support Record', 'Welfare Benefit', 'Other HR Benefit'];
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'] as const;
+
 const emptyDraft = (): Draft => ({
   fullName: '',
-  relationship: 'Other',
+  relationship: 'Spouse',
   gender: '',
   dateOfBirth: '',
   primaryPhone: '',
@@ -309,1377 +220,1009 @@ const emptyDraft = (): Draft => ({
   notes: '',
 });
 
+const emptyEvidenceDraft = (): EvidenceDraft => ({
+  evidenceType: 'Employee Declaration Form',
+  fileName: '',
+  mimeType: 'application/pdf',
+  sizeBytes: '240000',
+  markVerified: false,
+  notes: '',
+});
+
+const emptyBeneficiaryDraft = (): BeneficiaryDraft => ({
+  isBeneficiary: true,
+  beneficiaryPercentage: '50',
+  benefitCategory: 'Death Benefit',
+  notes: '',
+});
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const formatNumber = (n: number) => new Intl.NumberFormat('en-GB').format(n);
+
+const formatDate = (value?: string | null) => {
+  if (!value) return '--';
+  const s = value.includes('T') ? value : `${value}T00:00:00.000Z`;
+  const d = new Date(s);
+  if (!Number.isFinite(d.getTime())) return '--';
+  return `${pad2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return '--';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '--';
+  return `${formatDate(value)}, ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC`;
+};
+
+const validatePhone = (value: string) => /^[+]?[\d\s()-]{7,20}$/.test(value.trim());
+const validateEmail = (value: string) => !value.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+const apiHeaders = (role: Role, viewerEmployeeId?: string) => ({
+  'content-type': 'application/json',
+  'x-hris-role': role,
+  ...(viewerEmployeeId ? { 'x-hris-employee-id': viewerEmployeeId } : {}),
+});
+
+async function apiJson<T>(url: string, init: RequestInit & { role: Role; viewerEmployeeId?: string }) {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...apiHeaders(init.role, init.viewerEmployeeId),
+      ...(init.headers || {}),
+    },
+  });
+  const json = (await res.json().catch(() => null)) as { status?: string; data?: T; error?: string } | null;
+  if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Request failed');
+  return json.data as T;
+}
+
+const employeeApi = <T,>(employeeId: string, resource: string, init: RequestInit & { role: Role; viewerEmployeeId?: string }) =>
+  apiJson<T>(`/api/hris/employees/${encodeURIComponent(employeeId)}/${resource}`, init);
+
+const moduleApi = <T,>(resource: string, init: RequestInit & { role: Role; viewerEmployeeId?: string }) => apiJson<T>(resource, init);
+
+const mapDirectoryEmployee = (employee: EmployeeOption): EmployeeOption => ({
+  employeeId: employee.employeeId || employee.employeeCode || '',
+  employeeCode: employee.employeeCode,
+  fullName: employee.fullName || employee.employeeId || employee.employeeCode || 'Unnamed employee',
+  department: employee.department || '',
+  jobTitle: employee.jobTitle || '',
+  status: employee.status || '',
+  currentManager: employee.currentManager || employee.managerName || '',
+  managerName: employee.managerName || employee.currentManager || '',
+  location: employee.location || employee.workLocation || '',
+  workLocation: employee.workLocation || employee.location || '',
+  businessUnit: employee.businessUnit || '',
+});
+
+const styleForStatus = (status: string) => {
+  const v = status.toLowerCase();
+  if (v.includes('verified') || v.includes('approved') || v.includes('ready')) return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  if (v.includes('pending') || v.includes('uploaded') || v.includes('required') || v.includes('draft')) return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (v.includes('rejected') || v.includes('expired') || v.includes('missing') || v.includes('not ready')) return 'border-red-200 bg-red-50 text-red-800';
+  return 'border-slate-200 bg-slate-100 text-slate-700';
+};
+
+const styleForSeverity = (severity: Severity) => {
+  if (severity === 'high') return 'border-red-200 bg-red-50 text-red-800';
+  if (severity === 'medium') return 'border-amber-200 bg-amber-50 text-amber-800';
+  return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+};
+
+const readinessFor = (records: NextOfKinRecord[]) => {
+  const lastVerifiedAt = records
+    .map((record) => record.lastVerifiedAt)
+    .filter(Boolean)
+    .map((value) => new Date(String(value)).getTime())
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  const hasRecentVerification = Boolean(lastVerifiedAt && Date.now() - lastVerifiedAt < 365 * 24 * 60 * 60 * 1000);
+  const checks = [
+    { label: 'At least one next of kin', done: records.length > 0 },
+    { label: 'Primary record selected', done: records.some((record) => record.isPrimary) },
+    { label: 'Verified contact', done: records.some((record) => record.verificationStatus === 'Verified') },
+    { label: 'Relationship evidence captured', done: records.some((record) => ['Uploaded', 'Verified'].includes(record.evidenceStatus)) },
+    { label: 'Address available', done: records.some((record) => Boolean(record.residentialAddress || record.city || record.state || record.country)) },
+    { label: 'Verification within 12 months', done: hasRecentVerification },
+  ];
+  const score = Math.round((checks.filter((check) => check.done).length / checks.length) * 100);
+  const state = score >= 85 ? 'Ready' : score >= 55 ? 'Partially Ready' : score >= 35 ? 'Requires Update' : 'Not Ready';
+  return { checks, score, state };
+};
+
+const recordToDraft = (record: NextOfKinRecord): Draft => ({
+  id: record.id,
+  fullName: record.fullName || '',
+  relationship: record.relationship || 'Other',
+  gender: record.gender || '',
+  dateOfBirth: record.dateOfBirth || '',
+  primaryPhone: record.primaryPhone || '',
+  alternatePhone: record.alternatePhone || '',
+  email: record.email || '',
+  residentialAddress: record.residentialAddress || '',
+  city: record.city || '',
+  state: record.state || '',
+  country: record.country || '',
+  nearestLandmark: record.nearestLandmark || '',
+  preferredContactMethod: record.preferredContactMethod || 'Phone Confirmation',
+  isPrimary: Boolean(record.isPrimary),
+  isEmergencyContact: Boolean(record.isEmergencyContact),
+  isBeneficiary: Boolean(record.beneficiary?.isBeneficiary),
+  beneficiaryPercentage: typeof record.beneficiary?.beneficiaryPercentage === 'number' ? String(record.beneficiary.beneficiaryPercentage) : '',
+  benefitCategory: record.beneficiary?.benefitCategory || 'Death Benefit',
+  relationshipEvidenceType: record.relationshipEvidenceType || '',
+  notes: record.notes || '',
+});
+
+const compactAddress = (record: NextOfKinRecord) => [record.residentialAddress, record.city, record.state, record.country].filter(Boolean).join(', ') || '--';
+
+const IconButton = ({
+  label,
+  icon: Icon,
+  onClick,
+  disabled,
+  tone = 'secondary',
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: 'primary' | 'secondary' | 'danger' | 'dark';
+}) => {
+  const toneClass =
+    tone === 'primary'
+      ? 'border-dle-blue bg-dle-blue text-white hover:bg-dle-blue/90'
+      : tone === 'danger'
+        ? 'border-red-200 bg-white text-red-700 hover:bg-red-50'
+        : tone === 'dark'
+          ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-extrabold transition-colors disabled:pointer-events-none disabled:opacity-50 ${toneClass}`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span>{label}</span>
+    </button>
+  );
+};
+
+const StatusPill = ({ value }: { value: string }) => (
+  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-extrabold ${styleForStatus(value)}`}>{value}</span>
+);
+
+const Modal = ({ title, children, onClose, width = 'max-w-3xl' }: { title: string; children: React.ReactNode; onClose: () => void; width?: string }) => (
+  <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/35 px-4 py-8">
+    <div className={`w-full ${width} overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl`}>
+      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+        <div className="text-sm font-extrabold text-slate-900">{title}</div>
+        <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="Close">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
 export default function NextOfKinClient({ employeeId, initialNow }: { employeeId: string; initialNow: string }) {
   const router = useRouter();
-  const topRef = useRef<HTMLDivElement | null>(null);
-
   const [role, setRole] = useState<Role>('HR Manager');
-  const [viewerEmployeeId, setViewerEmployeeId] = useState<string | undefined>(undefined);
-
+  const [viewerEmployeeId, setViewerEmployeeId] = useState('');
   const [activeEmployeeId, setActiveEmployeeId] = useState(employeeId);
-  const [refreshToken, setRefreshToken] = useState(0);
+  const [employeeQuery, setEmployeeQuery] = useState('');
+  const [recordQuery, setRecordQuery] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<{ tone: 'ok' | 'error'; message: string } | null>(null);
 
-  const [employeesState, setEmployeesState] = useState<ApiState<EmployeeOption[]>>({ status: 'idle' });
-  const [recordsState, setRecordsState] = useState<ApiState<NextOfKinRecord[]>>({ status: 'idle' });
-  const [aiState, setAiState] = useState<ApiState<AIInsight[]>>({ status: 'idle' });
+  const [employeesState, setEmployeesState] = useState<ApiState<EmployeeOption[]>>({ loading: false, data: [], error: null });
+  const [recordsState, setRecordsState] = useState<ApiState<NextOfKinRecord[]>>({ loading: true, data: [], error: null });
+  const [insightsState, setInsightsState] = useState<ApiState<AIInsight[]>>({ loading: false, data: [], error: null });
+  const [auditState, setAuditState] = useState<ApiState<AuditRow[]>>({ loading: false, data: [], error: null });
 
-  const [selectorOpen, setSelectorOpen] = useState(false);
-  const [selectorQuery, setSelectorQuery] = useState('');
-
-  const [editOpen, setEditOpen] = useState(false);
-  const [editMode, setEditMode] = useState<'add' | 'edit'>('add');
+  const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
-
-  const [verifyOpen, setVerifyOpen] = useState(false);
-  const [verifyNokId, setVerifyNokId] = useState<string | null>(null);
-  const [verifyMethod, setVerifyMethod] = useState<PreferredContactMethod>('HR Manual Verification');
-
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const [evidenceNokId, setEvidenceNokId] = useState<string | null>(null);
-  const [evidenceType, setEvidenceType] = useState<string>('Marriage Certificate');
-  const [evidenceFileName, setEvidenceFileName] = useState<string>('relationship_evidence.pdf');
-  const [evidenceMime, setEvidenceMime] = useState<string>('application/pdf');
-  const [evidenceSizeBytes, setEvidenceSizeBytes] = useState<string>('240000');
-
-  const [beneficiaryOpen, setBeneficiaryOpen] = useState(false);
-  const [beneficiaryNokId, setBeneficiaryNokId] = useState<string | null>(null);
-  const [beneficiaryIs, setBeneficiaryIs] = useState(true);
-  const [beneficiaryPct, setBeneficiaryPct] = useState<string>('50');
-  const [beneficiaryCategory, setBeneficiaryCategory] = useState<string>('Death Benefit');
-  const [beneficiaryNotes, setBeneficiaryNotes] = useState<string>('');
-
+  const [evidenceTarget, setEvidenceTarget] = useState<NextOfKinRecord | null>(null);
+  const [evidenceDraft, setEvidenceDraft] = useState<EvidenceDraft>(() => emptyEvidenceDraft());
+  const [beneficiaryTarget, setBeneficiaryTarget] = useState<NextOfKinRecord | null>(null);
+  const [beneficiaryDraft, setBeneficiaryDraft] = useState<BeneficiaryDraft>(() => emptyBeneficiaryDraft());
   const [auditOpen, setAuditOpen] = useState(false);
-  const [auditRows, setAuditRows] = useState<ApiState<{ id: string; at: string; action: string; performedBy: string; reason?: string }[]>>({ status: 'idle' });
 
-  const [exportOpen, setExportOpen] = useState(false);
-  const [toast, setToast] = useState<{ title: string; detail: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
+  const canEdit = !['Employee', 'Auditor', 'Executive Management'].includes(role);
+  const effectiveViewerEmployeeId = role === 'Employee' ? viewerEmployeeId || activeEmployeeId : viewerEmployeeId || undefined;
 
-  const nowStamp = useMemo(() => formatDateTimeUtc(initialNow), [initialNow]);
+  useEffect(() => {
+    setActiveEmployeeId(employeeId);
+  }, [employeeId]);
 
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
-      setEmployeesState({ status: 'loading' });
+    const loadEmployees = async () => {
+      if (role === 'Employee') {
+        setEmployeesState({ loading: false, data: [], error: null });
+        return;
+      }
+      setEmployeesState((prev) => ({ ...prev, loading: true, error: null }));
       try {
-        const data = await apiFetchModule<ReportingLineFormOptions>(`/api/hris/reporting-line/form-options?includeEmployees=1`, { method: 'GET', role, viewerEmployeeId });
-        if (cancelled) return;
-        setEmployeesState({ status: 'ready', data: data.employees || [] });
-      } catch (e) {
-        if (cancelled) return;
-        setEmployeesState({ status: 'error', error: e instanceof Error ? e.message : 'Unable to load employees' });
+        const data = await moduleApi<EmployeeDirectoryPayload>('/api/hris/employees', {
+          method: 'GET',
+          role,
+          viewerEmployeeId: effectiveViewerEmployeeId,
+        });
+        if (!cancelled) {
+          const employees = (data.employees || []).map(mapDirectoryEmployee).filter((employee) => employee.employeeId);
+          setEmployeesState({ loading: false, data: employees, error: null });
+        }
+      } catch (error) {
+        if (!cancelled) setEmployeesState({ loading: false, data: [], error: error instanceof Error ? error.message : 'Unable to load employees from DLE_Enterprise HRIS' });
       }
     };
-    if (role === 'Employee') {
-      queueMicrotask(() => {
-        if (!cancelled) setEmployeesState({ status: 'ready', data: [] });
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-    void run();
+    void loadEmployees();
     return () => {
       cancelled = true;
     };
-  }, [role, viewerEmployeeId]);
+  }, [role, effectiveViewerEmployeeId]);
 
   useEffect(() => {
     let cancelled = false;
-    const run = async () => {
-      setRecordsState({ status: 'loading' });
-      setAiState({ status: 'loading' });
+    const loadRecords = async () => {
+      setRecordsState((prev) => ({ ...prev, loading: true, error: null }));
+      setInsightsState((prev) => ({ ...prev, loading: true, error: null }));
       try {
-        const [records, ai] = await Promise.all([
-          apiFetchEmployee<NextOfKinRecord[]>(activeEmployeeId, 'next-of-kin', { method: 'GET', role, viewerEmployeeId }),
-          apiFetchModule<AIInsight[]>(`/api/hris/next-of-kin/ai-insights?employeeId=${encodeURIComponent(activeEmployeeId)}`, { method: 'GET', role, viewerEmployeeId }).catch(() => [] as AIInsight[]),
+        const [records, insights] = await Promise.all([
+          employeeApi<NextOfKinRecord[]>(activeEmployeeId, 'next-of-kin', { method: 'GET', role, viewerEmployeeId: effectiveViewerEmployeeId }),
+          moduleApi<AIInsight[]>(`/api/hris/next-of-kin/ai-insights?employeeId=${encodeURIComponent(activeEmployeeId)}`, { method: 'GET', role, viewerEmployeeId: effectiveViewerEmployeeId }).catch(() => []),
         ]);
-        if (cancelled) return;
-        setRecordsState({ status: 'ready', data: records });
-        setAiState({ status: 'ready', data: ai });
-      } catch (e) {
-        if (cancelled) return;
-        const msg = e instanceof Error ? e.message : 'Unable to load next of kin';
-        setRecordsState({ status: 'error', error: msg });
-        setAiState({ status: 'error', error: msg });
+        if (!cancelled) {
+          setRecordsState({ loading: false, data: records || [], error: null });
+          setInsightsState({ loading: false, data: insights || [], error: null });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to load next of kin records';
+        if (!cancelled) {
+          setRecordsState({ loading: false, data: [], error: message });
+          setInsightsState({ loading: false, data: [], error: message });
+        }
       }
     };
-    void run();
+    void loadRecords();
     return () => {
       cancelled = true;
     };
-  }, [activeEmployeeId, refreshToken, role, viewerEmployeeId]);
+  }, [activeEmployeeId, refreshKey, role, effectiveViewerEmployeeId]);
 
-  const employees = useMemo(() => employeesState.data ?? [], [employeesState.data]);
-  const records = useMemo(() => recordsState.data ?? [], [recordsState.data]);
-  const readiness = useMemo(() => computeReadiness(records), [records]);
+  const employees = employeesState.data;
+  const records = recordsState.data;
+  const readiness = useMemo(() => readinessFor(records), [records]);
+  const activeEmployee = employees.find((employee) => employee.employeeId === activeEmployeeId);
+  const primaryRecord = records.find((record) => record.isPrimary) || null;
+  const verifiedCount = records.filter((record) => record.verificationStatus === 'Verified').length;
+  const evidenceCount = records.filter((record) => ['Uploaded', 'Verified'].includes(record.evidenceStatus)).length;
+  const beneficiaryCount = records.filter((record) => record.beneficiary?.isBeneficiary).length;
+  const beneficiaryTotal = records.reduce((sum, record) => sum + (record.beneficiary?.isBeneficiary && typeof record.beneficiary.beneficiaryPercentage === 'number' ? record.beneficiary.beneficiaryPercentage : 0), 0);
+  const lastUpdated = records
+    .map((record) => record.updatedAt)
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+
+  useEffect(() => {
+    if (role === 'Employee') return;
+    if (employeesState.loading || employeesState.error || employees.length === 0) return;
+    const activeExists = employees.some((employee) => employee.employeeId === activeEmployeeId);
+    if (!activeExists && activeEmployeeId === 'DLE-EMP-00001') {
+      const firstEmployeeId = employees[0].employeeId;
+      setActiveEmployeeId(firstEmployeeId);
+      router.replace(`/hris/employees/next-of-kin?employeeId=${encodeURIComponent(firstEmployeeId)}`);
+    }
+  }, [activeEmployeeId, employees, employeesState.error, employeesState.loading, role, router]);
 
   const filteredEmployees = useMemo(() => {
-    const q = selectorQuery.trim().toLowerCase();
-    if (!q) return employees.slice(0, 70);
+    const q = employeeQuery.trim().toLowerCase();
+    if (!q) return employees.slice(0, 60);
     return employees
-      .filter((e) => [e.employeeId, e.fullName, e.department, e.jobTitle, e.currentManager, e.location, e.businessUnit].filter(Boolean).some((x) => String(x).toLowerCase().includes(q)))
-      .slice(0, 140);
-  }, [employees, selectorQuery]);
+      .filter((employee) => [employee.employeeId, employee.employeeCode, employee.fullName, employee.department, employee.jobTitle, employee.status, employee.location, employee.workLocation, employee.businessUnit].filter(Boolean).some((value) => String(value).toLowerCase().includes(q)))
+      .slice(0, 80);
+  }, [employeeQuery, employees]);
 
-  const primary = records.find((r) => r.isPrimary) || null;
-  const verifiedCount = records.filter((r) => r.verificationStatus === 'Verified').length;
-  const unverifiedCount = records.length - verifiedCount;
-  const evidenceUploaded = records.filter((r) => r.evidenceStatus === 'Uploaded' || r.evidenceStatus === 'Verified').length;
-  const beneficiaryLinked = records.filter((r) => r.beneficiary?.isBeneficiary).length;
-  const missingStatus = !records.length ? 'No records' : !primary ? 'Missing Primary NOK' : readiness.state;
-  const beneficiaryTotalPct = records.reduce((acc, r) => acc + (r.beneficiary?.isBeneficiary ? (typeof r.beneficiary?.beneficiaryPercentage === 'number' ? r.beneficiary.beneficiaryPercentage : 0) : 0), 0);
+  const filteredRecords = useMemo(() => {
+    const q = recordQuery.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter((record) =>
+      [record.fullName, record.relationship, record.primaryPhone, record.email, record.verificationStatus, record.evidenceStatus, record.beneficiary?.benefitCategory]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q)),
+    );
+  }, [recordQuery, records]);
 
-  const lastUpdated = (() => {
-    const last = records
-      .map((r) => r.updatedAt || r.lastVerifiedAt || null)
-      .filter(Boolean)
-      .map((x) => new Date(String(x)).getTime())
-      .filter((t) => Number.isFinite(t))
-      .sort((a, b) => b - a)[0];
-    if (!last) return null;
-    return new Date(last).toISOString();
-  })();
-
-  const openAdd = () => {
-    setEditMode('add');
-    setDraft(emptyDraft());
-    setEditOpen(true);
+  const refresh = () => setRefreshKey((value) => value + 1);
+  const showToast = (message: string, tone: 'ok' | 'error' = 'ok') => {
+    setToast({ message, tone });
+    window.setTimeout(() => setToast(null), 3500);
   };
 
-  const openEdit = (r: NextOfKinRecord) => {
-    setEditMode('edit');
-    setDraft({
-      id: r.id,
-      fullName: r.fullName || '',
-      relationship: r.relationship || 'Other',
-      gender: r.gender || '',
-      dateOfBirth: r.dateOfBirth || '',
-      primaryPhone: r.primaryPhone || '',
-      alternatePhone: r.alternatePhone || '',
-      email: r.email || '',
-      residentialAddress: r.residentialAddress || '',
-      city: r.city || '',
-      state: r.state || '',
-      country: r.country || '',
-      nearestLandmark: r.nearestLandmark || '',
-      preferredContactMethod: (r.preferredContactMethod as PreferredContactMethod) || 'Phone Confirmation',
-      isPrimary: Boolean(r.isPrimary),
-      isEmergencyContact: Boolean(r.isEmergencyContact),
-      isBeneficiary: Boolean(r.beneficiary?.isBeneficiary),
-      beneficiaryPercentage: typeof r.beneficiary?.beneficiaryPercentage === 'number' ? String(r.beneficiary.beneficiaryPercentage) : '',
-      benefitCategory: r.beneficiary?.benefitCategory || 'Death Benefit',
-      relationshipEvidenceType: r.relationshipEvidenceType || '',
-      notes: r.notes || '',
-    });
-    setEditOpen(true);
+  const selectEmployee = (id: string) => {
+    setActiveEmployeeId(id);
+    router.replace(`/hris/employees/next-of-kin?employeeId=${encodeURIComponent(id)}`);
+  };
+
+  const openAdd = () => {
+    setDraft({ ...emptyDraft(), isPrimary: records.length === 0 });
+    setEditorOpen(true);
+  };
+
+  const openEdit = (record: NextOfKinRecord) => {
+    setDraft(recordToDraft(record));
+    setEditorOpen(true);
   };
 
   const saveRecord = async () => {
+    const payload = {
+      fullName: draft.fullName.trim(),
+      relationship: draft.relationship.trim(),
+      gender: draft.gender.trim() || null,
+      dateOfBirth: draft.dateOfBirth || null,
+      primaryPhone: draft.primaryPhone.trim(),
+      alternatePhone: draft.alternatePhone.trim() || null,
+      email: draft.email.trim() || null,
+      residentialAddress: draft.residentialAddress.trim() || null,
+      city: draft.city.trim() || null,
+      state: draft.state.trim() || null,
+      country: draft.country.trim() || null,
+      nearestLandmark: draft.nearestLandmark.trim() || null,
+      preferredContactMethod: draft.preferredContactMethod,
+      isPrimary: draft.isPrimary,
+      isEmergencyContact: draft.isEmergencyContact,
+      isBeneficiary: draft.isBeneficiary,
+      beneficiaryPercentage: draft.isBeneficiary && draft.beneficiaryPercentage ? Number(draft.beneficiaryPercentage) : null,
+      benefitCategory: draft.benefitCategory.trim() || 'Death Benefit',
+      relationshipEvidenceType: draft.relationshipEvidenceType.trim() || null,
+      notes: draft.notes.trim() || null,
+    };
+
+    if (!payload.fullName) return showToast('Full name is required', 'error');
+    if (!payload.relationship) return showToast('Relationship is required', 'error');
+    if (!validatePhone(payload.primaryPhone)) return showToast('Enter a valid primary phone number', 'error');
+    if (!validateEmail(payload.email || '')) return showToast('Enter a valid email address', 'error');
+    if (payload.isBeneficiary && (typeof payload.beneficiaryPercentage !== 'number' || !Number.isFinite(payload.beneficiaryPercentage) || payload.beneficiaryPercentage <= 0 || payload.beneficiaryPercentage > 100)) {
+      return showToast('Beneficiary percentage must be between 1 and 100', 'error');
+    }
+
+    setBusy(true);
     try {
-      const fullName = draft.fullName.trim();
-      const relationship = draft.relationship.trim();
-      const phone = draft.primaryPhone.trim();
-      const email = draft.email.trim();
-      if (!fullName) throw new Error('Full name is required');
-      if (!relationship) throw new Error('Relationship is required');
-      if (!phone) throw new Error('Primary phone number is required');
-      if (!validatePhone(phone)) throw new Error('Phone number must be valid');
-      if (email && !validateEmail(email)) throw new Error('Email must be valid');
-
-      const pct = draft.isBeneficiary && draft.beneficiaryPercentage.trim() ? Number(draft.beneficiaryPercentage) : null;
-      if (pct !== null && (!Number.isFinite(pct) || pct < 0 || pct > 100)) throw new Error('Beneficiary percentage must be between 0 and 100');
-
-      const payload = {
-        fullName,
-        relationship,
-        gender: draft.gender || undefined,
-        dateOfBirth: draft.dateOfBirth || undefined,
-        primaryPhone: phone,
-        alternatePhone: draft.alternatePhone || undefined,
-        email: email || undefined,
-        residentialAddress: draft.residentialAddress || undefined,
-        city: draft.city || undefined,
-        state: draft.state || undefined,
-        country: draft.country || undefined,
-        nearestLandmark: draft.nearestLandmark || undefined,
-        preferredContactMethod: draft.preferredContactMethod,
-        isPrimary: draft.isPrimary,
-        isEmergencyContact: draft.isEmergencyContact,
-        isBeneficiary: draft.isBeneficiary,
-        beneficiaryPercentage: pct === null ? undefined : pct,
-        benefitCategory: draft.benefitCategory || undefined,
-        relationshipEvidenceType: draft.relationshipEvidenceType || undefined,
-        notes: draft.notes || undefined,
-      };
-
-      if (editMode === 'add') {
-        await apiFetchEmployee<NextOfKinRecord>(activeEmployeeId, 'next-of-kin', {
+      if (draft.id) {
+        await employeeApi<NextOfKinRecord[]>(activeEmployeeId, `next-of-kin/${encodeURIComponent(draft.id)}`, {
+          method: 'PUT',
+          role,
+          viewerEmployeeId: effectiveViewerEmployeeId,
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await employeeApi<NextOfKinRecord>(activeEmployeeId, 'next-of-kin', {
           method: 'POST',
           role,
-          viewerEmployeeId,
-          headers: { 'content-type': 'application/json' },
+          viewerEmployeeId: effectiveViewerEmployeeId,
           body: JSON.stringify(payload),
         });
-        setToast({ title: 'Next of kin added', detail: fullName, tone: 'ok' });
-      } else {
-        if (!draft.id) throw new Error('Missing nokId');
-        await apiFetchEmployee<NextOfKinRecord[]>(activeEmployeeId, `next-of-kin/${encodeURIComponent(draft.id)}`, {
-          method: 'PATCH',
-          role,
-          viewerEmployeeId,
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        setToast({ title: 'Next of kin updated', detail: fullName, tone: 'ok' });
       }
-      setEditOpen(false);
-      setRefreshToken((n) => n + 1);
-    } catch (e) {
-      setToast({ title: 'Save failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' });
+      setEditorOpen(false);
+      showToast(draft.id ? 'Next of kin updated' : 'Next of kin added');
+      refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to save record', 'error');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const requestEmployeeUpdate = async () => {
+  const actionRecord = async (record: NextOfKinRecord, action: 'set-primary' | 'verify' | 'delete') => {
+    setBusy(true);
     try {
-      await apiFetchEmployee<any>(activeEmployeeId, 'next-of-kin/request-update', {
-        method: 'POST',
-        role,
-        viewerEmployeeId,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reason: 'Employee update requested' }),
-      });
-      setToast({ title: 'Update requested', detail: 'HR review pending.', tone: 'ok' });
-      setRefreshToken((n) => n + 1);
-    } catch (e) {
-      setToast({ title: 'Request failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' });
+      if (action === 'delete') {
+        await employeeApi<{ deleted: boolean }>(activeEmployeeId, `next-of-kin/${encodeURIComponent(record.id)}`, {
+          method: 'DELETE',
+          role,
+          viewerEmployeeId: effectiveViewerEmployeeId,
+        });
+        showToast('Next of kin deleted');
+      } else {
+        await employeeApi<NextOfKinRecord | NextOfKinRecord[]>(activeEmployeeId, `next-of-kin/${encodeURIComponent(record.id)}/${action}`, {
+          method: 'POST',
+          role,
+          viewerEmployeeId: effectiveViewerEmployeeId,
+          body: JSON.stringify(action === 'verify' ? { method: 'HR Manual Verification', verificationStatus: 'Verified' } : {}),
+        });
+        showToast(action === 'verify' ? 'Record verified' : 'Primary next of kin updated');
+      }
+      refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Action failed', 'error');
+    } finally {
+      setBusy(false);
     }
   };
 
-  const setPrimary = async (nokId: string) => {
-    await apiFetchEmployee<NextOfKinRecord[]>(activeEmployeeId, `next-of-kin/${encodeURIComponent(nokId)}/set-primary`, {
-      method: 'POST',
-      role,
-      viewerEmployeeId,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-  };
-
-  const verifyRecord = async () => {
-    if (!verifyNokId) return;
-    await apiFetchEmployee<NextOfKinRecord>(activeEmployeeId, `next-of-kin/${encodeURIComponent(verifyNokId)}/verify`, {
-      method: 'POST',
-      role,
-      viewerEmployeeId,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ verificationStatus: 'Verified', method: verifyMethod }),
+  const openEvidence = (record: NextOfKinRecord) => {
+    setEvidenceTarget(record);
+    setEvidenceDraft({
+      ...emptyEvidenceDraft(),
+      evidenceType: record.relationshipEvidenceType || 'Employee Declaration Form',
+      fileName: record.evidence?.[0]?.fileName || '',
     });
   };
 
   const uploadEvidence = async () => {
-    if (!evidenceNokId) return;
-    const size = Number(evidenceSizeBytes);
-    if (!Number.isFinite(size) || size <= 0) throw new Error('Size bytes must be a positive number');
-    await apiFetchEmployee<NextOfKinRecord>(activeEmployeeId, `next-of-kin/${encodeURIComponent(evidenceNokId)}/upload-evidence`, {
-      method: 'POST',
-      role,
-      viewerEmployeeId,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ evidenceType, fileName: evidenceFileName, mimeType: evidenceMime, sizeBytes: size }),
+    if (!evidenceTarget) return;
+    const sizeBytes = Number(evidenceDraft.sizeBytes);
+    if (!evidenceDraft.fileName.trim()) return showToast('File name is required', 'error');
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return showToast('File size is required', 'error');
+
+    setBusy(true);
+    try {
+      await employeeApi<NextOfKinRecord>(activeEmployeeId, `next-of-kin/${encodeURIComponent(evidenceTarget.id)}/upload-evidence`, {
+        method: 'POST',
+        role,
+        viewerEmployeeId: effectiveViewerEmployeeId,
+        body: JSON.stringify({
+          evidenceType: evidenceDraft.evidenceType,
+          fileName: evidenceDraft.fileName.trim(),
+          mimeType: evidenceDraft.mimeType,
+          sizeBytes,
+          markVerified: evidenceDraft.markVerified,
+          notes: evidenceDraft.notes.trim() || null,
+        }),
+      });
+      setEvidenceTarget(null);
+      showToast('Relationship evidence uploaded');
+      refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Upload failed', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openBeneficiary = (record: NextOfKinRecord) => {
+    setBeneficiaryTarget(record);
+    setBeneficiaryDraft({
+      isBeneficiary: Boolean(record.beneficiary?.isBeneficiary),
+      beneficiaryPercentage: typeof record.beneficiary?.beneficiaryPercentage === 'number' ? String(record.beneficiary.beneficiaryPercentage) : '50',
+      benefitCategory: record.beneficiary?.benefitCategory || 'Death Benefit',
+      notes: record.beneficiary?.notes || '',
     });
   };
 
-  const linkBeneficiary = async () => {
-    if (!beneficiaryNokId) return;
-    const pct = beneficiaryPct.trim() ? Number(beneficiaryPct) : NaN;
-    if (beneficiaryIs && (!Number.isFinite(pct) || pct <= 0 || pct > 100)) throw new Error('Beneficiary percentage must be between 1 and 100');
-    await apiFetchEmployee<NextOfKinRecord>(activeEmployeeId, `next-of-kin/${encodeURIComponent(beneficiaryNokId)}/link-beneficiary`, {
-      method: 'POST',
-      role,
-      viewerEmployeeId,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        isBeneficiary: beneficiaryIs,
-        beneficiaryPercentage: beneficiaryIs ? pct : 0,
-        benefitCategory: beneficiaryIs ? beneficiaryCategory : null,
-        notes: beneficiaryNotes || undefined,
-      }),
-    });
-  };
+  const saveBeneficiary = async () => {
+    if (!beneficiaryTarget) return;
+    const pct = Number(beneficiaryDraft.beneficiaryPercentage);
+    if (beneficiaryDraft.isBeneficiary && (!Number.isFinite(pct) || pct <= 0 || pct > 100)) return showToast('Beneficiary percentage must be between 1 and 100', 'error');
 
-  const deleteRecord = async (nokId: string) => {
-    await apiFetchEmployee<any>(activeEmployeeId, `next-of-kin/${encodeURIComponent(nokId)}`, {
-      method: 'DELETE',
-      role,
-      viewerEmployeeId,
-    });
+    setBusy(true);
+    try {
+      await employeeApi<NextOfKinRecord>(activeEmployeeId, `next-of-kin/${encodeURIComponent(beneficiaryTarget.id)}/link-beneficiary`, {
+        method: 'POST',
+        role,
+        viewerEmployeeId: effectiveViewerEmployeeId,
+        body: JSON.stringify({
+          isBeneficiary: beneficiaryDraft.isBeneficiary,
+          beneficiaryPercentage: beneficiaryDraft.isBeneficiary ? pct : null,
+          benefitCategory: beneficiaryDraft.benefitCategory,
+          notes: beneficiaryDraft.notes.trim() || null,
+        }),
+      });
+      setBeneficiaryTarget(null);
+      showToast('Beneficiary linkage updated');
+      refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Beneficiary update failed', 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const openAudit = async () => {
     setAuditOpen(true);
-    setAuditRows({ status: 'loading' });
+    setAuditState((prev) => ({ ...prev, loading: true, error: null }));
     try {
-      const rows = await apiFetchEmployee<{ id: string; at: string; action: string; performedBy: string; reason?: string }[]>(activeEmployeeId, 'audit-trail', { method: 'GET', role, viewerEmployeeId });
-      setAuditRows({ status: 'ready', data: rows });
-    } catch (e) {
-      setAuditRows({ status: 'error', error: e instanceof Error ? e.message : 'Unable to load audit trail' });
+      const rows = await employeeApi<AuditRow[]>(activeEmployeeId, 'audit-trail', { method: 'GET', role, viewerEmployeeId: effectiveViewerEmployeeId });
+      setAuditState({ loading: false, data: rows || [], error: null });
+    } catch (error) {
+      setAuditState({ loading: false, data: [], error: error instanceof Error ? error.message : 'Unable to load audit trail' });
     }
   };
 
-  const breadcrumbs = (
-    <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-      <span className="text-slate-700 font-extrabold">HRIS</span>
-      <ChevronRight className="w-4 h-4" />
-      <span className="text-slate-700 font-extrabold">Employees</span>
-      <ChevronRight className="w-4 h-4" />
-      <span>Next of Kin</span>
-    </div>
-  );
-
-  const header = (
-    <Card className="p-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="w-11 h-11 rounded-2xl bg-dle-blue/10 border border-slate-200/60 flex items-center justify-center text-dle-blue">
-              <Users className="w-6 h-6" />
-            </span>
-            <div className="min-w-0">
-              <div className="text-lg font-extrabold text-slate-900">Next of Kin</div>
-              <div className="text-sm text-slate-600 font-semibold mt-1">Manage employee next-of-kin records, legal relationship evidence, verification status, beneficiary linkage, and emergency dependency information.</div>
-            </div>
-          </div>
-          <div className="mt-4 flex items-center gap-2 flex-wrap">
-            <Pill label={`Employee: ${activeEmployeeId}`} />
-            <Pill label={`Loaded: ${nowStamp}`} />
-            <Pill label={`Readiness: ${readiness.state} (${readiness.score}%)`} />
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          <HeaderButton onClick={openAdd} label="Add Next of Kin" tone="primary" icon={UserPlus} disabled={role === 'Employee'} />
-          <HeaderButton onClick={() => void requestEmployeeUpdate()} label="Request Employee Update" tone="secondary" icon={BadgeCheck} />
-          <HeaderButton
-            onClick={() => {
-              const target = primary || records[0] || null;
-              if (!target) {
-                setToast({ title: 'No record', detail: 'Add a next of kin record first.', tone: 'warn' });
-                return;
-              }
-              setVerifyNokId(target.id);
-              setVerifyMethod('HR Manual Verification');
-              setVerifyOpen(true);
-            }}
-            label="Verify Record"
-            tone="secondary"
-            icon={ShieldCheck}
-            disabled={role === 'Employee' || !records.length}
-          />
-          <HeaderButton
-            onClick={() => {
-              const target = primary || records[0] || null;
-              if (!target) {
-                setToast({ title: 'No record', detail: 'Add a next of kin record first.', tone: 'warn' });
-                return;
-              }
-              setEvidenceNokId(target.id);
-              setEvidenceOpen(true);
-            }}
-            label="Upload Evidence"
-            tone="secondary"
-            icon={FileUp}
-            disabled={role === 'Employee' || !records.length}
-          />
-          <HeaderButton onClick={() => setExportOpen(true)} label="Export Report" tone="dark" icon={Download} disabled={role === 'Employee'} />
-          <HeaderButton onClick={() => setRefreshToken((n) => n + 1)} label="Refresh" tone="secondary" icon={RefreshCcw} />
-        </div>
-      </div>
-    </Card>
-  );
-
-  const toolbar = (
-    <Card className="p-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <button type="button" onClick={() => setSelectorOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:pointer-events-none" disabled={role === 'Employee'}>
-            <Search className="w-4 h-4" />
-            Employee Selector
-          </button>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] font-extrabold text-slate-600">Role</span>
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800 focus:outline-none">
-            {(
-              [
-                'Super Admin',
-                'HR Director',
-                'HR Manager',
-                'HR Officer',
-                'Admin Officer',
-                'Employee',
-                'Line Manager',
-                'HSE Officer',
-                'Compliance Officer',
-                'Auditor',
-                'Executive Management',
-              ] as Role[]
-            ).map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
-            <span className="text-[11px] font-extrabold text-slate-600">Viewer Employee ID</span>
-            <input value={viewerEmployeeId || ''} onChange={(e) => setViewerEmployeeId(e.target.value.trim() || undefined)} placeholder="Optional" className="w-[180px] max-w-[60vw] text-xs font-extrabold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent" />
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-
-  const summaryCards = (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-      {[
-        { title: 'Total Next of Kin', value: String(records.length), detail: 'Registered records', status: records.length ? 'OK' : 'Missing' },
-        { title: 'Primary Next of Kin', value: primary ? primary.fullName : '—', detail: primary ? primary.relationship : 'Set primary', status: primary ? 'Configured' : 'Missing' },
-        { title: 'Verified Records', value: String(verifiedCount), detail: 'Verified', status: verifiedCount ? 'Verified' : 'Unverified' },
-        { title: 'Unverified Records', value: String(unverifiedCount), detail: 'Needs verification', status: unverifiedCount ? 'Pending' : 'OK' },
-        { title: 'Evidence Uploaded', value: String(evidenceUploaded), detail: 'Uploaded/verified', status: evidenceUploaded ? 'Uploaded' : 'Missing' },
-        { title: 'Beneficiary Linked', value: String(beneficiaryLinked), detail: `Total %: ${beneficiaryTotalPct}%`, status: beneficiaryTotalPct > 100 ? 'Exceeds 100%' : beneficiaryLinked ? 'Linked' : 'None' },
-        { title: 'Missing NOK Status', value: missingStatus, detail: 'Readiness / compliance', status: missingStatus },
-        { title: 'Last Updated', value: lastUpdated ? formatDateUtc(lastUpdated) : '—', detail: 'Last update', status: lastUpdated ? 'Updated' : 'None' },
-      ].map((c) => {
-        const st = statusPill(c.status);
-        return (
-          <div key={c.title} className="rounded-2xl border border-slate-200/60 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[11px] font-extrabold text-slate-600">{c.title}</div>
-                <div className="text-sm font-extrabold text-slate-900 mt-1 truncate">{String(c.value || '—')}</div>
-                <div className="text-[11px] text-slate-500 font-semibold mt-2 truncate">{c.detail}</div>
-              </div>
-              <span className="w-10 h-10 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-700">
-                <Users className="w-5 h-5" />
-              </span>
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${st.border} ${st.bg} ${st.fg}`}>{c.status}</span>
-              <span className="text-[11px] font-extrabold text-slate-500">{formatDateUtc(initialNow)}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  const aiPanel = (
-    <Card className="p-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-purple-600/10 border border-slate-200/60 flex items-center justify-center text-purple-700">
-            <Sparkles className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">AI Next-of-Kin Intelligence</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Missing primary NOK, invalid phone, evidence gaps, stale verification, duplicate detection and readiness scoring.</div>
-          </div>
-        </div>
-        <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{formatNumber((aiState.data || []).length)} insights</span>
-      </div>
-      <div className="mt-4 space-y-3">
-        {(aiState.data || []).slice(0, 10).map((i) => {
-          const st = severityStyle(i.severity);
-          return (
-            <div key={i.id} className={`rounded-2xl border ${st.border} bg-white p-4`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold ${st.bg} ${st.fg}`}>{i.severity.toUpperCase()}</span>
-                    <span className="text-sm font-extrabold text-slate-900">{i.title}</span>
-                    <span className="text-[11px] font-extrabold text-slate-500">Confidence: {formatNumber(Math.round(i.confidence * 100))}%</span>
-                  </div>
-                  <div className="text-xs text-slate-600 font-semibold mt-2">{i.recommendation}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (i.action === 'open_add') openAdd();
-                    else if (i.action === 'open_edit') {
-                      const t = primary || records[0] || null;
-                      if (t) openEdit(t);
-                    } else if (i.action === 'open_evidence') {
-                      const t = primary || records[0] || null;
-                      if (t) {
-                        setEvidenceNokId(t.id);
-                        setEvidenceOpen(true);
-                      }
-                    } else if (i.action === 'open_verify') {
-                      const t = primary || records[0] || null;
-                      if (t) {
-                        setVerifyNokId(t.id);
-                        setVerifyMethod('HR Manual Verification');
-                        setVerifyOpen(true);
-                      }
-                    } else if (i.action === 'open_beneficiary') {
-                      const t = primary || records[0] || null;
-                      if (t) {
-                        setBeneficiaryNokId(t.id);
-                        setBeneficiaryIs(true);
-                        setBeneficiaryPct(String(t.beneficiary?.beneficiaryPercentage ?? 50));
-                        setBeneficiaryCategory(t.beneficiary?.benefitCategory || 'Death Benefit');
-                        setBeneficiaryNotes('');
-                        setBeneficiaryOpen(true);
-                      }
-                    } else if (i.action === 'open_request') void requestEmployeeUpdate();
-                    else topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  }}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 transition-colors shrink-0"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                  {i.actionLabel}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-        {aiState.status === 'error' ? <div className="text-xs font-semibold text-slate-600">{aiState.error}</div> : null}
-      </div>
-    </Card>
-  );
-
-  const primarySection = (
-    <Card className="p-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <Phone className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Primary Next of Kin</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Primary next of kin record, evidence/beneficiary linkage and quick actions.</div>
-          </div>
-        </div>
-        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${statusPill(primary?.verificationStatus || 'Unverified').border} ${statusPill(primary?.verificationStatus || 'Unverified').bg} ${statusPill(primary?.verificationStatus || 'Unverified').fg}`}>
-          {primary?.verificationStatus || 'Unverified'}
-        </span>
-      </div>
-
-      {!primary ? (
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-6 flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">No primary next of kin configured</div>
-            <div className="text-xs text-slate-600 font-semibold mt-1">Add a record and mark it as primary for emergency dependency readiness.</div>
-          </div>
-          <button type="button" onClick={openAdd} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-dle-blue text-white text-xs font-extrabold hover:bg-dle-blue/90 disabled:opacity-60 disabled:pointer-events-none" disabled={role === 'Employee'}>
-            <UserPlus className="w-4 h-4" />
-            Add NOK
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-3">
-            {[
-              ['Full Name', primary.fullName],
-              ['Relationship', primary.relationship],
-              ['Gender', primary.gender || '—'],
-              ['Date of Birth', primary.dateOfBirth ? formatDateUtc(primary.dateOfBirth) : '—'],
-              ['Primary Phone', primary.primaryPhone],
-              ['Alternate Phone', primary.alternatePhone || '—'],
-              ['Email', primary.email || '—'],
-              ['Residential Address', primary.residentialAddress || '—'],
-              ['City', primary.city || '—'],
-              ['State', primary.state || '—'],
-              ['Country', primary.country || '—'],
-              ['Preferred Contact Method', primary.preferredContactMethod || '—'],
-              ['Beneficiary Status', primary.beneficiary?.isBeneficiary ? `Yes (${primary.beneficiary.beneficiaryPercentage ?? 0}%)` : 'No'],
-              ['Evidence Status', primary.evidenceStatus],
-              ['Last Verified Date', primary.lastVerifiedAt ? formatDateUtc(primary.lastVerifiedAt) : '—'],
-            ].map(([k, v]) => (
-              <div key={k} className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-[11px] font-extrabold text-slate-600">{k}</div>
-                <div className="text-sm font-extrabold text-slate-900 mt-1 truncate">{String(v || '—')}</div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-5 flex items-center gap-2 flex-wrap">
-            <a href={`tel:${encodeURIComponent(primary.primaryPhone)}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-              <Phone className="w-4 h-4" />
-              Call
-            </a>
-            <a href={`sms:${encodeURIComponent(primary.primaryPhone)}`} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-              <Phone className="w-4 h-4" />
-              Send SMS
-            </a>
-            <a href={primary.email ? `mailto:${encodeURIComponent(primary.email)}` : '#'} className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 ${primary.email ? '' : 'opacity-60 pointer-events-none'}`}>
-              <Mail className="w-4 h-4" />
-              Send Email
-            </a>
-            <button type="button" onClick={() => openEdit(primary)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:pointer-events-none" disabled={role === 'Employee'}>
-              Edit Record
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setVerifyNokId(primary.id);
-                setVerifyMethod('HR Manual Verification');
-                setVerifyOpen(true);
-              }}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 disabled:opacity-60 disabled:pointer-events-none"
-              disabled={role === 'Employee'}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              Mark Verified
-            </button>
-            <button type="button" onClick={() => void requestEmployeeUpdate()} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-              <BadgeCheck className="w-4 h-4" />
-              Request Update
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEvidenceNokId(primary.id);
-                setEvidenceOpen(true);
-              }}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:pointer-events-none"
-              disabled={role === 'Employee'}
-            >
-              <FileUp className="w-4 h-4" />
-              Upload Evidence
-            </button>
-            <button type="button" onClick={() => void openAudit()} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-              <Fingerprint className="w-4 h-4" />
-              View History
-            </button>
-          </div>
-        </>
-      )}
-    </Card>
-  );
-
-  const recordsTable = (
-    <Card className="p-0 overflow-hidden">
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <Users className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Next-of-Kin Records</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Primary NOK, beneficiary linkage, evidence status, verification status and actions.</div>
-          </div>
-        </div>
-        <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">{formatNumber(records.length)} rows</span>
-      </div>
-      <div className="p-4 overflow-auto">
-        <table className="min-w-[1600px] w-full text-left bg-white">
-          <thead className="bg-slate-50 border-b border-slate-100">
-            <tr>
-              {['Full Name', 'Relationship', 'Phone', 'Email', 'Address', 'Primary NOK', 'Beneficiary Linked', 'Evidence Status', 'Verification Status', 'Last Verified', 'Actions'].map((h) => (
-                <th key={h} className="px-4 py-3 text-[11px] font-extrabold text-slate-600 whitespace-nowrap">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {records.length ? (
-              records.map((r) => {
-                const st = statusPill(r.verificationStatus);
-                const ev = statusPill(r.evidenceStatus);
-                return (
-                  <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 py-3 text-xs font-extrabold text-slate-900 whitespace-nowrap">{r.fullName}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{r.relationship}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{r.primaryPhone}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{r.email || '—'}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 min-w-[320px]">{r.residentialAddress || '—'}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{r.isPrimary ? 'Yes' : 'No'}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{r.beneficiary?.isBeneficiary ? `Yes (${r.beneficiary.beneficiaryPercentage ?? 0}%)` : 'No'}</td>
-                    <td className="px-4 py-3 text-xs font-semibold whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${ev.border} ${ev.bg} ${ev.fg}`}>{r.evidenceStatus}</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs font-semibold whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${st.border} ${st.bg} ${st.fg}`}>{r.verificationStatus}</span>
-                    </td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{r.lastVerifiedAt ? formatDateUtc(r.lastVerifiedAt) : '—'}</td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <button type="button" onClick={() => openEdit(r)} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:pointer-events-none" disabled={role === 'Employee'}>
-                          View / Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void setPrimary(r.id)
-                              .then(() => setRefreshToken((n) => n + 1))
-                              .catch((e) => setToast({ title: 'Action failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' }))
-                          }
-                          className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-dle-blue text-white text-[11px] font-extrabold hover:bg-dle-blue/90 disabled:opacity-60 disabled:pointer-events-none"
-                          disabled={role === 'Employee'}
-                        >
-                          Mark Primary
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setBeneficiaryNokId(r.id);
-                            setBeneficiaryIs(true);
-                            setBeneficiaryPct(String(r.beneficiary?.beneficiaryPercentage ?? 50));
-                            setBeneficiaryCategory(r.beneficiary?.benefitCategory || 'Death Benefit');
-                            setBeneficiaryNotes('');
-                            setBeneficiaryOpen(true);
-                          }}
-                          className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:pointer-events-none"
-                          disabled={role === 'Employee'}
-                        >
-                          Link Beneficiary
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEvidenceNokId(r.id);
-                            setEvidenceOpen(true);
-                          }}
-                          className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700 hover:bg-slate-50 disabled:opacity-60 disabled:pointer-events-none"
-                          disabled={role === 'Employee'}
-                        >
-                          Upload Evidence
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setVerifyNokId(r.id);
-                            setVerifyMethod('HR Manual Verification');
-                            setVerifyOpen(true);
-                          }}
-                          className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-900 text-white text-[11px] font-extrabold hover:bg-slate-800 disabled:opacity-60 disabled:pointer-events-none"
-                          disabled={role === 'Employee'}
-                        >
-                          Verify
-                        </button>
-                        <button type="button" onClick={() => void requestEmployeeUpdate()} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700 hover:bg-slate-50">
-                          Request Update
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void deleteRecord(r.id)
-                              .then(() => setRefreshToken((n) => n + 1))
-                              .catch((e) => setToast({ title: 'Delete failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' }))
-                          }
-                          className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-[11px] font-extrabold text-red-800 hover:bg-red-100 disabled:opacity-60 disabled:pointer-events-none"
-                          disabled={role === 'Employee'}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          Delete
-                        </button>
-                        <button type="button" onClick={() => void openAudit()} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700 hover:bg-slate-50">
-                          <Fingerprint className="w-4 h-4" />
-                          Audit Log
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={11} className="px-6 py-10 text-center text-sm text-slate-600 font-semibold">
-                  No next of kin records found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-
-  const evidencePanel = (
-    <Card className="p-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-amber-600/10 border border-amber-200 flex items-center justify-center text-amber-700">
-            <FileUp className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Verification & Evidence</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Verification states, evidence presence, and compliance review readiness.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => void openAudit()} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-          <Fingerprint className="w-4 h-4" />
-          Open Audit Trail
-        </button>
-      </div>
-      <div className="mt-5 grid grid-cols-1 lg:grid-cols-4 gap-3">
-        {[
-          ['Verified Records', String(verifiedCount)],
-          ['Unverified Records', String(unverifiedCount)],
-          ['Evidence Uploaded/Verified', String(evidenceUploaded)],
-          ['Beneficiary Total %', `${beneficiaryTotalPct}%`],
-        ].map(([k, v]) => (
-          <div key={k} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-[11px] font-extrabold text-slate-600">{k}</div>
-            <div className="text-sm font-extrabold text-slate-900 mt-1">{v}</div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-
-  const beneficiaryPanel = (
-    <Card className="p-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-emerald-600/10 border border-emerald-200 flex items-center justify-center text-emerald-700">
-            <BadgeCheck className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Beneficiary Linkage</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Benefit-linked next of kin records (controlled and audited).</div>
-          </div>
-        </div>
-        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${statusPill(beneficiaryTotalPct > 100 ? 'Exceeds 100%' : beneficiaryLinked ? 'Linked' : 'None').border} ${statusPill(beneficiaryTotalPct > 100 ? 'Exceeds 100%' : beneficiaryLinked ? 'Linked' : 'None').bg} ${statusPill(beneficiaryTotalPct > 100 ? 'Exceeds 100%' : beneficiaryLinked ? 'Linked' : 'None').fg}`}>
-          Total: {beneficiaryTotalPct}% • Linked: {beneficiaryLinked}
-        </span>
-      </div>
-      <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {records
-          .filter((r) => r.beneficiary?.isBeneficiary)
-          .slice(0, 6)
-          .map((r) => (
-            <div key={r.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="text-sm font-extrabold text-slate-900">{r.fullName}</div>
-              <div className="text-xs text-slate-600 font-semibold mt-1">{r.relationship}</div>
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
-                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-extrabold border ${statusPill(r.beneficiary.nominationStatus).border} ${statusPill(r.beneficiary.nominationStatus).bg} ${statusPill(r.beneficiary.nominationStatus).fg}`}>
-                  {r.beneficiary.nominationStatus}
-                </span>
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-extrabold">{r.beneficiary.beneficiaryPercentage ?? 0}%</span>
-                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-extrabold">{r.beneficiary.benefitCategory || '—'}</span>
-              </div>
-            </div>
-          ))}
-        {!beneficiaryLinked ? (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-sm text-slate-700 font-semibold lg:col-span-3">No beneficiary linkage records found.</div>
-        ) : null}
-      </div>
-    </Card>
-  );
-
-  const selectorModal = (
-    <Modal open={selectorOpen} onClose={() => setSelectorOpen(false)} maxW="max-w-4xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <Search className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Employee Selector</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Search by ID, name, department, job title, manager, location.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setSelectorOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6 space-y-4">
-        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white w-full">
-          <Search className="w-4 h-4 text-slate-500" />
-          <input value={selectorQuery} onChange={(e) => setSelectorQuery(e.target.value)} placeholder="Search employees..." className="w-full text-sm font-semibold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent" />
-        </div>
-        <div className="max-h-[440px] overflow-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[950px] w-full text-left bg-white">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                {['Employee ID', 'Employee Name', 'Department', 'Job Title', 'Manager', 'Location'].map((h) => (
-                  <th key={h} className="px-4 py-3 text-[11px] font-extrabold text-slate-600 whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredEmployees.map((e) => (
-                <tr
-                  key={e.employeeId}
-                  className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
-                  onClick={() => {
-                    setSelectorOpen(false);
-                    setSelectorQuery('');
-                    setActiveEmployeeId(e.employeeId);
-                    router.push(`/hris/employees/next-of-kin/${encodeURIComponent(e.employeeId)}`);
-                    setToast({ title: 'Employee loaded', detail: `${e.employeeId} — ${e.fullName}`, tone: 'ok' });
-                    setTimeout(() => topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-                  }}
-                >
-                  <td className="px-4 py-3 text-xs font-extrabold text-slate-900 whitespace-nowrap">{e.employeeId}</td>
-                  <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{e.fullName}</td>
-                  <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{e.department || '—'}</td>
-                  <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{e.jobTitle || '—'}</td>
-                  <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{e.currentManager || '—'}</td>
-                  <td className="px-4 py-3 text-xs font-semibold text-slate-700 whitespace-nowrap">{e.location || '—'}</td>
-                </tr>
-              ))}
-              {!filteredEmployees.length ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-600 font-semibold">
-                    No results.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-        {employeesState.status === 'error' ? <div className="text-xs font-semibold text-red-700">{employeesState.error}</div> : null}
-      </div>
-    </Modal>
-  );
-
-  const editModal = (
-    <Modal open={editOpen} onClose={() => setEditOpen(false)} maxW="max-w-5xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-dle-blue/10 border border-slate-200/60 flex items-center justify-center text-dle-blue">
-            <UserPlus className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">{editMode === 'add' ? 'Add Next of Kin' : 'Edit Next of Kin'}</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Validation: one primary NOK, valid phone/email, beneficiary total ≤ 100%.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setEditOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6 space-y-4 max-h-[75vh] overflow-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {[
-            ['fullName', 'Full Name', 'Required'],
-            ['relationship', 'Relationship', 'Required'],
-            ['gender', 'Gender', 'Optional'],
-            ['dateOfBirth', 'Date of Birth', 'Optional (YYYY-MM-DD)'],
-            ['primaryPhone', 'Primary Phone Number', 'Required'],
-            ['alternatePhone', 'Alternate Phone Number', 'Optional'],
-            ['email', 'Email Address', 'Optional'],
-            ['residentialAddress', 'Residential Address', 'Optional'],
-            ['city', 'City', 'Optional'],
-            ['state', 'State', 'Optional'],
-            ['country', 'Country', 'Optional'],
-            ['nearestLandmark', 'Nearest Landmark', 'Optional'],
-            ['relationshipEvidenceType', 'Relationship Evidence Type', 'Optional (evidence document uploaded separately)'],
-          ].map(([k, label, hint]) => (
-            <div key={k} className="rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="text-[11px] font-extrabold text-slate-600">{label}</div>
-              <input
-                value={(draft as any)[k] || ''}
-                onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value } as any))}
-                placeholder={String(hint)}
-                className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800"
-              />
-            </div>
-          ))}
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-3">
-            <div className="text-[11px] font-extrabold text-slate-600">Preferred Contact Method</div>
-            <select value={draft.preferredContactMethod} onChange={(e) => setDraft((d) => ({ ...d, preferredContactMethod: e.target.value as PreferredContactMethod }))} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800">
-              {(
-                [
-                  'Phone Confirmation',
-                  'SMS Confirmation',
-                  'Email Confirmation',
-                  'Document Review',
-                  'Employee Declaration',
-                  'HR Manual Verification',
-                  'Compliance Review',
-                  'Other',
-                ] as PreferredContactMethod[]
-              ).map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <div className="text-sm font-extrabold text-slate-900">Flags</div>
-              <div className="text-xs text-slate-500 font-semibold mt-1">Primary NOK must be exactly one per employee.</div>
-            </div>
-            <div className="flex items-center gap-4 flex-wrap">
-              {[
-                ['isPrimary', 'Is Primary Next of Kin'],
-                ['isEmergencyContact', 'Is Emergency Contact'],
-                ['isBeneficiary', 'Is Beneficiary'],
-              ].map(([k, label]) => (
-                <label key={k} className="inline-flex items-center gap-2 text-xs font-extrabold text-slate-700">
-                  <input type="checkbox" checked={Boolean((draft as any)[k])} onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.checked } as any))} />
-                  {label}
-                </label>
-              ))}
-              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
-                <span className="text-[11px] font-extrabold text-slate-600">Beneficiary %</span>
-                <input value={draft.beneficiaryPercentage} onChange={(e) => setDraft((d) => ({ ...d, beneficiaryPercentage: e.target.value }))} placeholder="0-100" className="w-[90px] text-xs font-extrabold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent" />
-              </div>
-              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
-                <span className="text-[11px] font-extrabold text-slate-600">Benefit Category</span>
-                <input value={draft.benefitCategory} onChange={(e) => setDraft((d) => ({ ...d, benefitCategory: e.target.value }))} placeholder="Death Benefit" className="w-[200px] text-xs font-extrabold text-slate-900 placeholder:text-slate-400 outline-none bg-transparent" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-[11px] font-extrabold text-slate-600">Notes</div>
-          <input value={draft.notes} onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))} placeholder="Optional notes for audit and HR review" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
-        </div>
-
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => setEditOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button type="button" onClick={() => void saveRecord()} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 disabled:opacity-60 disabled:pointer-events-none" disabled={role === 'Employee'}>
-            <BadgeCheck className="w-4 h-4" />
-            Save
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-
-  const verifyModal = (
-    <Modal open={verifyOpen} onClose={() => setVerifyOpen(false)} maxW="max-w-2xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <ShieldCheck className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Verify Next of Kin Record</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Record verification method and mark as verified.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setVerifyOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-[11px] font-extrabold text-slate-600">Verification Method</div>
-          <select value={verifyMethod} onChange={(e) => setVerifyMethod(e.target.value as PreferredContactMethod)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800">
-            {(['Phone Confirmation', 'SMS Confirmation', 'Email Confirmation', 'Document Review', 'Employee Declaration', 'HR Manual Verification', 'Compliance Review', 'Other'] as PreferredContactMethod[]).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => setVerifyOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              void verifyRecord()
-                .then(() => {
-                  setVerifyOpen(false);
-                  setToast({ title: 'Verified', detail: 'Record marked as verified.', tone: 'ok' });
-                  setRefreshToken((n) => n + 1);
-                })
-                .catch((e) => setToast({ title: 'Verify failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' }))
-            }
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 disabled:opacity-60 disabled:pointer-events-none"
-            disabled={role === 'Employee'}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            Mark Verified
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-
-  const evidenceModal = (
-    <Modal open={evidenceOpen} onClose={() => setEvidenceOpen(false)} maxW="max-w-3xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <FileUp className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Upload Relationship Evidence</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Simulated secure upload with file validation and audit logging.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setEvidenceOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-[11px] font-extrabold text-slate-600">Evidence Type</div>
-          <select value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800">
-            {[
-              'Marriage Certificate',
-              'Birth Certificate',
-              'Court Affidavit',
-              'Government ID',
-              'Employee Declaration Form',
-              'HR Verified Declaration',
-              'Other Supporting Document',
-            ].map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-2">
-            <div className="text-[11px] font-extrabold text-slate-600">File Name</div>
-            <input value={evidenceFileName} onChange={(e) => setEvidenceFileName(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-[11px] font-extrabold text-slate-600">Size (bytes)</div>
-            <input value={evidenceSizeBytes} onChange={(e) => setEvidenceSizeBytes(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-3">
-            <div className="text-[11px] font-extrabold text-slate-600">MIME Type</div>
-            <select value={evidenceMime} onChange={(e) => setEvidenceMime(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800">
-              {['application/pdf', 'image/png', 'image/jpeg'].map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => setEvidenceOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              void uploadEvidence()
-                .then(() => {
-                  setEvidenceOpen(false);
-                  setToast({ title: 'Evidence uploaded', detail: evidenceFileName, tone: 'ok' });
-                  setRefreshToken((n) => n + 1);
-                })
-                .catch((e) => setToast({ title: 'Upload failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' }))
-            }
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 disabled:opacity-60 disabled:pointer-events-none"
-            disabled={role === 'Employee'}
-          >
-            <FileUp className="w-4 h-4" />
-            Upload
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-
-  const beneficiaryModal = (
-    <Modal open={beneficiaryOpen} onClose={() => setBeneficiaryOpen(false)} maxW="max-w-3xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <BadgeCheck className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Beneficiary Linkage</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Controlled beneficiary linkage with percentage validation and audit logging.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setBeneficiaryOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6 space-y-4">
-        <label className="inline-flex items-center gap-2 text-xs font-extrabold text-slate-700">
-          <input type="checkbox" checked={beneficiaryIs} onChange={(e) => setBeneficiaryIs(e.target.checked)} />
-          Is Beneficiary
-        </label>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-[11px] font-extrabold text-slate-600">Beneficiary %</div>
-            <input value={beneficiaryPct} onChange={(e) => setBeneficiaryPct(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-2">
-            <div className="text-[11px] font-extrabold text-slate-600">Benefit Category</div>
-            <select value={beneficiaryCategory} onChange={(e) => setBeneficiaryCategory(e.target.value)} className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800">
-              {['Death Benefit', 'Insurance Benefit', 'Gratuity', 'Pension Support Record', 'Welfare Benefit', 'Other HR Benefit'].map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-[11px] font-extrabold text-slate-600">Notes</div>
-          <input value={beneficiaryNotes} onChange={(e) => setBeneficiaryNotes(e.target.value)} placeholder="Optional" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={() => setBeneficiaryOpen(false)} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              void linkBeneficiary()
-                .then(() => {
-                  setBeneficiaryOpen(false);
-                  setToast({ title: 'Beneficiary updated', detail: beneficiaryIs ? `${beneficiaryPct}%` : 'Removed', tone: 'ok' });
-                  setRefreshToken((n) => n + 1);
-                })
-                .catch((e) => setToast({ title: 'Update failed', detail: e instanceof Error ? e.message : 'Request failed', tone: 'err' }))
-            }
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 disabled:opacity-60 disabled:pointer-events-none"
-            disabled={role === 'Employee'}
-          >
-            <BadgeCheck className="w-4 h-4" />
-            Save
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-
-  const exportModal = (
-    <Modal open={exportOpen} onClose={() => setExportOpen(false)} maxW="max-w-2xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <Download className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Export Next of Kin Report</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">CSV / Excel / PDF export for compliance reporting.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setExportOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6 grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {['csv', 'xls', 'pdf'].map((fmt) => (
-          <a key={fmt} href={`/api/hris/next-of-kin/export?format=${encodeURIComponent(fmt)}&employeeId=${encodeURIComponent(activeEmployeeId)}`} className="inline-flex items-center justify-between px-4 py-3 rounded-2xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50">
-            {fmt.toUpperCase()} <Download className="w-4 h-4" />
-          </a>
-        ))}
-      </div>
-    </Modal>
-  );
-
-  const auditModal = (
-    <Modal open={auditOpen} onClose={() => setAuditOpen(false)} maxW="max-w-3xl">
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-            <Fingerprint className="w-5 h-5" />
-          </span>
-          <div>
-            <div className="text-sm font-extrabold text-slate-900">Next of Kin Audit Trail</div>
-            <div className="text-xs text-slate-500 font-semibold mt-1">Viewed/created/edited/deleted, primary changed, evidence uploaded, verified, beneficiary linked.</div>
-          </div>
-        </div>
-        <button type="button" onClick={() => setAuditOpen(false)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-          <X className="w-4 h-4 text-slate-600" />
-        </button>
-      </div>
-      <div className="p-6">
-        {auditRows.status === 'loading' ? <div className="text-sm text-slate-600 font-semibold">Loading…</div> : null}
-        {auditRows.status === 'error' ? <div className="text-sm text-slate-600 font-semibold">{auditRows.error}</div> : null}
-        {auditRows.status === 'ready' ? (
-          <div className="space-y-3">
-            {(auditRows.data || []).slice(0, 160).map((a) => (
-              <div key={a.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-xs font-extrabold text-slate-900">{a.action}</div>
-                    <div className="text-xs text-slate-600 font-semibold mt-2">{a.reason ? `Reason: ${a.reason} • ` : ''}By: {a.performedBy}</div>
-                  </div>
-                  <div className="text-[11px] font-extrabold text-slate-500">{formatDateTimeUtc(a.at)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </Modal>
-  );
-
-  const loading = recordsState.status === 'loading' || employeesState.status === 'loading';
-  const hasError = recordsState.status === 'error';
+  const requestEmployeeUpdate = async () => {
+    setBusy(true);
+    try {
+      await employeeApi(activeEmployeeId, 'next-of-kin/request-update', {
+        method: 'POST',
+        role,
+        viewerEmployeeId: effectiveViewerEmployeeId,
+        body: JSON.stringify({ reason: 'Please review and update next of kin information.' }),
+      });
+      showToast('Employee update request created');
+      refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to request update', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
-    <div className="bg-white space-y-6">
-      <div ref={topRef} />
-      {breadcrumbs}
-      {header}
-      {toolbar}
+    <div className="space-y-5 bg-white pb-8">
+      <div className="flex flex-wrap items-center gap-2 text-xs font-extrabold text-slate-500">
+        <span>HRIS</span>
+        <span>/</span>
+        <span>Employees</span>
+        <span>/</span>
+        <span className="text-slate-900">Next of Kin</span>
+      </div>
 
-      {loading ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-[110px] rounded-2xl border border-slate-200/60 bg-slate-50 animate-pulse" />
-          ))}
+      <section className="border-b border-slate-200 pb-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-extrabold text-emerald-800">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Emergency dependency record
+            </div>
+            <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-slate-950">Next of Kin Management</h1>
+            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-600">
+              Maintain verified next-of-kin contacts, primary NOK status, relationship evidence, beneficiary nomination, and HR audit history for each employee.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={role} onChange={(event) => setRole(event.target.value as Role)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700">
+              {ROLES.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+            {role === 'Employee' ? (
+              <input value={viewerEmployeeId} onChange={(event) => setViewerEmployeeId(event.target.value)} placeholder="Viewer employee ID" className="h-9 w-44 rounded-lg border border-slate-200 px-3 text-xs font-extrabold text-slate-700" />
+            ) : null}
+            <IconButton label="Refresh" icon={RefreshCcw} onClick={refresh} disabled={busy || recordsState.loading} />
+            <a
+              href={`/api/hris/next-of-kin/export?format=csv&employeeId=${encodeURIComponent(activeEmployeeId)}`}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </a>
+            <IconButton label="Audit" icon={Eye} onClick={openAudit} disabled={busy} />
+            <IconButton label="Add NOK" icon={Plus} onClick={openAdd} disabled={!canEdit || busy} tone="primary" />
+          </div>
         </div>
-      ) : hasError ? (
-        <Card className="p-6">
-          <div className="flex items-start gap-3">
-            <span className="w-10 h-10 rounded-2xl bg-red-600/10 border border-red-200 flex items-center justify-center text-red-700">
-              <X className="w-5 h-5" />
-            </span>
-            <div>
-              <div className="text-sm font-extrabold text-slate-900">Unable to load next of kin records</div>
-              <div className="text-xs text-slate-600 font-semibold mt-1">{recordsState.error || 'Request failed'}</div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="space-y-4">
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-extrabold uppercase text-slate-500">Employee</div>
+                <div className="mt-1 text-sm font-extrabold text-slate-950">{activeEmployee?.fullName || activeEmployeeId}</div>
+              </div>
+              <Users className="h-5 w-5 text-slate-400" />
+            </div>
+            {role !== 'Employee' ? (
+              <>
+                <div className="mt-4 flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3">
+                  <Search className="h-4 w-4 text-slate-400" />
+                  <input value={employeeQuery} onChange={(event) => setEmployeeQuery(event.target.value)} placeholder="Search employees" className="min-w-0 flex-1 bg-transparent text-xs font-bold text-slate-800 outline-none placeholder:text-slate-400" />
+                </div>
+                <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                  {employeesState.loading ? <div className="rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-500">Loading employees...</div> : null}
+                  {employeesState.error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">{employeesState.error}</div> : null}
+                  {filteredEmployees.map((employee) => (
+                    <button
+                      key={employee.employeeId}
+                      type="button"
+                      onClick={() => selectEmployee(employee.employeeId)}
+                      className={`w-full rounded-lg border p-3 text-left transition-colors ${employee.employeeId === activeEmployeeId ? 'border-dle-blue bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                    >
+                      <div className="text-xs font-extrabold text-slate-950">{employee.fullName}</div>
+                      <div className="mt-1 truncate text-[11px] font-bold text-slate-500">
+                        {employee.employeeId} · {employee.department || 'Unassigned'} · {employee.jobTitle || 'No job title'}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="mt-3 text-xs font-bold leading-5 text-slate-600">Employee role is restricted to the viewer employee record.</p>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-extrabold uppercase text-slate-500">Readiness</div>
+                <div className="mt-1 text-3xl font-extrabold text-slate-950">{readiness.score}%</div>
+              </div>
+              <StatusPill value={readiness.state} />
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${readiness.score}%` }} />
+            </div>
+            <div className="mt-4 space-y-2">
+              {readiness.checks.map((check) => (
+                <div key={check.label} className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full border ${check.done ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
+                    {check.done ? <Check className="h-3.5 w-3.5" /> : null}
+                  </span>
+                  {check.label}
+                </div>
+              ))}
             </div>
           </div>
-        </Card>
-      ) : (
-        <>
-          {summaryCards}
-          {aiPanel}
-          {primarySection}
-          {recordsTable}
-          {evidencePanel}
-          {beneficiaryPanel}
-        </>
-      )}
+        </aside>
 
-      {selectorModal}
-      {editModal}
-      {verifyModal}
-      {evidenceModal}
-      {beneficiaryModal}
-      {exportModal}
-      {auditModal}
+        <main className="min-w-0 space-y-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            {[
+              ['Records', formatNumber(records.length)],
+              ['Verified', formatNumber(verifiedCount)],
+              ['Evidence', formatNumber(evidenceCount)],
+              ['Beneficiaries', formatNumber(beneficiaryCount)],
+              ['Allocation', `${beneficiaryTotal}%`],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="text-[11px] font-extrabold uppercase text-slate-500">{label}</div>
+                <div className="mt-2 text-2xl font-extrabold text-slate-950">{value}</div>
+              </div>
+            ))}
+          </div>
 
-      <AnimatePresence>
-        {toast ? (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.16 }} className="fixed bottom-6 right-6 z-50">
-            <div className={`w-[380px] rounded-2xl border shadow-lg p-4 bg-white ${toast.tone === 'err' ? 'border-red-200' : toast.tone === 'warn' ? 'border-amber-200' : 'border-slate-200'}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-extrabold text-slate-900">{toast.title}</div>
-                  <div className="text-xs text-slate-600 font-semibold mt-1">{toast.detail}</div>
+          {recordsState.error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{recordsState.error}</div>
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs font-extrabold uppercase text-slate-500">Primary Next of Kin</div>
+                  <div className="mt-2 text-lg font-extrabold text-slate-950">{primaryRecord?.fullName || 'No primary NOK selected'}</div>
                 </div>
-                <button type="button" onClick={() => setToast(null)} className="p-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-                  <X className="w-4 h-4 text-slate-600" />
-                </button>
+                <Star className={`h-5 w-5 ${primaryRecord ? 'fill-amber-400 text-amber-400' : 'text-slate-300'}`} />
+              </div>
+              {primaryRecord ? (
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Detail label="Relationship" value={primaryRecord.relationship} />
+                  <Detail label="Verification" value={primaryRecord.verificationStatus} pill />
+                  <Detail label="Phone" value={primaryRecord.primaryPhone} />
+                  <Detail label="Email" value={primaryRecord.email || '--'} />
+                  <Detail label="Address" value={compactAddress(primaryRecord)} wide />
+                  <Detail label="Last Verified" value={formatDate(primaryRecord.lastVerifiedAt)} />
+                </div>
+              ) : (
+                <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-4 text-sm font-bold text-slate-600">Add a next of kin record or mark an existing record as primary.</div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-extrabold uppercase text-slate-500">HR Intelligence</div>
+                  <div className="mt-1 text-sm font-bold text-slate-600">Risk checks generated from NOK completeness and compliance rules.</div>
+                </div>
+                <ShieldCheck className="h-5 w-5 text-slate-400" />
+              </div>
+              <div className="mt-4 space-y-3">
+                {insightsState.loading ? <div className="rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-500">Loading insights...</div> : null}
+                {!insightsState.loading && insightsState.data.length === 0 ? <div className="rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-500">No active NOK risks detected.</div> : null}
+                {insightsState.data.slice(0, 4).map((insight) => (
+                  <div key={insight.id} className="rounded-lg border border-slate-200 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold text-slate-950">{insight.title}</div>
+                        <div className="mt-1 text-xs font-semibold leading-5 text-slate-600">{insight.recommendation}</div>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-extrabold uppercase ${styleForSeverity(insight.severity)}`}>{insight.severity}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+          </div>
+
+          <section className="rounded-lg border border-slate-200 bg-white">
+            <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-sm font-extrabold text-slate-950">Next of Kin Records</div>
+                <div className="mt-1 text-xs font-semibold text-slate-500">
+                  {activeEmployeeId} · Last updated {lastUpdated ? formatDateTime(new Date(lastUpdated).toISOString()) : '--'}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 px-3">
+                  <Search className="h-4 w-4 text-slate-400" />
+                  <input value={recordQuery} onChange={(event) => setRecordQuery(event.target.value)} placeholder="Search NOK records" className="w-44 bg-transparent text-xs font-bold text-slate-800 outline-none placeholder:text-slate-400" />
+                </div>
+                <IconButton label="Request Update" icon={UserRoundCheck} onClick={requestEmployeeUpdate} disabled={busy} />
+              </div>
+            </div>
+
+            {recordsState.loading ? (
+              <div className="grid gap-3 p-4 sm:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="h-28 animate-pulse rounded-lg bg-slate-50" />
+                ))}
+              </div>
+            ) : filteredRecords.length === 0 ? (
+              <div className="p-8 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                  <Users className="h-6 w-6" />
+                </div>
+                <div className="mt-4 text-sm font-extrabold text-slate-950">No next of kin records found</div>
+                <div className="mt-2 text-xs font-semibold text-slate-500">Create the first record for this employee to start readiness tracking.</div>
+                <button type="button" onClick={openAdd} disabled={!canEdit} className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-dle-blue px-3 text-xs font-extrabold text-white disabled:opacity-50">
+                  <Plus className="h-4 w-4" />
+                  Add NOK
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-[1080px] w-full text-left">
+                  <thead className="bg-slate-50 text-[11px] font-extrabold uppercase text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Contact</th>
+                      <th className="px-4 py-3">Verification</th>
+                      <th className="px-4 py-3">Evidence</th>
+                      <th className="px-4 py-3">Beneficiary</th>
+                      <th className="px-4 py-3">Updated</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredRecords.map((record) => (
+                      <tr key={record.id} className="align-top">
+                        <td className="px-4 py-4">
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                              <Users className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-extrabold text-slate-950">{record.fullName}</span>
+                                {record.isPrimary ? <StatusPill value="Primary" /> : null}
+                              </div>
+                              <div className="mt-1 text-xs font-bold text-slate-500">{record.relationship}</div>
+                              <div className="mt-1 max-w-[280px] truncate text-xs font-semibold text-slate-500">{compactAddress(record)}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-700">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-3.5 w-3.5 text-slate-400" />
+                            {record.primaryPhone}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2 text-slate-500">
+                            <Mail className="h-3.5 w-3.5 text-slate-400" />
+                            {record.email || '--'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <StatusPill value={record.verificationStatus} />
+                          <div className="mt-2 text-[11px] font-bold text-slate-500">{formatDate(record.lastVerifiedAt)}</div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <StatusPill value={record.evidenceStatus} />
+                          <div className="mt-2 text-[11px] font-bold text-slate-500">{record.relationshipEvidenceType || 'No evidence type'}</div>
+                        </td>
+                        <td className="px-4 py-4">
+                          <StatusPill value={record.beneficiary?.isBeneficiary ? record.beneficiary.nominationStatus : 'Not linked'} />
+                          <div className="mt-2 text-[11px] font-bold text-slate-500">
+                            {record.beneficiary?.isBeneficiary ? `${record.beneficiary.beneficiaryPercentage || 0}% · ${record.beneficiary.benefitCategory || 'Benefit'}` : '--'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 text-xs font-bold text-slate-600">{formatDate(record.updatedAt)}</td>
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <IconButton label="Edit" icon={Pencil} onClick={() => openEdit(record)} disabled={!canEdit || busy} />
+                            <IconButton label="Primary" icon={Star} onClick={() => void actionRecord(record, 'set-primary')} disabled={!canEdit || busy || record.isPrimary} />
+                            <IconButton label="Verify" icon={BadgeCheck} onClick={() => void actionRecord(record, 'verify')} disabled={!canEdit || busy || record.verificationStatus === 'Verified'} />
+                            <IconButton label="Evidence" icon={FileUp} onClick={() => openEvidence(record)} disabled={!canEdit || busy} />
+                            <IconButton label="Beneficiary" icon={ShieldCheck} onClick={() => openBeneficiary(record)} disabled={!canEdit || busy} />
+                            <IconButton label="Delete" icon={Trash2} onClick={() => void actionRecord(record, 'delete')} disabled={!canEdit || busy} tone="danger" />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </main>
+      </section>
+
+      {editorOpen ? (
+        <Modal title={draft.id ? 'Edit Next of Kin' : 'Add Next of Kin'} onClose={() => setEditorOpen(false)} width="max-w-5xl">
+          <div className="grid gap-4 p-5 lg:grid-cols-3">
+            <Field label="Full Name" value={draft.fullName} onChange={(value) => setDraft((prev) => ({ ...prev, fullName: value }))} required />
+            <SelectField label="Relationship" value={draft.relationship} values={RELATIONSHIPS} onChange={(value) => setDraft((prev) => ({ ...prev, relationship: value }))} />
+            <SelectField label="Gender" value={draft.gender} values={['', 'Female', 'Male', 'Other', 'Prefer not to say']} onChange={(value) => setDraft((prev) => ({ ...prev, gender: value }))} />
+            <Field label="Date of Birth" type="date" value={draft.dateOfBirth} onChange={(value) => setDraft((prev) => ({ ...prev, dateOfBirth: value }))} />
+            <Field label="Primary Phone" value={draft.primaryPhone} onChange={(value) => setDraft((prev) => ({ ...prev, primaryPhone: value }))} required />
+            <Field label="Alternate Phone" value={draft.alternatePhone} onChange={(value) => setDraft((prev) => ({ ...prev, alternatePhone: value }))} />
+            <Field label="Email" value={draft.email} onChange={(value) => setDraft((prev) => ({ ...prev, email: value }))} />
+            <SelectField label="Preferred Contact Method" value={draft.preferredContactMethod} values={CONTACT_METHODS} onChange={(value) => setDraft((prev) => ({ ...prev, preferredContactMethod: value as PreferredContactMethod }))} />
+            <SelectField label="Relationship Evidence Type" value={draft.relationshipEvidenceType} values={['', ...EVIDENCE_TYPES]} onChange={(value) => setDraft((prev) => ({ ...prev, relationshipEvidenceType: value }))} />
+            <Field label="Residential Address" value={draft.residentialAddress} onChange={(value) => setDraft((prev) => ({ ...prev, residentialAddress: value }))} wide />
+            <Field label="City" value={draft.city} onChange={(value) => setDraft((prev) => ({ ...prev, city: value }))} />
+            <Field label="State" value={draft.state} onChange={(value) => setDraft((prev) => ({ ...prev, state: value }))} />
+            <Field label="Country" value={draft.country} onChange={(value) => setDraft((prev) => ({ ...prev, country: value }))} />
+            <Field label="Nearest Landmark" value={draft.nearestLandmark} onChange={(value) => setDraft((prev) => ({ ...prev, nearestLandmark: value }))} />
+            <Field label="Notes" value={draft.notes} onChange={(value) => setDraft((prev) => ({ ...prev, notes: value }))} wide />
+            <div className="rounded-lg border border-slate-200 p-4 lg:col-span-3">
+              <div className="grid gap-4 lg:grid-cols-4">
+                <Toggle label="Primary NOK" checked={draft.isPrimary} onChange={(checked) => setDraft((prev) => ({ ...prev, isPrimary: checked }))} />
+                <Toggle label="Emergency Contact" checked={draft.isEmergencyContact} onChange={(checked) => setDraft((prev) => ({ ...prev, isEmergencyContact: checked }))} />
+                <Toggle label="Beneficiary" checked={draft.isBeneficiary} onChange={(checked) => setDraft((prev) => ({ ...prev, isBeneficiary: checked }))} />
+                <Field label="Beneficiary %" value={draft.beneficiaryPercentage} onChange={(value) => setDraft((prev) => ({ ...prev, beneficiaryPercentage: value }))} disabled={!draft.isBeneficiary} />
+                <SelectField label="Benefit Category" value={draft.benefitCategory} values={BENEFIT_CATEGORIES} onChange={(value) => setDraft((prev) => ({ ...prev, benefitCategory: value }))} disabled={!draft.isBeneficiary} />
+              </div>
+            </div>
+          </div>
+          <ModalActions onCancel={() => setEditorOpen(false)} onSave={saveRecord} busy={busy} label="Save Record" />
+        </Modal>
+      ) : null}
+
+      {evidenceTarget ? (
+        <Modal title={`Upload Evidence: ${evidenceTarget.fullName}`} onClose={() => setEvidenceTarget(null)}>
+          <div className="grid gap-4 p-5 sm:grid-cols-2">
+            <SelectField label="Evidence Type" value={evidenceDraft.evidenceType} values={EVIDENCE_TYPES} onChange={(value) => setEvidenceDraft((prev) => ({ ...prev, evidenceType: value }))} />
+            <SelectField label="MIME Type" value={evidenceDraft.mimeType} values={['application/pdf', 'image/png', 'image/jpeg']} onChange={(value) => setEvidenceDraft((prev) => ({ ...prev, mimeType: value }))} />
+            <Field label="File Name" value={evidenceDraft.fileName} onChange={(value) => setEvidenceDraft((prev) => ({ ...prev, fileName: value }))} required />
+            <Field label="Size (bytes)" value={evidenceDraft.sizeBytes} onChange={(value) => setEvidenceDraft((prev) => ({ ...prev, sizeBytes: value }))} required />
+            <Field label="Notes" value={evidenceDraft.notes} onChange={(value) => setEvidenceDraft((prev) => ({ ...prev, notes: value }))} wide />
+            <Toggle label="Mark verified on upload" checked={evidenceDraft.markVerified} onChange={(checked) => setEvidenceDraft((prev) => ({ ...prev, markVerified: checked }))} />
+          </div>
+          <ModalActions onCancel={() => setEvidenceTarget(null)} onSave={uploadEvidence} busy={busy} label="Upload Evidence" />
+        </Modal>
+      ) : null}
+
+      {beneficiaryTarget ? (
+        <Modal title={`Beneficiary Linkage: ${beneficiaryTarget.fullName}`} onClose={() => setBeneficiaryTarget(null)}>
+          <div className="grid gap-4 p-5 sm:grid-cols-2">
+            <Toggle label="Is Beneficiary" checked={beneficiaryDraft.isBeneficiary} onChange={(checked) => setBeneficiaryDraft((prev) => ({ ...prev, isBeneficiary: checked }))} />
+            <Field label="Beneficiary %" value={beneficiaryDraft.beneficiaryPercentage} onChange={(value) => setBeneficiaryDraft((prev) => ({ ...prev, beneficiaryPercentage: value }))} disabled={!beneficiaryDraft.isBeneficiary} />
+            <SelectField label="Benefit Category" value={beneficiaryDraft.benefitCategory} values={BENEFIT_CATEGORIES} onChange={(value) => setBeneficiaryDraft((prev) => ({ ...prev, benefitCategory: value }))} disabled={!beneficiaryDraft.isBeneficiary} />
+            <Field label="Notes" value={beneficiaryDraft.notes} onChange={(value) => setBeneficiaryDraft((prev) => ({ ...prev, notes: value }))} wide />
+          </div>
+          <ModalActions onCancel={() => setBeneficiaryTarget(null)} onSave={saveBeneficiary} busy={busy} label="Save Beneficiary" />
+        </Modal>
+      ) : null}
+
+      {auditOpen ? (
+        <Modal title="Next of Kin Audit Trail" onClose={() => setAuditOpen(false)} width="max-w-4xl">
+          <div className="max-h-[70vh] overflow-y-auto p-5">
+            {auditState.loading ? <div className="rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-600">Loading audit trail...</div> : null}
+            {auditState.error ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{auditState.error}</div> : null}
+            {!auditState.loading && !auditState.error ? (
+              <div className="space-y-3">
+                {auditState.data
+                  .filter((row) => row.action.toLowerCase().includes('kin') || row.action.toLowerCase().includes('evidence') || row.action.toLowerCase().includes('beneficiary'))
+                  .slice(0, 80)
+                  .map((row) => (
+                    <div key={row.id} className="rounded-lg border border-slate-200 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-extrabold text-slate-950">{row.action}</div>
+                          <div className="mt-1 text-xs font-semibold text-slate-500">
+                            {row.reason ? `${row.reason} · ` : ''}By {row.performedBy}
+                          </div>
+                        </div>
+                        <div className="text-xs font-extrabold text-slate-500">{formatDateTime(row.at)}</div>
+                      </div>
+                    </div>
+                  ))}
+                {auditState.data.length === 0 ? <div className="rounded-lg bg-slate-50 p-4 text-sm font-bold text-slate-600">No audit rows found.</div> : null}
+              </div>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
+
+      {toast ? (
+        <div className="fixed bottom-5 right-5 z-50 max-w-sm rounded-lg border bg-white p-4 shadow-lg">
+          <div className={`text-sm font-extrabold ${toast.tone === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>{toast.message}</div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
+const Detail = ({ label, value, pill, wide }: { label: string; value: string; pill?: boolean; wide?: boolean }) => (
+  <div className={wide ? 'sm:col-span-2' : ''}>
+    <div className="text-[11px] font-extrabold uppercase text-slate-500">{label}</div>
+    <div className="mt-1 text-sm font-bold text-slate-900">{pill ? <StatusPill value={value} /> : value}</div>
+  </div>
+);
+
+const Field = ({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  required,
+  wide,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  required?: boolean;
+  wide?: boolean;
+  disabled?: boolean;
+}) => (
+  <label className={`block ${wide ? 'lg:col-span-3' : ''}`}>
+    <span className="text-[11px] font-extrabold uppercase text-slate-500">
+      {label}
+      {required ? <span className="text-red-600"> *</span> : null}
+    </span>
+    <input
+      type={type}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={disabled}
+      className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-dle-blue disabled:bg-slate-50 disabled:text-slate-400"
+    />
+  </label>
+);
+
+const SelectField = ({
+  label,
+  value,
+  values,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  values: string[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) => (
+  <label className="block">
+    <span className="text-[11px] font-extrabold uppercase text-slate-500">{label}</span>
+    <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-900 outline-none transition focus:border-dle-blue disabled:bg-slate-50 disabled:text-slate-400">
+      {values.map((item) => (
+        <option key={item || 'blank'} value={item}>
+          {item || '--'}
+        </option>
+      ))}
+    </select>
+  </label>
+);
+
+const Toggle = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) => (
+  <label className="flex h-10 items-center gap-3 rounded-lg border border-slate-200 px-3 text-sm font-extrabold text-slate-800">
+    <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+    {label}
+  </label>
+);
+
+const ModalActions = ({ onCancel, onSave, busy, label }: { onCancel: () => void; onSave: () => void | Promise<void>; busy: boolean; label: string }) => (
+  <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+    <button type="button" onClick={onCancel} className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 hover:bg-slate-50">
+      Cancel
+    </button>
+    <button type="button" onClick={() => void onSave()} disabled={busy} className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-extrabold text-white hover:bg-slate-800 disabled:opacity-50">
+      <BadgeCheck className="h-4 w-4" />
+      {busy ? 'Saving...' : label}
+    </button>
+  </div>
+);

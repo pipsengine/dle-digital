@@ -7,6 +7,7 @@ import {
   previewNextEmployeeCodeFromDb,
   saveEmployeeDraftToDb,
 } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { readActiveSagePayrollEmployees } from '@/lib/sage-people-payroll-store';
 
 type Role =
@@ -116,6 +117,15 @@ const employeeTypePrefix = (employeeType: unknown) => {
   if (normalized === 'permanent') return 'P';
   if (normalized === 'lumpsum') return 'L';
   if (normalized === 'daily rate') return 'C';
+  if (normalized === 'nysc' || normalized.includes('nysc')) return 'N';
+  if (
+    normalized === 'it' ||
+    normalized === 'intern' ||
+    normalized.includes('industrial trainee') ||
+    normalized.includes('industrial training') ||
+    normalized.includes('industrial attachment') ||
+    normalized.includes('intern')
+  ) return 'I';
   return '';
 };
 
@@ -235,8 +245,8 @@ const validateDraft = (draft: EmployeeDraftPayload): ValidationResult => {
   if (normalize(c.alternatePhone) && !isPhone(normalize(c.alternatePhone))) warnings.push({ path: 'contact.alternatePhone', message: 'Alternate phone number format may be invalid', severity: 'low' });
 
   req('employment.employmentType', normalize(e.employmentType));
-  if (normalize(e.employmentType) && !['Permanent', 'Lumpsum', 'Daily Rate'].includes(normalize(e.employmentType))) {
-    errors.push({ path: 'employment.employmentType', message: 'Employee Type must be Permanent, Lumpsum, or Daily Rate', severity: 'high' });
+  if (normalize(e.employmentType) && !['Permanent', 'Lumpsum', 'Daily Rate', 'NYSC', 'IT', 'Intern', 'Industrial Trainee'].includes(normalize(e.employmentType))) {
+    errors.push({ path: 'employment.employmentType', message: 'Employee Type must be Permanent, Lumpsum, Daily Rate, NYSC, IT, Intern, or Industrial Trainee', severity: 'high' });
   }
   req('employment.employmentStatus', normalize(e.employmentStatus));
   req('employment.dateJoined', normalize(e.dateJoined));
@@ -354,7 +364,7 @@ const templateChecklist = (): ChecklistItem[] => [
   { id: 'chk-14', title: 'Leave entitlement initialized', status: 'Pending', responsibleOfficer: 'HR Officer', dueDate: '', notes: '' },
 ];
 
-const optionsPayload = (): FormOptions => ({
+const fallbackOptionsPayload = (): FormOptions => ({
   departments: [
     'Civil Engineering',
     'Mechanical Engineering',
@@ -402,6 +412,47 @@ const optionsPayload = (): FormOptions => ({
   roleProfiles: ['HR Generalist', 'Project Delivery', 'Finance Ops', 'HSE Compliance', 'IT Support'],
 });
 
+const uniqueSorted = (values: unknown[]) =>
+  Array.from(new Set(values.map((value) => (typeof value === 'string' ? value.trim() : '')).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+const mergeUnique = (primary: string[], fallback: string[]) => uniqueSorted([...primary, ...fallback]);
+
+const optionsPayload = async (): Promise<FormOptions> => {
+  const fallback = fallbackOptionsPayload();
+  try {
+    const employeeSource = await readPayrollEmployees();
+    const employees = employeeSource.employees;
+    if (!employees.length) return fallback;
+    const fromDb = {
+      departments: uniqueSorted(employees.map((employee: any) => employee.department)),
+      divisions: uniqueSorted(employees.map((employee: any) => employee.division)),
+      businessUnits: uniqueSorted(employees.map((employee: any) => employee.businessUnit)),
+      locations: uniqueSorted(employees.flatMap((employee: any) => [employee.location, employee.workLocation, employee.officeLocation, employee.projectSite])),
+      jobTitles: uniqueSorted(employees.flatMap((employee: any) => [employee.jobTitle, employee.designation])),
+      jobGrades: uniqueSorted(employees.map((employee: any) => employee.jobGrade)),
+      costCenters: uniqueSorted(employees.map((employee: any) => employee.costCenter)),
+      projectSites: uniqueSorted(employees.map((employee: any) => employee.projectSite)),
+      staffCategories: uniqueSorted(employees.map((employee: any) => employee.staffCategory)),
+      employeeCategories: uniqueSorted(employees.map((employee: any) => employee.employeeCategory)),
+    };
+    return {
+      ...fallback,
+      departments: mergeUnique(fromDb.departments, fallback.departments),
+      divisions: mergeUnique(fromDb.divisions, fallback.divisions),
+      businessUnits: mergeUnique(fromDb.businessUnits, fallback.businessUnits),
+      locations: mergeUnique(fromDb.locations, fallback.locations),
+      jobTitles: mergeUnique(fromDb.jobTitles, fallback.jobTitles),
+      jobGrades: mergeUnique(fromDb.jobGrades, fallback.jobGrades),
+      costCenters: mergeUnique(fromDb.costCenters, fallback.costCenters),
+      projectSites: mergeUnique(fromDb.projectSites, fallback.projectSites),
+      staffCategories: mergeUnique(fromDb.staffCategories, fallback.staffCategories),
+      employeeCategories: mergeUnique(fromDb.employeeCategories, fallback.employeeCategories),
+    };
+  } catch {
+    return fallback;
+  }
+};
+
 const validateDoc = (d: any) => {
   const mime = normalize(d.mimeType);
   const size = typeof d.sizeBytes === 'number' ? d.sizeBytes : 0;
@@ -416,12 +467,12 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   const { action } = await ctx.params;
   const seg0 = action[0] || '';
 
-  if (seg0 === 'form-options') return jsonOk(optionsPayload());
+  if (seg0 === 'form-options') return jsonOk(await optionsPayload());
   if (seg0 === 'onboarding' && action[1] === 'checklist-template') return jsonOk(templateChecklist());
   if (seg0 === 'employee-code' && action[1] === 'next') {
     const employeeType = new URL(request.url).searchParams.get('employeeType') || '';
     const prefix = employeeTypePrefix(employeeType);
-    if (!prefix) return jsonErr(400, 'employeeType must be Permanent, Lumpsum, or Daily Rate');
+    if (!prefix) return jsonErr(400, 'employeeType must be Permanent, Lumpsum, Daily Rate, NYSC, IT, Intern, or Industrial Trainee');
     const employeeCode = (await previewNextEmployeeCodeFromDb(employeeType)) || nextPreviewFallback(employeeType);
     return jsonOk({ employeeCode, prefix, employeeType });
   }
@@ -540,7 +591,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
     return jsonOk({ started: true });
   }
 
-  if (seg0 === 'form-options') return jsonOk(optionsPayload());
+  if (seg0 === 'form-options') return jsonOk(await optionsPayload());
 
   if (seg0 === 'import-sage') {
     if (!(role === 'Super Admin' || role === 'HR Director' || role === 'HR Manager')) return jsonErr(403, 'Permission denied');

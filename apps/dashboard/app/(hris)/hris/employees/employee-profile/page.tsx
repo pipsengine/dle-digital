@@ -1,5 +1,5 @@
 import EmployeeProfileClient from './EmployeeProfileClient';
-import { readEmployeeDirectoryFromDb } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,8 +12,8 @@ export default async function EmployeeProfilePage({
   const raw = sp.employeeId;
   let employeeId = typeof raw === 'string' && raw.trim() ? raw.trim() : '';
   if (!employeeId) {
-    const employees = await readEmployeeDirectoryFromDb().catch(() => null);
-    employeeId = employees?.[0]?.employeeCode || '';
+    const employees = (await readPayrollEmployees()).employees;
+    employeeId = employees[0]?.employeeCode || '';
   }
   return <EmployeeProfileClient employeeId={employeeId} initialNow={new Date().toISOString()} />;
 }

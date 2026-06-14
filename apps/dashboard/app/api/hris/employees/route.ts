@@ -3,9 +3,9 @@ import {
   createEmployeeFromDraftInDb,
   getEmployeeDraftFromDb,
   nextEmployeeCodeFromDb,
-  readEmployeeDirectoryFromDb,
   saveEmployeeDraftToDb,
 } from '@/lib/dle-enterprise-db';
+import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -155,7 +155,22 @@ const employeeTypePrefix = (employeeType: unknown) => {
   if (normalized === 'permanent') return 'P';
   if (normalized === 'lumpsum') return 'L';
   if (normalized === 'daily rate') return 'C';
+  if (normalized === 'nysc' || normalized.includes('nysc')) return 'N';
+  if (
+    normalized === 'it' ||
+    normalized === 'intern' ||
+    normalized.includes('industrial trainee') ||
+    normalized.includes('industrial training') ||
+    normalized.includes('industrial attachment') ||
+    normalized.includes('intern')
+  ) return 'I';
   return '';
+};
+
+const normalizeEmployeeCodeForPrefix = (employeeCode: string, prefix: string) => {
+  const code = employeeCode.trim().toUpperCase();
+  if ((prefix === 'N' || prefix === 'I') && code.startsWith(`P${prefix}`)) return code.slice(1);
+  return code;
 };
 
 const isUniqueEmployeeId = (employeeId: string) => {
@@ -171,9 +186,12 @@ const isUniqueEmployeeId = (employeeId: string) => {
 const finalizeEmployeeId = async (draft: EmployeeDraftPayload) => {
   const employeeType = draft.employment?.employmentType;
   const prefix = employeeTypePrefix(employeeType);
-  if (!prefix) throw new Error('Employee Type must be Permanent, Lumpsum, or Daily Rate');
+  if (!prefix) throw new Error('Employee Type must be Permanent, Lumpsum, Daily Rate, NYSC, IT, Intern, or Industrial Trainee');
   const dbEmployeeCode = await nextEmployeeCodeFromDb(employeeType);
-  if (dbEmployeeCode) return dbEmployeeCode;
+  if (dbEmployeeCode) {
+    const normalized = normalizeEmployeeCodeForPrefix(dbEmployeeCode, prefix);
+    if (normalized.startsWith(prefix)) return normalized;
+  }
   for (let i = 0; i < 1000; i++) {
     const n = nextSeq();
     const gen = `${prefix}${String(n).padStart(4, '0')}`;
@@ -333,12 +351,12 @@ export async function POST(request: Request) {
 
 export async function GET() {
   try {
-    const employees = await readEmployeeDirectoryFromDb();
-    if (!employees) return jsonErr(503, 'DLE_Enterprise HRIS database is not available');
+    const employeeSource = await readPayrollEmployees();
     return jsonOk({
-      source: 'DLE_Enterprise HRIS',
+      source: employeeSource.source,
+      dataSource: payrollDataSourceInfo(employeeSource),
       syncedAt: nowIso(),
-      employees: employees.map(toDirectoryEmployee),
+      employees: employeeSource.employees.map(toDirectoryEmployee),
     });
   } catch (error) {
     return jsonErr(502, error instanceof Error ? `Unable to read DLE_Enterprise HRIS employees: ${error.message}` : 'Unable to read DLE_Enterprise HRIS employees');

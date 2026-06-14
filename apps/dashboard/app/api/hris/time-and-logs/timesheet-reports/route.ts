@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   isTimesheetPayrollReadyStatus,
+  normalizePaidWorkHours,
   normalizeTimesheetStatus,
   readTimesheetData,
   readTimesheetPayrollUpdates,
@@ -149,11 +150,11 @@ export async function GET(request: Request) {
           employeeName: line.employeeName,
           clockIn: line.clockIn,
           clockOut: line.clockOut,
-          attendanceHours: line.attendanceDuration,
-          projectHours: line.usedHours,
+          attendanceHours: normalizePaidWorkHours(line.attendanceDuration),
+          projectHours: normalizePaidWorkHours(line.usedHours),
           idleHours: line.idleHours,
-          totalHours: line.totalHours,
-          variance: line.variance,
+          totalHours: normalizePaidWorkHours(line.totalHours),
+          variance: round1(normalizePaidWorkHours(line.totalHours) - 8),
           validationStatus: line.validationStatus,
           validationMessage: line.validationMessage,
           projectCodes: line.projectAllocations.filter((item) => item.hours > 0).map((item) => item.projectCode),

@@ -129,6 +129,7 @@ type Employee = {
 
 type EmployeeDirectoryPayload = {
   source: string;
+  dataSource?: { source: string; databaseAvailable: boolean; warning: string | null; employeeCount: number };
   syncedAt: string;
   employees: Employee[];
 };
@@ -651,6 +652,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [directorySource, setDirectorySource] = useState('DLE_Enterprise HRIS');
+  const [directoryWarning, setDirectoryWarning] = useState<string | null>(null);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [directoryLoading, setDirectoryLoading] = useState(true);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
@@ -672,6 +674,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       const data = payload.data;
       setEmployees(data.employees);
       setDirectorySource(data.source);
+      setDirectoryWarning(data.dataSource?.warning || null);
       setSyncedAt(data.syncedAt);
       setPage(1);
       setAudit((prev) => [
@@ -686,6 +689,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       ]);
     } catch (error) {
       setEmployees([]);
+      setDirectoryWarning(null);
       setDirectoryError(error instanceof Error ? error.message : 'Unable to load DLE_Enterprise HRIS employees');
     } finally {
       setDirectoryLoading(false);
@@ -1330,6 +1334,20 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       <button
         type="button"
         disabled={!permissions.canAdd}
+        onClick={() => {
+          if (!permissions.canAdd) return;
+          setAudit((prev) => [
+            {
+              id: crypto.randomUUID(),
+              type: 'employee.open',
+              at: new Date().toISOString(),
+              actorRole: role,
+              message: 'Add Employee opened from Employee Directory',
+            },
+            ...prev,
+          ]);
+          router.push('/hris/employees/add-new-employee');
+        }}
         className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold border transition-colors ${
           permissions.canAdd ? 'bg-dle-blue text-white border-dle-blue hover:bg-dle-blue-deep' : 'bg-slate-100 text-slate-400 border-slate-200'
         }`}
@@ -1450,6 +1468,11 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       {directoryError && (
         <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
           {directoryError}
+        </div>
+      )}
+      {directoryWarning && !directoryError && (
+        <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+          {directoryWarning}
         </div>
       )}
 
@@ -1741,7 +1764,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                       <td colSpan={visibleColumns.length} className="px-6 py-16 text-center">
                         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-extrabold">
                           {directoryLoading ? <RefreshCcw className="w-4 h-4 animate-spin" /> : <Minus className="w-4 h-4" />}
-                          {directoryLoading ? 'Loading employees from DLE_Enterprise HRIS...' : directoryError ? 'Unable to load DLE_Enterprise HRIS employees.' : 'No employees match your search/filters.'}
+                          {directoryLoading ? 'Loading employees from HRIS...' : directoryError ? 'Unable to load HRIS employees.' : 'No employees match your search/filters.'}
                         </div>
                       </td>
                     </tr>

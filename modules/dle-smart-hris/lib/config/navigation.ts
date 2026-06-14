@@ -227,6 +227,7 @@ export const navigationConfig: NavItem[] = [
       'Salary Structure',
       'Employee Salary Setup',
       'Allowances',
+      'Daily Rate Pay',
       'Deductions',
       'Overtime Pay',
       'Bonuses',

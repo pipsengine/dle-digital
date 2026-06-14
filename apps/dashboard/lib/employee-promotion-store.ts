@@ -1,4 +1,5 @@
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from './dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from './dle-enterprise-db';
+import { readPayrollEmployees } from './payroll-employee-source';
 
 export type PromotionRisk = 'Low' | 'Medium' | 'High';
 export type PromotionStage = 'Eligible Review' | 'Due Review' | 'Not Yet Due' | 'Recently Confirmed' | 'Needs Data';
@@ -140,7 +141,8 @@ const deriveRecord = (row: DleEmployeeDirectoryRow): EmployeePromotionRecord | n
 
 export const readEmployeePromotionFromDb = async (): Promise<EmployeePromotionPayload> => {
   const now = new Date();
-  const employees = (await readEmployeeDirectoryFromDb()) || [];
+  const employeeSource = await readPayrollEmployees();
+  const employees = employeeSource.employees;
   const activeEmployees = employees.filter((row) => ACTIVE_STATUSES.has((row.status || '').toLowerCase())).length;
   const records = employees
     .map((row) => deriveRecord(row))
@@ -199,7 +201,7 @@ export const readEmployeePromotionFromDb = async (): Promise<EmployeePromotionPa
 
   return {
     generatedAt: now.toISOString(),
-    source: 'DLE Enterprise HRIS database',
+    source: employeeSource.source,
     records,
     summary,
     filterOptions: {

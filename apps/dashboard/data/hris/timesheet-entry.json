@@ -1,7 +1,7 @@
 [
   {
-    "id": "ts-dle-emp-00001-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00001-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00001",
     "employeeName": "Amina Bello",
     "department": "Human Capital",
@@ -16,9 +16,9 @@
     "approvedOvertimeHours": 0.5,
     "mode": "Project Engineer Entry",
     "status": "Submitted",
-    "remarks": "",
-    "submittedAt": "2026-06-01T11:30:42.639Z",
-    "updatedAt": "2026-06-01T11:30:42.639Z",
+    "remarks": null,
+    "submittedAt": "2026-06-03T17:15:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00001-main-prj-002",
@@ -102,7 +102,7 @@
         "stage": "Employee",
         "status": "Approved",
         "by": "Amina Bello",
-        "actedAt": "2026-06-01T11:30:42.639Z",
+        "actedAt": "2026-06-03T17:15:00.000Z",
         "comment": "Timesheet submitted."
       },
       {
@@ -143,8 +143,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00002-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00002-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00002",
     "employeeName": "Chinedu Okafor",
     "department": "Project Controls",
@@ -161,7 +161,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00002-main-prj-001",
@@ -305,8 +305,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00003-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00003-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00003",
     "employeeName": "Ngozi Eze",
     "department": "Finance",
@@ -323,7 +323,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00003-main-internal",
@@ -467,8 +467,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00004-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00004-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00004",
     "employeeName": "Tunde Adebayo",
     "department": "Mechanical Engineering",
@@ -485,7 +485,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00004-main-prj-001",
@@ -610,8 +610,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00005-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00005-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00005",
     "employeeName": "Halima Sule",
     "department": "HSE",
@@ -628,7 +628,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00005-main-prj-001",
@@ -772,8 +772,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00006-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00006-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00006",
     "employeeName": "Emeka Nwankwo",
     "department": "Quality Assurance",
@@ -790,7 +790,7 @@
     "status": "Draft",
     "remarks": "Overtime captured but pending approval.",
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00006-main-prj-001",
@@ -915,8 +915,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00007-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00007-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00007",
     "employeeName": "Mary Johnson",
     "department": "IT & Support",
@@ -933,7 +933,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00007-main-prj-002",
@@ -1058,8 +1058,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00008-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00008-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00008",
     "employeeName": "Ibrahim Mohammed",
     "department": "Electrical & Instrumentation",
@@ -1076,7 +1076,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00008-main-prj-004",
@@ -1201,8 +1201,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00009-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00009-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00009",
     "employeeName": "Grace Okoro",
     "department": "Procurement",
@@ -1219,7 +1219,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00009-leave-leave",
@@ -1287,8 +1287,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00010-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00010-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00010",
     "employeeName": "Samuel Ade",
     "department": "Civil Engineering",
@@ -1304,8 +1304,8 @@
     "mode": "Employee Self-Service",
     "status": "Returned",
     "remarks": "Absence requires supervisor confirmation.",
-    "submittedAt": "2026-05-29T17:15:00.000Z",
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "submittedAt": "2026-06-03T17:15:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00010-absent-no_assignment",
@@ -1332,14 +1332,14 @@
         "stage": "Employee",
         "status": "Approved",
         "by": "Samuel Ade",
-        "actedAt": "2026-05-29T11:30:00.000Z",
+        "actedAt": "2026-06-03T11:30:00.000Z",
         "comment": "Submitted."
       },
       {
         "stage": "Supervisor",
         "status": "Returned",
         "by": "Site Supervisor",
-        "actedAt": "2026-05-29T11:30:00.000Z",
+        "actedAt": "2026-06-03T11:30:00.000Z",
         "comment": "Please correct WBS and idle classification."
       },
       {
@@ -1373,8 +1373,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00011-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00011-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00011",
     "employeeName": "Fatima Aliyu",
     "department": "Executive Office",
@@ -1390,8 +1390,8 @@
     "mode": "Employee Self-Service",
     "status": "Submitted",
     "remarks": null,
-    "submittedAt": "2026-05-29T17:15:00.000Z",
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "submittedAt": "2026-06-03T17:15:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00011-main-prj-002",
@@ -1475,7 +1475,7 @@
         "stage": "Employee",
         "status": "Approved",
         "by": "Fatima Aliyu",
-        "actedAt": "2026-05-29T17:15:00.000Z",
+        "actedAt": "2026-06-03T17:15:00.000Z",
         "comment": "Timesheet submitted."
       },
       {
@@ -1516,8 +1516,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00012-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00012-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00012",
     "employeeName": "David Reyes",
     "department": "Operations",
@@ -1534,7 +1534,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00012-main-prj-004",
@@ -1659,8 +1659,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00013-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00013-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00013",
     "employeeName": "Rita Garcia",
     "department": "Legal & Compliance",
@@ -1677,7 +1677,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00013-excused-leave",
@@ -1745,8 +1745,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00014-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00014-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00014",
     "employeeName": "Ade Torres",
     "department": "Mechanical Engineering",
@@ -1763,7 +1763,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00014-main-prj-001",
@@ -1888,8 +1888,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00015-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00015-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00015",
     "employeeName": "Zainab Okonkwo",
     "department": "Project Controls",
@@ -1906,7 +1906,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00015-main-prj-001",
@@ -2050,8 +2050,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00016-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00016-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00016",
     "employeeName": "Bola Ibrahim",
     "department": "HSE",
@@ -2067,8 +2067,8 @@
     "mode": "Foreman Entry",
     "status": "Submitted",
     "remarks": null,
-    "submittedAt": "2026-05-29T17:15:00.000Z",
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "submittedAt": "2026-06-03T17:15:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00016-main-prj-004",
@@ -2152,7 +2152,7 @@
         "stage": "Employee",
         "status": "Approved",
         "by": "Bola Ibrahim",
-        "actedAt": "2026-05-29T17:15:00.000Z",
+        "actedAt": "2026-06-03T17:15:00.000Z",
         "comment": "Timesheet submitted."
       },
       {
@@ -2193,8 +2193,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00017-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00017-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00017",
     "employeeName": "Chika Mendoza",
     "department": "Human Capital",
@@ -2211,7 +2211,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00017-main-prj-002",
@@ -2336,8 +2336,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00018-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00018-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00018",
     "employeeName": "Michael Valdez",
     "department": "Operations",
@@ -2353,8 +2353,8 @@
     "mode": "Foreman Entry",
     "status": "Returned",
     "remarks": "Absence requires supervisor confirmation.",
-    "submittedAt": "2026-05-29T17:15:00.000Z",
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "submittedAt": "2026-06-03T17:15:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00018-absent-no_assignment",
@@ -2381,14 +2381,14 @@
         "stage": "Employee",
         "status": "Approved",
         "by": "Michael Valdez",
-        "actedAt": "2026-05-29T11:30:00.000Z",
+        "actedAt": "2026-06-03T11:30:00.000Z",
         "comment": "Submitted."
       },
       {
         "stage": "Supervisor",
         "status": "Returned",
         "by": "Site Supervisor",
-        "actedAt": "2026-05-29T11:30:00.000Z",
+        "actedAt": "2026-06-03T11:30:00.000Z",
         "comment": "Please correct WBS and idle classification."
       },
       {
@@ -2422,8 +2422,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00019-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00019-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00019",
     "employeeName": "Kehinde Uche",
     "department": "Electrical & Instrumentation",
@@ -2440,7 +2440,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00019-main-prj-001",
@@ -2584,8 +2584,8 @@
     ]
   },
   {
-    "id": "ts-dle-emp-00020-2026-05-29",
-    "timesheetDate": "2026-05-29",
+    "id": "ts-dle-emp-00020-2026-06-03",
+    "timesheetDate": "2026-06-03",
     "employeeId": "DLE-EMP-00020",
     "employeeName": "Juan Dela Cruz",
     "department": "IT & Support",
@@ -2602,7 +2602,7 @@
     "status": "Draft",
     "remarks": null,
     "submittedAt": null,
-    "updatedAt": "2026-05-29T17:30:00.000Z",
+    "updatedAt": "2026-06-03T17:30:00.000Z",
     "allocations": [
       {
         "id": "dle-emp-00020-main-internal",

@@ -52,7 +52,11 @@ type Role =
 type EmploymentType =
   | 'Permanent'
   | 'Lumpsum'
-  | 'Daily Rate';
+  | 'Daily Rate'
+  | 'NYSC'
+  | 'IT'
+  | 'Intern'
+  | 'Industrial Trainee';
 
 type EmploymentStatus =
   | 'Active'
@@ -1136,7 +1140,7 @@ export default function AddNewEmployeeClient({ initialNow, initialDraftId }: { i
             setCodePreview(v ? { status: 'loading' } : { status: 'idle' });
             setDraft((d) => ({ ...d, employment: { ...d.employment, employmentType: v as EmploymentType, employeeId: '' } }));
           }}
-          options={['Permanent', 'Lumpsum', 'Daily Rate']}
+          options={['Permanent', 'Lumpsum', 'Daily Rate', 'NYSC', 'IT', 'Intern', 'Industrial Trainee']}
           error={requiredErrors['employment.employmentType']}
         />
         <Field

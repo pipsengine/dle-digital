@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -82,13 +83,13 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   if (seg0 === 'form-options') {
     const url = new URL(request.url);
     const includeEmployees = url.searchParams.get('includeEmployees') === '1';
-    const rows = (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+    const rows = (await readPayrollEmployees()).employees;
     return jsonOk(buildFormOptions(rows, includeEmployees));
   }
 
   if (seg0 === 'summary') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
-    const rows = (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+    const rows = (await readPayrollEmployees()).employees;
     const totalEmployees = rows.length;
     const gradeDistribution = uniqueSorted(rows.map((row) => row.jobGrade)).map((grade) => ({
       grade,

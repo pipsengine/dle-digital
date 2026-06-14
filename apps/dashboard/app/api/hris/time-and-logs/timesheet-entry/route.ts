@@ -6,6 +6,7 @@ import {
   advanceTimesheetWorkflow,
   generateProjectCode,
   idleReasons,
+  normalizePaidWorkHours,
   STANDARD_TIMESHEET_HOURS,
   withDefaultIdleReason,
   readProjects,
@@ -41,7 +42,7 @@ import {
   type WorkflowStage,
 } from '@/lib/timesheet-entry-store';
 import { readBiometricDevices, type BiometricDeviceRecord } from '@/lib/biometric-attendance-store';
-import { readEmployeeDirectoryFromDb } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import type { StructureInsight } from '@/lib/organization-data';
 
 type TimesheetPayload = {
@@ -324,7 +325,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const projects = await readProjects();
   const nextProjectCode = await generateProjectCode();
   const biometricDevices = await readBiometricDevices();
-  const employees = (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+  const employees = (await readPayrollEmployees()).employees;
   const activeEmployees = employees.filter((employee) => !['Resigned', 'Terminated', 'Retired'].includes(employee.status));
   const projectManagers = activeEmployees
     .map((employee) => ({
@@ -398,11 +399,11 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     onLeaveEmployees: lines.filter((l) => l.idleAllocations.some((item) => item.reasonName.toLowerCase().includes('leave'))).length,
     sickEmployees: 0,
     notSyncedEmployees: 0,
-    bookedHours: round1(lines.reduce((sum, l) => sum + l.totalHours, 0)),
-    usedHours: round1(lines.reduce((sum, l) => sum + l.usedHours, 0)),
+    bookedHours: round1(lines.reduce((sum, l) => sum + normalizePaidWorkHours(l.totalHours), 0)),
+    usedHours: round1(lines.reduce((sum, l) => sum + normalizePaidWorkHours(l.usedHours), 0)),
     idleHours: round1(lines.reduce((sum, l) => sum + l.idleHours, 0)),
-    productivityPct: lines.reduce((sum, l) => sum + l.totalHours, 0) > 0 
-      ? round1((lines.reduce((sum, l) => sum + l.usedHours, 0) / lines.reduce((sum, l) => sum + l.totalHours, 0)) * 100)
+    productivityPct: lines.reduce((sum, l) => sum + normalizePaidWorkHours(l.totalHours), 0) > 0 
+      ? round1((lines.reduce((sum, l) => sum + normalizePaidWorkHours(l.usedHours), 0) / lines.reduce((sum, l) => sum + normalizePaidWorkHours(l.totalHours), 0)) * 100)
       : 0,
     pendingApprovals: headers.filter((h) => ['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(h.status)).length,
   };

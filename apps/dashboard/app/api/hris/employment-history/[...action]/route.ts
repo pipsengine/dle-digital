@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -662,10 +663,76 @@ const buildPdf = (title: string, lines: string[]) => {
   return encoder.encode(full);
 };
 
-const findVisibleItems = (role: Role, viewerEmployeeId: string | undefined) => {
+const dbHistoryItems = async (): Promise<EmploymentHistoryItem[]> => {
+  try {
+    const employeeSource = await readPayrollEmployees();
+    const employees = employeeSource.employees;
+    if (!employees.length) return [];
+    return employees
+      .map((employee: any) => {
+        const employeeId = String(employee.employeeId || employee.employeeCode || '').trim();
+        if (!employeeId) return null;
+        const dateJoined = String(employee.dateJoined || employee.contractStartDate || employee.createdAt || '').trim();
+        const effectiveDate = dateJoined ? (dateJoined.includes('T') ? dateJoined : `${dateJoined}T00:00:00.000Z`) : nowIso();
+        const status = String(employee.status || employee.employmentStatus || 'Active').trim() || 'Active';
+        const item: EmploymentHistoryItem = {
+          id: `db-hist-${employeeId}-employment-baseline`,
+          referenceNo: `DB-HIST-${employeeId}`,
+          employeeId,
+          employeeName: String(employee.fullName || employee.name || employeeId),
+          businessUnit: employee.businessUnit || null,
+          location: employee.location || employee.workLocation || employee.officeLocation || employee.projectSite || null,
+          eventType: 'Onboarding',
+          eventDate: effectiveDate,
+          effectiveDate,
+          previousDepartment: null,
+          newDepartment: employee.department || null,
+          previousJobTitle: null,
+          newJobTitle: employee.jobTitle || employee.designation || null,
+          previousGrade: null,
+          newGrade: employee.jobGrade || null,
+          previousManager: null,
+          newManager: employee.managerName || employee.currentManager || employee.reportingManager || null,
+          previousLocation: null,
+          newLocation: employee.location || employee.workLocation || employee.officeLocation || employee.projectSite || null,
+          previousStatus: null,
+          newStatus: status,
+          reason: 'Current employment baseline sourced from DLE_Enterprise HRIS.',
+          notes: 'Read-only baseline generated from the live employee directory until audited lifecycle events are recorded.',
+          supportingDocument: null,
+          approvalStatus: 'Approved',
+          approvalId: null,
+          approvedBy: 'DLE_Enterprise HRIS',
+          approvedAt: effectiveDate,
+          createdBy: 'DLE_Enterprise HRIS',
+          createdAt: effectiveDate,
+          updatedAt: null,
+          audit: [
+            {
+              id: `aud-db-${employeeId}`,
+              at: nowIso(),
+              action: 'Baseline imported from DLE_Enterprise HRIS',
+              performedBy: 'System',
+              reason: 'Live employee directory baseline',
+            },
+          ],
+          reverseOf: null,
+        };
+        return item;
+      })
+      .filter((item): item is EmploymentHistoryItem => Boolean(item));
+  } catch {
+    return [];
+  }
+};
+
+const findVisibleItems = async (role: Role, viewerEmployeeId: string | undefined) => {
   ensureSeedFromListStore();
   const perms = permissions(role, viewerEmployeeId);
-  let items = Array.from(historyStore.values());
+  const dbItems = await dbHistoryItems();
+  const manualItems = Array.from(historyStore.values());
+  const manualEmployeeIds = new Set(manualItems.map((item) => item.employeeId));
+  let items = [...manualItems, ...dbItems.filter((item) => !manualEmployeeIds.has(item.employeeId))];
   if (!perms.canViewAll) {
     if (!perms.canViewOwn) throw new Error('Permission denied');
     items = items.filter((i) => i.employeeId === viewerEmployeeId && i.approvalStatus === 'Approved');
@@ -682,10 +749,10 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   const seg0 = action[0] || '';
 
   try {
-    if (seg0 === 'summary') return jsonOk(summary(findVisibleItems(role, viewerEmployeeId)));
+    if (seg0 === 'summary') return jsonOk(summary(await findVisibleItems(role, viewerEmployeeId)));
     if (seg0 === 'analytics') {
       if (!perms.canAnalytics) return jsonErr(403, 'Permission denied');
-      const items = findVisibleItems(role, viewerEmployeeId);
+      const items = await findVisibleItems(role, viewerEmployeeId);
       const byEventType: Record<string, number> = {};
       const byDepartment: Record<string, number> = {};
       for (const i of items) {
@@ -696,7 +763,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
       return jsonOk({ byEventType, byDepartment, lastUpdatedAt: nowIso() });
     }
     if (seg0 === 'ai-insights') {
-      const items = findVisibleItems(role, viewerEmployeeId);
+      const items = await findVisibleItems(role, viewerEmployeeId);
       return jsonOk(aiInsights(items, perms.canSeePayrollSignals));
     }
     if (seg0 === 'export') {
@@ -720,7 +787,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
       const approvalStatuses = parseCsv(url.searchParams.get('approvalStatus'));
       const from = normalize(url.searchParams.get('from'));
       const to = normalize(url.searchParams.get('to'));
-      let items = findVisibleItems(role, viewerEmployeeId);
+      let items = await findVisibleItems(role, viewerEmployeeId);
       if (employeeId) items = items.filter((i) => i.employeeId === employeeId);
 
       const fromMs = from ? new Date(`${from}T00:00:00.000Z`).getTime() : null;
@@ -795,7 +862,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
 
     if (!seg0) return jsonErr(404, 'Not found');
     const historyId = seg0;
-    const item = historyStore.get(historyId);
+    const item = historyStore.get(historyId) || (await dbHistoryItems()).find((row) => row.id === historyId);
     if (!item) return jsonErr(404, 'Not found');
     if (!perms.canViewAll) {
       if (item.employeeId !== viewerEmployeeId || item.approvalStatus !== 'Approved') return jsonErr(403, 'Permission denied');

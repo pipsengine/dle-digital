@@ -30,7 +30,7 @@ import type { StructureInsight } from '@/lib/organization-data';
 
 type TimesheetStatus = 'Draft' | 'Submitted' | 'Project_Manager_Reviewed' | 'Cost_Control_Reviewed' | 'HR_Acknowledged' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected' | 'Returned';
 type TimesheetWorkflowStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR';
-const STANDARD_TIMESHEET_HOURS = 9;
+const STANDARD_TIMESHEET_HOURS = 8;
 const DEFAULT_IDLE_REASON_ID = 'idl-009';
 const DEFAULT_IDLE_REASON_NAME = 'Break Time';
 const editableTimesheetStatuses: TimesheetStatus[] = ['Draft', 'Returned', 'Rejected'];
@@ -237,6 +237,35 @@ const todayDateInputValue = () => {
   const now = new Date();
   const offsetMs = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+};
+
+const dateInputValue = (date: Date) => {
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+};
+
+const fallbackPeriodForDate = (value: string): TimesheetPeriod => {
+  const date = value ? new Date(`${value}T00:00:00`) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const year = safeDate.getFullYear();
+  const month = safeDate.getMonth();
+  const day = safeDate.getDate();
+  const startDate = day >= 16 ? new Date(year, month, 16) : new Date(year, month - 1, 16);
+  const endDate = day >= 16 ? new Date(year, month + 1, 15) : new Date(year, month, 15);
+  return {
+    id: `per-${dateInputValue(endDate).slice(0, 7)}`,
+    name: `${endDate.toLocaleDateString([], { month: 'long', year: 'numeric' })} Period`,
+    startDate: dateInputValue(startDate),
+    endDate: dateInputValue(endDate),
+    status: 'Open',
+  };
+};
+
+const formatPeriodDate = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 const formatShortTime = (value?: string | null) => {
@@ -730,8 +759,26 @@ export default function TimesheetEntryClient() {
   ).sort((a, b) => a.localeCompare(b));
   const projectManagerOptions = payload?.projectManagers ?? [];
   const projectManagerIsSelected = projectManagerOptions.some((employee) => `${employee.employeeCode} - ${employee.fullName}`.toLowerCase() === newProjectManager.trim().toLowerCase());
-  const currentStageIdx = payload?.workflowStages.findIndex(s => s.id === payload?.header?.status) ?? 0;
+  const workflowStages = payload?.workflowStages ?? [];
+  const currentStageIdx = Math.max(0, workflowStages.findIndex(s => s.id === payload?.header?.status));
+  const workflowProgressPct = workflowStages.length > 1 ? (currentStageIdx / (workflowStages.length - 1)) * 100 : 0;
+  const summary = payload?.summary ?? {
+    totalEmployees: 0,
+    presentEmployees: 0,
+    absentEmployees: 0,
+    onLeaveEmployees: 0,
+    sickEmployees: 0,
+    notSyncedEmployees: 0,
+    bookedHours: 0,
+    usedHours: 0,
+    idleHours: 0,
+    productivityPct: 0,
+    pendingApprovals: 0,
+  };
+  const pctOfCrew = (value: number) => (summary.totalEmployees > 0 ? (value / summary.totalEmployees) * 100 : 0);
   const periodStatus = payload?.period.status ?? 'Open';
+  const displayPeriod = payload?.period.startDate && payload.period.endDate ? payload.period : fallbackPeriodForDate(selectedDate);
+  const periodLabel = `${formatPeriodDate(displayPeriod.startDate)} to ${formatPeriodDate(displayPeriod.endDate)}`;
   const periodIsOpen = periodStatus === 'Open';
   const headerStatus = payload?.header?.status ?? 'Draft';
   const isPayrollReady = payrollReadyStatuses.includes(headerStatus);
@@ -778,7 +825,7 @@ export default function TimesheetEntryClient() {
               <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase">Timesheet Entry</h1>
               <div className="flex items-center gap-3 text-sm font-bold text-slate-500">
                 <span className="flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-indigo-700">
-                  <Clock className="h-3.5 w-3.5" /> Period: {payload?.period.startDate} to {payload?.period.endDate}
+                  <Clock className="h-3.5 w-3.5" /> Period: {periodLabel}
                 </span>
                 <span className={`rounded-full px-2.5 py-1 border ${periodIsOpen ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{periodStatus}</span>
                 {payload?.header?.currentApprover && (
@@ -854,7 +901,7 @@ export default function TimesheetEntryClient() {
           </div>
           <div className="mt-8">
             <div className="relative flex justify-between">
-              {payload?.workflowStages.map((stage, idx) => (
+              {workflowStages.map((stage, idx) => (
                 <div key={stage.id} className="relative z-10 flex flex-col items-center gap-2">
                   <div className={`flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold transition-all ${idx <= currentStageIdx ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-400'}`}>
                     {idx < currentStageIdx ? <CheckCircle2 className="h-4 w-4" /> : stage.order}
@@ -863,7 +910,7 @@ export default function TimesheetEntryClient() {
                 </div>
               ))}
               <div className="absolute top-4 left-0 h-0.5 w-full -translate-y-1/2 bg-slate-100">
-                <div className="h-full bg-indigo-600 transition-all duration-500" style={{ width: `${(currentStageIdx / (payload!.workflowStages.length - 1)) * 100}%` }} />
+                <div className="h-full bg-indigo-600 transition-all duration-500" style={{ width: `${workflowProgressPct}%` }} />
               </div>
             </div>
           </div>
@@ -936,12 +983,12 @@ export default function TimesheetEntryClient() {
         {/* Dashboard Metrics */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           {[
-            { label: 'Total Crew', value: payload?.summary.totalEmployees, color: 'indigo' },
-            { label: 'Present', value: payload?.summary.presentEmployees, color: 'emerald', pct: (payload!.summary.presentEmployees / payload!.summary.totalEmployees) * 100 },
-            { label: 'Absent', value: payload?.summary.absentEmployees, color: 'red', pct: (payload!.summary.absentEmployees / payload!.summary.totalEmployees) * 100 },
-            { label: 'On Leave', value: payload?.summary.onLeaveEmployees, color: 'amber' },
-            { label: 'Productive Hrs', value: payload?.summary.usedHours, color: 'blue', sub: `${payload?.summary.productivityPct}% Productivity` },
-            { label: 'Idle Hrs', value: payload?.summary.idleHours, color: 'slate', sub: `${round1(100 - payload!.summary.productivityPct)}% Idle Rate` },
+            { label: 'Total Crew', value: summary.totalEmployees, color: 'indigo' },
+            { label: 'Present', value: summary.presentEmployees, color: 'emerald', pct: pctOfCrew(summary.presentEmployees) },
+            { label: 'Absent', value: summary.absentEmployees, color: 'red', pct: pctOfCrew(summary.absentEmployees) },
+            { label: 'On Leave', value: summary.onLeaveEmployees, color: 'amber' },
+            { label: 'Productive Hrs', value: summary.usedHours, color: 'blue', sub: `${summary.productivityPct}% Productivity` },
+            { label: 'Idle Hrs', value: summary.idleHours, color: 'slate', sub: `${round1(100 - summary.productivityPct)}% Idle Rate` },
           ].map((m, i) => (
             <div key={i} className={`rounded-2xl border p-4 shadow-sm ${metricCardTone[m.color].card}`}>
               <p className={`text-[10px] font-bold uppercase tracking-widest ${metricCardTone[m.color].label}`}>{m.label}</p>

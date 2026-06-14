@@ -1,0 +1,27 @@
+[
+  {
+    "id": "payrun-2026-06-1781396457954",
+    "period": "2026-06",
+    "periodLabel": "June 2026",
+    "status": "Calculated",
+    "employeeCount": 634,
+    "grossPay": 134704407.18,
+    "netPay": 89966604.44,
+    "totalDeductions": 44737802.74,
+    "employerCost": 146832781.41,
+    "exceptionCount": 2116,
+    "createdAt": "2026-06-14T00:20:57.954Z",
+    "createdBy": "Payroll Officer",
+    "updatedAt": "2026-06-14T00:20:57.954Z",
+    "updatedBy": "Payroll Officer",
+    "audit": [
+      {
+        "at": "2026-06-14T00:20:57.954Z",
+        "actor": "Payroll Officer",
+        "action": "calculate",
+        "to": "Calculated",
+        "note": "Smoke test calculate"
+      }
+    ]
+  }
+]

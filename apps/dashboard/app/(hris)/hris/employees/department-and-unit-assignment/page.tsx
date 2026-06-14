@@ -1,5 +1,6 @@
 import DepartmentAndUnitAssignmentClient from './DepartmentAndUnitAssignmentClient';
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,8 +50,7 @@ export default async function DepartmentAndUnitAssignmentPage({
 }) {
   const sp = (await searchParams) || {};
   const raw = sp.employeeId;
-  const directory = await readEmployeeDirectoryFromDb().catch(() => null);
-  const employees = directory || [];
+  const employees = (await readPayrollEmployees()).employees;
   const fallbackEmployeeId = employees[0]?.employeeCode || '';
   const employeeId = typeof raw === 'string' && raw.trim() ? raw.trim() : fallbackEmployeeId;
   return <DepartmentAndUnitAssignmentClient initialNow={new Date().toISOString()} employeeId={employeeId} initialFormOptions={buildInitialFormOptions(employees)} />;

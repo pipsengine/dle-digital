@@ -1,4 +1,5 @@
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from './dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from './dle-enterprise-db';
+import { readPayrollEmployees } from './payroll-employee-source';
 
 export type ExitRisk = 'Low' | 'Medium' | 'High';
 export type ExitStage = 'Active Monitoring' | 'Due Soon' | 'In Clearance' | 'Payroll Closure' | 'Closed';
@@ -181,7 +182,8 @@ const deriveRecord = (row: DleEmployeeDirectoryRow, now: Date): EmployeeExitStat
 
 export const readEmployeeExitStatusFromDb = async (): Promise<EmployeeExitStatusPayload> => {
   const now = new Date();
-  const employees = (await readEmployeeDirectoryFromDb()) || [];
+  const employeeSource = await readPayrollEmployees();
+  const employees = employeeSource.employees;
   const records = employees
     .map((row) => deriveRecord(row, now))
     .filter((row): row is EmployeeExitStatusRecord => Boolean(row))
@@ -239,7 +241,7 @@ export const readEmployeeExitStatusFromDb = async (): Promise<EmployeeExitStatus
 
   return {
     generatedAt: now.toISOString(),
-    source: 'DLE Enterprise HRIS database',
+    source: employeeSource.source,
     records,
     summary,
     filterOptions: {

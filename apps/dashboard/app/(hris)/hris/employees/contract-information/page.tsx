@@ -1,5 +1,5 @@
 import ContractInformationClient from './ContractInformationClient';
-import { readEmployeeDirectoryFromDb } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,7 @@ export default async function ContractInformationPage({
 }) {
   const sp = (await searchParams) || {};
   const raw = sp.employeeId;
-  const employees = typeof raw === 'string' && raw.trim() ? [] : ((await readEmployeeDirectoryFromDb()) || []);
+  const employees = typeof raw === 'string' && raw.trim() ? [] : (await readPayrollEmployees()).employees;
   const employeeId =
     typeof raw === 'string' && raw.trim()
       ? raw.trim()

@@ -318,7 +318,13 @@ const resolveDashboardRoot = () => {
 const DATA_DIR = path.join(resolveDashboardRoot(), 'data', 'hris');
 const FILE_PATH = path.join(DATA_DIR, 'timesheet-entry.json');
 const TIMESHEET_DATE = '2026-06-03';
-export const STANDARD_TIMESHEET_HOURS = 9;
+export const STANDARD_TIMESHEET_HOURS = 8;
+export const DAILY_BREAK_HOURS = 1;
+export const normalizePaidWorkHours = (hours: number) => {
+  const value = Number.isFinite(hours) ? hours : 0;
+  if (value <= STANDARD_TIMESHEET_HOURS) return Math.max(0, Math.round(value * 10) / 10);
+  return Math.max(0, Math.round((value - DAILY_BREAK_HOURS) * 10) / 10);
+};
 
 const projectCatalog: ProjectCatalogItem[] = [
   { code: 'PRJ-001', label: 'PRJ-001', name: 'Dangote Refinery Pipe Fabrication', kind: 'project', hourType: 'Project Work', billable: true, phase: 'Mechanical', workPackage: 'Pipe Shop', activity: 'Pipe Fabrication', task: 'Fit-Up and Welding', costCode: 'FAB-001', wbs: 'PRJ-001.MEC.PSHOP.FAB', client: 'Dangote Refinery' },
@@ -643,7 +649,10 @@ export const calculateTimesheetPeriod = (date: Date = new Date()): TimesheetPeri
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const periodName = `${monthNames[endDate.getMonth()]} ${endDate.getFullYear()} Period`;
 
-  const formatDate = (d: Date) => d.toISOString().split('T')[0];
+  const formatDate = (d: Date) => {
+    const offsetMs = d.getTimezoneOffset() * 60 * 1000;
+    return new Date(d.getTime() - offsetMs).toISOString().slice(0, 10);
+  };
 
   return {
     id: `per-${formatDate(endDate).slice(0, 7)}`,
@@ -940,21 +949,25 @@ VALUES (@Id,@Name,@StartDate,@EndDate,@Status,@OpenedAt,@OpenedBy,@ClosedAt,@Clo
 };
 
 export async function readTimesheetPeriods(): Promise<TimesheetPeriod[]> {
-  const pool = await db();
-  const result = await pool.request().query(`SELECT * FROM [hris].[TimesheetPeriods] ORDER BY [StartDate] DESC`);
-  return result.recordset.map((row) => ({
-    id: row.Id,
-    name: row.Name,
-    startDate: toDateOnly(row.StartDate),
-    endDate: toDateOnly(row.EndDate),
-    status: row.Status,
-    openedAt: toIso(row.OpenedAt),
-    openedBy: row.OpenedBy,
-    closedAt: toIso(row.ClosedAt),
-    closedBy: row.ClosedBy,
-    updatedAt: toIso(row.UpdatedAt),
-    updatedBy: row.UpdatedBy,
-  }));
+  try {
+    const pool = await db();
+    const result = await pool.request().query(`SELECT * FROM [hris].[TimesheetPeriods] ORDER BY [StartDate] DESC`);
+    return result.recordset.map((row) => ({
+      id: row.Id,
+      name: row.Name,
+      startDate: toDateOnly(row.StartDate),
+      endDate: toDateOnly(row.EndDate),
+      status: row.Status,
+      openedAt: toIso(row.OpenedAt),
+      openedBy: row.OpenedBy,
+      closedAt: toIso(row.ClosedAt),
+      closedBy: row.ClosedBy,
+      updatedAt: toIso(row.UpdatedAt),
+      updatedBy: row.UpdatedBy,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export async function writeTimesheetPeriods(periods: TimesheetPeriod[]) {
@@ -993,7 +1006,11 @@ export async function readTimesheetPeriod(date: Date = new Date()): Promise<Time
     updatedBy: 'System',
   };
 
-  await writeTimesheetPeriods([...periods, period]);
+  try {
+    await writeTimesheetPeriods([...periods, period]);
+  } catch {
+    // Read-only fallback: the page can still render when SQL is temporarily unavailable.
+  }
   return period;
 }
 
@@ -1070,26 +1087,40 @@ export async function readTimesheetPeriodSummaries(windowMonths = 12): Promise<T
 }
 
 export async function readProjects(): Promise<Project[]> {
-  const pool = await db();
-  const [projectsResult, tasksResult] = await Promise.all([
-    pool.request().query(`SELECT * FROM [hris].[TimesheetProjects] ORDER BY [Code]`),
-    pool.request().query(`SELECT * FROM [hris].[TimesheetProjectTasks] ORDER BY [Name]`),
-  ]);
-  const tasksByProject = new Map<string, ProjectTask[]>();
-  for (const row of tasksResult.recordset) {
-    const tasks = tasksByProject.get(row.ProjectId) || [];
-    tasks.push({ id: row.Id, name: row.Name, activityId: row.ActivityId ?? undefined, activityName: row.ActivityName ?? undefined });
-    tasksByProject.set(row.ProjectId, tasks);
+  try {
+    const pool = await db();
+    const [projectsResult, tasksResult] = await Promise.all([
+      pool.request().query(`SELECT * FROM [hris].[TimesheetProjects] ORDER BY [Code]`),
+      pool.request().query(`SELECT * FROM [hris].[TimesheetProjectTasks] ORDER BY [Name]`),
+    ]);
+    const tasksByProject = new Map<string, ProjectTask[]>();
+    for (const row of tasksResult.recordset) {
+      const tasks = tasksByProject.get(row.ProjectId) || [];
+      tasks.push({ id: row.Id, name: row.Name, activityId: row.ActivityId ?? undefined, activityName: row.ActivityName ?? undefined });
+      tasksByProject.set(row.ProjectId, tasks);
+    }
+    return projectsResult.recordset.map((row) => ({
+      id: row.Id,
+      code: row.Code,
+      name: row.Name,
+      site: row.Site,
+      projectManager: row.ProjectManager || '',
+      status: row.Status,
+      tasks: tasksByProject.get(row.Id) || [],
+    }));
+  } catch {
+    return projectCatalog
+      .filter((item) => item.kind === 'project' || item.kind === 'internal')
+      .map((item) => ({
+        id: `fallback-${item.code.toLowerCase()}`,
+        code: item.code,
+        name: item.name,
+        site: item.client || item.phase,
+        projectManager: '',
+        status: 'Active',
+        tasks: [{ id: `task-${item.code.toLowerCase()}`, name: item.task }],
+      }));
   }
-  return projectsResult.recordset.map((row) => ({
-    id: row.Id,
-    code: row.Code,
-    name: row.Name,
-    site: row.Site,
-    projectManager: row.ProjectManager || '',
-    status: row.Status,
-    tasks: tasksByProject.get(row.Id) || [],
-  }));
 }
 
 export async function writeProjects(projects: Project[]) {
@@ -1143,7 +1174,12 @@ export async function generateProjectCode(): Promise<string> {
 }
 
 export async function readTimesheetData() {
-  const pool = await db();
+  let pool: sql.ConnectionPool;
+  try {
+    pool = await db();
+  } catch {
+    return { headers: [] as TimesheetHeader[], lines: [] as TimesheetLine[] };
+  }
   const [headersResult, eventsResult, linesResult, projectAllocationsResult, idleAllocationsResult] = await Promise.all([
     pool.request().query(`SELECT * FROM [hris].[TimesheetHeaders] ORDER BY [TimesheetDate] DESC, [SupervisorName], [WorkCenterName]`),
     pool.request().query(`SELECT * FROM [hris].[TimesheetWorkflowEvents] ORDER BY [Id]`),
@@ -1411,27 +1447,50 @@ WHEN NOT MATCHED THEN INSERT ([Id],[PeriodId],[PeriodName],[AcknowledgedAt],[Ack
 }
 
 export async function readTimesheetWorkCenters(): Promise<TimesheetWorkCenter[]> {
-  const pool = await db();
-  const result = await pool.request().query(`
+  try {
+    const pool = await db();
+    const result = await pool.request().query(`
 SELECT [Id],[Code],[Name],[Location],[Site],[Status],[SourceSystem],[CreatedAt],[UpdatedAt]
 FROM [hris].[TimesheetWorkCenters]
 WHERE [Status] = N'Active'
 ORDER BY [Name]`);
-  return result.recordset.map((row) => ({
-    id: row.Id,
-    code: row.Code,
-    name: row.Name,
-    location: row.Location,
-    site: row.Site,
-    status: row.Status,
-    sourceSystem: row.SourceSystem,
-    createdAt: toIso(row.CreatedAt),
-    updatedAt: toIso(row.UpdatedAt),
-  }));
+    return result.recordset.map((row) => ({
+      id: row.Id,
+      code: row.Code,
+      name: row.Name,
+      location: row.Location,
+      site: row.Site,
+      status: row.Status,
+      sourceSystem: row.SourceSystem,
+      createdAt: toIso(row.CreatedAt),
+      updatedAt: toIso(row.UpdatedAt),
+    }));
+  } catch {
+    const now = new Date().toISOString();
+    return officialTimesheetWorkCenters.map((name) => ({
+      id: workCenterId(name),
+      code: workCenterCode(name),
+      name,
+      location: name,
+      site: name,
+      status: 'Active',
+      sourceSystem: 'Local HRIS fallback',
+      createdAt: now,
+      updatedAt: now,
+    }));
+  }
 }
 
 export async function readSystemTimesheetDepartments(): Promise<TimesheetDepartment[]> {
-  const pool = await db();
+  let pool: sql.ConnectionPool;
+  try {
+    pool = await db();
+  } catch {
+    const records = await readTimesheetRecords();
+    return Array.from(new Set(records.map((record) => record.department).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ id: `fallback-dept-${workCenterCode(name).toLowerCase()}`, code: workCenterCode(name), name, sourceSystem: 'Local HRIS fallback' }));
+  }
   const table = await pool.request().query(`SELECT OBJECT_ID(N'[hris].[OrganizationDepartments]', N'U') AS [TableId]`);
   if (!table.recordset[0]?.TableId) return [];
 
@@ -1450,7 +1509,15 @@ ORDER BY CASE WHEN [Name]=N'Unassigned Department' THEN 1 ELSE 0 END, [Name]`);
 }
 
 export async function readSystemTimesheetLocations(): Promise<TimesheetLocation[]> {
-  const pool = await db();
+  let pool: sql.ConnectionPool;
+  try {
+    pool = await db();
+  } catch {
+    const records = await readTimesheetRecords();
+    return Array.from(new Set(records.map((record) => record.location).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ id: `fallback-loc-${workCenterCode(name).toLowerCase()}`, code: workCenterCode(name), name, site: name, sourceSystem: 'Local HRIS fallback' }));
+  }
   const table = await pool.request().query(`SELECT OBJECT_ID(N'[hris].[OrganizationLocationsSites]', N'U') AS [TableId]`);
   if (!table.recordset[0]?.TableId) return [];
 
@@ -1603,8 +1670,8 @@ const createPayrollUpdateForPeriod = async (periodId: string, actor: string): Pr
       idleHours: 0,
     };
     current.daysWorked += line.clockIn ? 1 : 0;
-    current.attendanceHours = Math.round((current.attendanceHours + line.attendanceDuration) * 10) / 10;
-    current.bookedHours = Math.round((current.bookedHours + line.totalHours) * 10) / 10;
+    current.attendanceHours = Math.round((current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration)) * 10) / 10;
+    current.bookedHours = Math.round((current.bookedHours + normalizePaidWorkHours(line.totalHours)) * 10) / 10;
     current.idleHours = Math.round((current.idleHours + line.idleHours) * 10) / 10;
     totals.set(line.employeeId, current);
   }
@@ -1755,9 +1822,10 @@ export async function syncAttendanceForTimesheet(date: string, supervisorId: str
     const existingLine = lines.find((l) => l.headerId === header!.id && l.employeeId === employeeCode);
     
     // Attendance duration in hours
-    const duration = att.checkInTime && att.checkOutTime 
+    const rawDuration = att.checkInTime && att.checkOutTime 
       ? (new Date(`2026-01-01T${att.checkOutTime}`).getTime() - new Date(`2026-01-01T${att.checkInTime}`).getTime()) / (1000 * 60 * 60)
-      : att.checkInTime ? 9 : 0; // Default to 9 if clocked in but not out yet (7:30 to 16:30 is 9 hours)
+      : att.checkInTime ? STANDARD_TIMESHEET_HOURS : 0;
+    const duration = normalizePaidWorkHours(rawDuration);
 
     return {
       id: existingLine?.id || `line-${header!.id}-${employeeCode}`,
@@ -1769,13 +1837,13 @@ export async function syncAttendanceForTimesheet(date: string, supervisorId: str
       attendanceId: att.id,
       clockIn: att.checkInTime,
       clockOut: att.checkOutTime,
-      attendanceDuration: Math.round(duration * 10) / 10,
+      attendanceDuration: duration,
       projectAllocations: existingLine?.projectAllocations || [],
       idleAllocations: (existingLine?.idleAllocations || []).map(withDefaultIdleReason),
       usedHours: existingLine?.usedHours || 0,
       idleHours: existingLine?.idleHours || 0,
       totalHours: existingLine?.totalHours || 0,
-      variance: Math.round(((existingLine?.totalHours || 0) - (Math.round(duration * 10) / 10)) * 10) / 10,
+      variance: Math.round(((existingLine?.totalHours || 0) - duration) * 10) / 10,
       remarks: existingLine?.remarks || null,
       validationStatus: 'Incomplete',
       validationMessage: 'Awaiting time allocation.',

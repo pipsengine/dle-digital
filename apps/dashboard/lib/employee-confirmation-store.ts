@@ -1,4 +1,5 @@
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from './dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from './dle-enterprise-db';
+import { readPayrollEmployees } from './payroll-employee-source';
 
 export type ConfirmationRisk = 'Low' | 'Medium' | 'High';
 export type ConfirmationStage = 'Probation Active' | 'Due Soon' | 'Overdue' | 'Confirmed' | 'Review Required';
@@ -149,7 +150,8 @@ const deriveRecord = (row: DleEmployeeDirectoryRow, now: Date): EmployeeConfirma
 
 export const readEmployeeConfirmationFromDb = async (): Promise<EmployeeConfirmationPayload> => {
   const now = new Date();
-  const employees = (await readEmployeeDirectoryFromDb()) || [];
+  const employeeSource = await readPayrollEmployees();
+  const employees = employeeSource.employees;
   const records = employees
     .map((row) => deriveRecord(row, now))
     .filter((row): row is EmployeeConfirmationRecord => Boolean(row))
@@ -207,7 +209,7 @@ export const readEmployeeConfirmationFromDb = async (): Promise<EmployeeConfirma
 
   return {
     generatedAt: now.toISOString(),
-    source: 'DLE Enterprise HRIS database',
+    source: employeeSource.source,
     records,
     summary,
     filterOptions: {

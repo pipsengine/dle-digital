@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -87,7 +88,7 @@ type ReportingEmployeeOption = {
 const uniqueSorted = (values: Array<string | undefined | null>) =>
   Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
-const readRows = async () => (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+const readRows = async () => (await readPayrollEmployees()).employees;
 
 const toEmployeeOption = (row: DleEmployeeDirectoryRow): ReportingEmployeeOption => ({
   employeeId: row.employeeId,

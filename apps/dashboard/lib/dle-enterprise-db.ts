@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import sql from 'mssql';
 
 type DraftRecordLike = {
@@ -82,6 +84,10 @@ export type DleEmployeeDirectoryRow = {
   paymentType: string;
   periodSalary: number | null;
   annualSalary: number | null;
+  ratePerHour: number | null;
+  ratePerDay: number | null;
+  hoursPerDay: number | null;
+  hoursPerPeriod: number | null;
   setupAssignedToPayroll: boolean;
   sourceSystem: string;
   sourceEmployeeId: string;
@@ -234,14 +240,43 @@ export type SagePayrollEmployeeImportRow = {
 };
 
 let poolPromise: Promise<sql.ConnectionPool> | null = null;
-let disabledAfterFailure = false;
+let workspaceEnvLoaded = false;
 
 const bool = (v: string | undefined, fallback: boolean) => {
   if (v == null || v === '') return fallback;
   return !['0', 'false', 'no', 'off'].includes(v.toLowerCase());
 };
 
+const loadWorkspaceEnv = () => {
+  if (workspaceEnvLoaded || process.env.DLE_ENTERPRISE_DB_HOST) return;
+  workspaceEnvLoaded = true;
+  const candidates = [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '..', '..', '.env'),
+  ];
+  for (const file of candidates) {
+    try {
+      const raw = readFileSync(file, 'utf8');
+      for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const idx = trimmed.indexOf('=');
+        if (idx < 0) continue;
+        const key = trimmed.slice(0, idx).trim();
+        if (process.env[key]) continue;
+        let value = trimmed.slice(idx + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+        process.env[key] = value;
+      }
+      if (process.env.DLE_ENTERPRISE_DB_HOST) return;
+    } catch {
+      // Try the next workspace root candidate.
+    }
+  }
+};
+
 const config = (): sql.config | null => {
+  loadWorkspaceEnv();
   if (!bool(process.env.DLE_ENTERPRISE_DB_ENABLED, true)) return null;
   const server = process.env.DLE_ENTERPRISE_DB_HOST;
   const database = process.env.DLE_ENTERPRISE_DB_NAME || 'DLE_Enterprise';
@@ -266,15 +301,35 @@ const config = (): sql.config | null => {
   };
 };
 
+const connectionConfigs = () => {
+  const primary = config();
+  if (!primary) return [];
+  const fallbackHosts = (process.env.DLE_ENTERPRISE_DB_FALLBACK_HOSTS || (primary.server === 'host.docker.internal' ? 'localhost,127.0.0.1' : ''))
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean);
+  const hosts = Array.from(new Set([primary.server, ...fallbackHosts]));
+  return hosts.map((server) => ({ ...primary, server }));
+};
+
 const pool = async () => {
-  if (disabledAfterFailure) return null;
-  const cfg = config();
-  if (!cfg) return null;
+  const configs = connectionConfigs();
+  if (!configs.length) return null;
   if (!poolPromise) {
-    poolPromise = new sql.ConnectionPool(cfg).connect().catch((error) => {
+    poolPromise = (async () => {
+      let lastError: unknown = null;
+      for (const cfg of configs) {
+        try {
+          return await new sql.ConnectionPool(cfg).connect();
+        } catch (error) {
+          lastError = error;
+          console.warn(`[DLE Enterprise DB] Connection attempt failed for ${cfg.server}:${cfg.port}:`, error instanceof Error ? error.message : error);
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('Unable to connect to DLE Enterprise database.');
+    })().catch((error) => {
       poolPromise = null;
-      disabledAfterFailure = true;
-      console.warn('[DLE Enterprise DB] SQL persistence disabled after connection failure:', error instanceof Error ? error.message : error);
+      console.warn('[DLE Enterprise DB] SQL persistence unavailable; will retry on the next request:', error instanceof Error ? error.message : error);
       throw error;
     });
   }
@@ -325,9 +380,48 @@ const isLocalNationality = (value: unknown) => {
   return ['nigeria', 'nigerian', 'ng'].includes(normalized);
 };
 
+const employeeTypeCode = (employeeType: string) => {
+  const normalized = employeeType.trim().toLowerCase();
+  if (normalized === 'permanent') return 'P';
+  if (normalized === 'lumpsum') return 'L';
+  if (normalized === 'daily rate') return 'C';
+  if (normalized === 'nysc' || normalized.includes('nysc')) return 'N';
+  if (
+    normalized === 'it' ||
+    normalized === 'intern' ||
+    normalized.includes('industrial trainee') ||
+    normalized.includes('industrial training') ||
+    normalized.includes('industrial attachment') ||
+    normalized.includes('intern')
+  ) return 'I';
+  return null;
+};
+
+const employeeCodePrefixForTypeCode = (typeCode: string | null) => (typeCode === 'N' ? 'NYSC' : typeCode === 'I' ? 'IT' : typeCode || '');
+
+const inferEmployeeTypeCode = (...values: unknown[]) => employeeTypeCode(values.map((value) => str(value)).filter(Boolean).join(' '));
+
+const employeeTypeCodeFromRawCode = (employeeCode: string) => {
+  const raw = str(employeeCode).toUpperCase();
+  if (/^P?N/.test(raw)) return 'N';
+  if (/^P?I/.test(raw)) return 'I';
+  return null;
+};
+
+const normalizeEmployeeCodeForType = (employeeCode: string, typeCode: string | null) => {
+  const raw = str(employeeCode).toUpperCase();
+  if (!raw) return raw;
+  if ((typeCode === 'N' || typeCode === 'I') && raw.startsWith(`P${typeCode}`)) return raw.slice(1);
+  if (typeCode && !/^[PCLNI]/.test(raw)) return `${typeCode}${raw}`;
+  return raw;
+};
+
 const sageEmployeeCode = (employee: SagePayrollEmployeeImportRow) => {
   const raw = str(employee.directoryEmployeeCode || employee.employeeCode).toUpperCase();
-  const base = /^[PCL]/.test(raw) ? raw : `P${raw}`;
+  const typeCode =
+    inferEmployeeTypeCode(employee.hierarchyEmployeeTypeName, employee.jobTitle, employee.departmentName) ||
+    employeeTypeCodeFromRawCode(raw);
+  const base = normalizeEmployeeCodeForType(raw, typeCode || (/^[PCL]/.test(raw) ? null : 'P'));
   const currency = str(employee.companyCurrency).toUpperCase();
   const companyCode = str(employee.companyCode).toUpperCase();
   if (currency && currency !== 'NGN') return `${base}-${currency}`;
@@ -336,6 +430,8 @@ const sageEmployeeCode = (employee: SagePayrollEmployeeImportRow) => {
 };
 
 const sageEmployeeType = (employeeCode: string) => {
+  if (employeeCode.startsWith('N')) return 'NYSC';
+  if (employeeCode.startsWith('I')) return 'IT';
   if (employeeCode.startsWith('L')) return 'Lumpsum';
   if (employeeCode.startsWith('C')) return 'Daily Rate';
   return 'Permanent';
@@ -665,6 +761,19 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       emp.shift_pattern,
       emp.contract_end_date,
       emp.expatriate_status,
+      payroll.payroll_group,
+      payroll.salary_grade,
+      payroll.benefit_group,
+      payroll.pay_currency,
+      payroll.payment_run,
+      payroll.payment_type,
+      payroll.period_salary,
+      payroll.annual_salary,
+      payroll.rate_per_hour,
+      payroll.rate_per_day,
+      payroll.hours_per_day,
+      payroll.hours_per_period,
+      payroll.setup_assigned_to_payroll,
       ec.emergency_contact_count,
       doc.document_count
     FROM [hris].[EmployeeMasterView] v
@@ -672,6 +781,7 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
     LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeeContactInfo] contact ON contact.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = v.employee_id
+    LEFT JOIN [hris].[EmployeePayrollSetup] payroll ON payroll.employee_id = v.employee_id
     OUTER APPLY (
       SELECT COUNT_BIG(*) AS emergency_contact_count
       FROM [hris].[EmployeeEmergencyContacts] c
@@ -686,8 +796,11 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
   `);
 
   return (rs.recordset || []).map((row: any) => {
-    const employeeCode = str(row.employee_code);
-    const employmentType = str(row.employment_type) || 'Not assigned';
+    const rawEmployeeCode = str(row.employee_code);
+    const rawEmploymentType = str(row.employment_type) || 'Not assigned';
+    const typeCode = employeeTypeCodeFromRawCode(rawEmployeeCode) || inferEmployeeTypeCode(rawEmploymentType, row.staff_category, row.employee_category, row.job_title);
+    const employeeCode = normalizeEmployeeCodeForType(rawEmployeeCode, typeCode);
+    const employmentType = typeCode === 'N' ? 'NYSC' : typeCode === 'I' ? 'IT' : rawEmploymentType;
     const status = str(row.employment_status) || 'Inactive';
     const workMode = str(row.work_mode);
     const workLocation = str(row.work_location);
@@ -762,16 +875,20 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       emergencyContactCount,
       documentCount,
       hasManagerAssigned: Boolean(str(row.reporting_manager)),
-      payrollSource: '',
-      payrollGroup: '',
-      salaryGrade: '',
-      benefitGroup: '',
-      payCurrency: '',
-      paymentRun: '',
-      paymentType: '',
-      periodSalary: null,
-      annualSalary: null,
-      setupAssignedToPayroll: false,
+      payrollSource: 'DLE_Enterprise HRIS',
+      payrollGroup: str(row.payroll_group),
+      salaryGrade: str(row.salary_grade),
+      benefitGroup: str(row.benefit_group),
+      payCurrency: str(row.pay_currency),
+      paymentRun: str(row.payment_run),
+      paymentType: str(row.payment_type),
+      periodSalary: Number(row.period_salary || 0) || null,
+      annualSalary: Number(row.annual_salary || 0) || null,
+      ratePerHour: Number(row.rate_per_hour || 0) || null,
+      ratePerDay: Number(row.rate_per_day || 0) || null,
+      hoursPerDay: Number(row.hours_per_day || 0) || null,
+      hoursPerPeriod: Number(row.hours_per_period || 0) || null,
+      setupAssignedToPayroll: Boolean(row.setup_assigned_to_payroll),
       sourceSystem: 'DLE_Enterprise HRIS',
       sourceEmployeeId: '',
       createdAt: isoDateTime(row.created_at),
@@ -1338,24 +1455,40 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
   };
 };
 
-const employeeTypeCode = (employeeType: string) => {
-  switch (employeeType.trim().toLowerCase()) {
-    case 'permanent':
-      return 'P';
-    case 'lumpsum':
-      return 'L';
-    case 'daily rate':
-      return 'C';
-    default:
-      return null;
-  }
-};
-
 export const previewNextEmployeeCodeFromDb = async (employeeType: string) => {
   const code = employeeTypeCode(employeeType);
   if (!code) return null;
   const p = await pool();
   if (!p) return null;
+  if (code === 'N' || code === 'I') {
+    const employeeCodePrefix = employeeCodePrefixForTypeCode(code);
+    const rs = await p
+      .request()
+      .input('type_code', sql.Char(1), code)
+      .input('employee_code_prefix', sql.NVarChar(10), employeeCodePrefix)
+      .query(`
+        SELECT
+          ISNULL((
+            SELECT MAX(TRY_CONVERT(int,
+              CASE
+                WHEN employee_code LIKE 'P' + @employee_code_prefix + '[0-9]%' THEN SUBSTRING(employee_code, LEN(@employee_code_prefix) + 2, 20)
+                WHEN employee_code LIKE @employee_code_prefix + '[0-9]%' THEN SUBSTRING(employee_code, LEN(@employee_code_prefix) + 1, 20)
+              END
+            ))
+            FROM [hris].[Employees]
+            WHERE employee_code LIKE @employee_code_prefix + '[0-9]%'
+              OR employee_code LIKE 'P' + @employee_code_prefix + '[0-9]%'
+          ), 0) AS latest_employee,
+          ISNULL((
+            SELECT last_sequence
+            FROM [hris].[EmployeeCodeCounters]
+            WHERE employee_type_code = @type_code
+          ), 0) AS latest_counter;
+      `);
+    const row = rs.recordset[0];
+    const next = Math.max(Number(row?.latest_employee || 0), Number(row?.latest_counter || 0)) + 1;
+    return `${employeeCodePrefix}${String(next).padStart(4, '0')}`;
+  }
   const rs = await p
     .request()
     .input('type_code', sql.Char(1), code)
@@ -1381,11 +1514,112 @@ export const previewNextEmployeeCodeFromDb = async (employeeType: string) => {
 export const nextEmployeeCodeFromDb = async (employeeType: string) => {
   const p = await pool();
   if (!p) return null;
+  const typeCode = employeeTypeCode(employeeType);
+  if (typeCode === 'N' || typeCode === 'I') {
+    const employeeCodePrefix = employeeCodePrefixForTypeCode(typeCode);
+    const tx = new sql.Transaction(p);
+    await tx.begin();
+    try {
+      const rs = await new sql.Request(tx)
+        .input('type_code', sql.Char(1), typeCode)
+        .input('employee_code_prefix', sql.NVarChar(10), employeeCodePrefix)
+        .query(`
+          SELECT
+            ISNULL((
+              SELECT MAX(TRY_CONVERT(int,
+                CASE
+                  WHEN employee_code LIKE 'P' + @employee_code_prefix + '[0-9]%' THEN SUBSTRING(employee_code, LEN(@employee_code_prefix) + 2, 20)
+                  WHEN employee_code LIKE @employee_code_prefix + '[0-9]%' THEN SUBSTRING(employee_code, LEN(@employee_code_prefix) + 1, 20)
+                END
+              ))
+              FROM [hris].[Employees]
+              WHERE employee_code LIKE @employee_code_prefix + '[0-9]%'
+                OR employee_code LIKE 'P' + @employee_code_prefix + '[0-9]%'
+            ), 0) AS latest_employee,
+            ISNULL((
+              SELECT last_sequence
+              FROM [hris].[EmployeeCodeCounters] WITH (UPDLOCK, HOLDLOCK)
+              WHERE employee_type_code = @type_code
+            ), 0) AS latest_counter;
+        `);
+      const row = rs.recordset[0];
+      const next = Math.max(Number(row?.latest_employee || 0), Number(row?.latest_counter || 0)) + 1;
+      await new sql.Request(tx)
+        .input('type_code', sql.Char(1), typeCode)
+        .input('last_sequence', sql.Int, next)
+        .query(`
+          MERGE [hris].[EmployeeCodeCounters] AS target
+          USING (SELECT @type_code AS employee_type_code, @last_sequence AS last_sequence) AS source
+          ON target.employee_type_code = source.employee_type_code
+          WHEN MATCHED THEN UPDATE SET last_sequence = source.last_sequence
+          WHEN NOT MATCHED THEN INSERT (employee_type_code, last_sequence) VALUES (source.employee_type_code, source.last_sequence);
+        `);
+      await tx.commit();
+      return `${employeeCodePrefix}${String(next).padStart(4, '0')}`;
+    } catch (error) {
+      await tx.rollback().catch(() => undefined);
+      throw error;
+    }
+  }
   const request = p.request();
   request.input('EmployeeTypeName', sql.NVarChar(40), employeeType);
   request.output('EmployeeCode', sql.NVarChar(50));
   const rs = await request.execute('[hris].[usp_AllocateEmployeeCode]');
-  return String(rs.output.EmployeeCode || '');
+  return normalizeEmployeeCodeForType(String(rs.output.EmployeeCode || ''), typeCode);
+};
+
+export const updateEmployeeDailyRatePayInDb = async (input: {
+  employeeDbId: number;
+  payrollGroup?: string | null;
+  salaryGrade?: string | null;
+  payCurrency?: string | null;
+  paymentRun?: string | null;
+  paymentType?: string | null;
+  periodSalary?: number | null;
+  ratePerDay?: number | null;
+  ratePerHour?: number | null;
+  hoursPerDay?: number | null;
+  hoursPerPeriod?: number | null;
+}) => {
+  const p = await pool();
+  if (!p) return false;
+  await p.request()
+    .input('employee_id', sql.BigInt, input.employeeDbId)
+    .input('payroll_group', sql.NVarChar(100), nullable(input.payrollGroup))
+    .input('salary_grade', sql.NVarChar(80), nullable(input.salaryGrade))
+    .input('pay_currency', sql.NVarChar(10), nullable(input.payCurrency || 'NGN'))
+    .input('payment_run', sql.NVarChar(80), nullable(input.paymentRun || 'Daily Timesheet'))
+    .input('payment_type', sql.NVarChar(80), nullable(input.paymentType || 'Timesheet Rate'))
+    .input('period_salary', sql.Decimal(19, 4), numOrNull(input.periodSalary))
+    .input('rate_per_day', sql.Decimal(19, 4), numOrNull(input.ratePerDay))
+    .input('rate_per_hour', sql.Decimal(19, 4), numOrNull(input.ratePerHour))
+    .input('hours_per_day', sql.Decimal(9, 4), numOrNull(input.hoursPerDay))
+    .input('hours_per_period', sql.Decimal(9, 4), numOrNull(input.hoursPerPeriod))
+    .query(`
+      MERGE [hris].[EmployeePayrollSetup] AS target
+      USING (SELECT @employee_id AS employee_id) AS source
+      ON target.employee_id = source.employee_id
+      WHEN MATCHED THEN UPDATE SET
+        payroll_group = COALESCE(@payroll_group, target.payroll_group),
+        salary_grade = COALESCE(@salary_grade, target.salary_grade),
+        pay_currency = COALESCE(@pay_currency, target.pay_currency),
+        payment_run = COALESCE(@payment_run, target.payment_run),
+        payment_type = COALESCE(@payment_type, target.payment_type),
+        period_salary = @period_salary,
+        rate_per_day = @rate_per_day,
+        rate_per_hour = @rate_per_hour,
+        hours_per_day = @hours_per_day,
+        hours_per_period = @hours_per_period,
+        setup_assigned_to_payroll = 1
+      WHEN NOT MATCHED THEN INSERT (
+        employee_id, payroll_group, salary_grade, pay_currency, payment_run, payment_type,
+        period_salary, rate_per_day, rate_per_hour, hours_per_day, hours_per_period, setup_assigned_to_payroll
+      ) VALUES (
+        @employee_id, @payroll_group, @salary_grade, @pay_currency, @payment_run, @payment_type,
+        @period_salary, @rate_per_day, @rate_per_hour, @hours_per_day, @hours_per_period, 1
+      );
+    `);
+  return true;
 };
 
 export const createEmployeeFromDraftInDb = async (draftId: string, employeeCode: string, draft: any, role: string, startOnboarding: boolean) => {

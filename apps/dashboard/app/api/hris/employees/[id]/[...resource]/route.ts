@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readEmployeeContractsFromDb } from '@/lib/dle-enterprise-db';
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -2602,8 +2603,8 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
 };
 
 const ensureRecordFromDb = async (employeeId: string) => {
-  const rows = await readEmployeeDirectoryFromDb().catch(() => null);
-  const found = rows?.find((row) => row.employeeCode.toLowerCase() === employeeId.toLowerCase() || row.employeeId.toLowerCase() === employeeId.toLowerCase());
+  const employeeSource = await readPayrollEmployees();
+  const found = employeeSource.employees.find((row) => row.employeeCode.toLowerCase() === employeeId.toLowerCase() || row.employeeId.toLowerCase() === employeeId.toLowerCase());
   if (!found) return ensureRecord(employeeId);
   const record = applyOverrides(found.employeeCode, buildDbProfileRecord(found));
   store.set(found.employeeCode, record);

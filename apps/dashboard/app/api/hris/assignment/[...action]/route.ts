@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 type Role =
   | 'Super Admin'
@@ -59,7 +60,7 @@ const stores = () => {
   return { requests: g.__dleHrisAssignmentRequests };
 };
 
-const readAssignmentEmployees = async () => (await readEmployeeDirectoryFromDb().catch(() => null)) || [];
+const readAssignmentEmployees = async () => (await readPayrollEmployees()).employees;
 
 const assignmentTypes = [
   'Permanent Assignment',
