@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { Search, Bell, Mail, Menu, Building2 } from 'lucide-react';
+import { Search, Menu, Building2 } from 'lucide-react';
 import { usePathname } from 'next/navigation';
+import { NotificationCenter } from '@/components/layout/notification-center';
 import { EnterpriseUserProfile } from './enterprise-user-profile';
 
 export function Header({ 
@@ -40,15 +41,8 @@ export function Header({
           <span className="hidden sm:inline">Enterprise Home</span>
         </Link>
 
-        <button className="relative hidden h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-50 min-[380px]:flex">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-dle-red border-2 border-white"></span>
-        </button>
-
-        <button className="relative hidden h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-50 min-[430px]:flex">
-          <Mail className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-dle-blue border-2 border-white"></span>
-        </button>
+        <NotificationCenter scope="notifications" />
+        <NotificationCenter scope="messages" />
 
         <div className="h-6 w-px bg-slate-200 mx-1 hidden sm:block"></div>
 

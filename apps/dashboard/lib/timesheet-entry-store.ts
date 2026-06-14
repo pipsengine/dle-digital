@@ -1747,6 +1747,138 @@ export async function advanceTimesheetWorkflow(
   return { header, payrollUpdate };
 }
 
+const projectApprovalMarker = (stage: 'Project Manager' | 'Cost Control', projectCode: string) => `[${stage === 'Project Manager' ? 'PROJECT' : 'COST'}:${projectCode}]`;
+const markerRegex = /\[(PROJECT|COST):([^\]]+)\]/;
+
+const eventMatchesProject = (event: TimesheetWorkflowEvent, stage: 'Project Manager' | 'Cost Control', projectCode: string, decisions: TimesheetWorkflowDecision[]) => {
+  if (event.stage !== stage || !decisions.includes(event.decision)) return false;
+  const match = String(event.comment || '').match(markerRegex);
+  return Boolean(match && match[2].toLowerCase() === projectCode.toLowerCase());
+};
+
+export type ProjectTimesheetApproval = {
+  headerId: string;
+  projectCode: string;
+  projectName: string;
+  projectManager: string;
+  employeeCount: number;
+  totalHours: number;
+  billableHours: number;
+  costControlStatus: 'Pending' | 'Approved' | 'Rejected' | 'Returned';
+  projectManagerStatus: 'Pending' | 'Approved' | 'Rejected' | 'Returned';
+  visibilityScope: string;
+  lineIds: string[];
+};
+
+export function buildProjectTimesheetApprovals(header: TimesheetHeader, lines: TimesheetLine[], projects: Project[], actor?: string | null): ProjectTimesheetApproval[] {
+  const byProject = new Map<string, ProjectTimesheetApproval>();
+  for (const line of lines) {
+    for (const allocation of line.projectAllocations || []) {
+      if (!allocation.projectCode || Number(allocation.hours || 0) <= 0) continue;
+      const project = projects.find((item) => item.code.toLowerCase() === allocation.projectCode.toLowerCase());
+      const existing = byProject.get(allocation.projectCode) || {
+        headerId: header.id,
+        projectCode: allocation.projectCode,
+        projectName: allocation.projectName || project?.name || allocation.projectCode,
+        projectManager: project?.projectManager || 'Unassigned',
+        employeeCount: 0,
+        totalHours: 0,
+        billableHours: 0,
+        costControlStatus: 'Pending' as const,
+        projectManagerStatus: 'Pending' as const,
+        visibilityScope: project?.projectManager || 'Cost Control / HR',
+        lineIds: [],
+      };
+      existing.totalHours = Math.round((existing.totalHours + Number(allocation.hours || 0)) * 10) / 10;
+      existing.billableHours = existing.totalHours;
+      if (!existing.lineIds.includes(line.id)) {
+        existing.employeeCount += 1;
+        existing.lineIds.push(line.id);
+      }
+      byProject.set(allocation.projectCode, existing);
+    }
+  }
+
+  const history = header.workflowHistory || [];
+  for (const item of byProject.values()) {
+    const pmRejected = history.some((event) => eventMatchesProject(event, 'Project Manager', item.projectCode, ['Rejected']));
+    const pmReturned = history.some((event) => eventMatchesProject(event, 'Project Manager', item.projectCode, ['Returned']));
+    const pmApproved = history.some((event) => eventMatchesProject(event, 'Project Manager', item.projectCode, ['Approved']));
+    const ccRejected = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Rejected']));
+    const ccReturned = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Returned']));
+    const ccApproved = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Approved']));
+    item.projectManagerStatus = pmRejected ? 'Rejected' : pmReturned ? 'Returned' : pmApproved ? 'Approved' : 'Pending';
+    item.costControlStatus = ccRejected ? 'Rejected' : ccReturned ? 'Returned' : ccApproved ? 'Approved' : 'Pending';
+  }
+
+  const actorText = String(actor || '').trim().toLowerCase();
+  const rows = Array.from(byProject.values()).sort((a, b) => a.projectCode.localeCompare(b.projectCode));
+  if (!actorText) return rows;
+  return rows.filter((row) => {
+    const manager = row.projectManager.toLowerCase();
+    return manager === 'unassigned' || manager.includes(actorText) || actorText.includes(manager) || ['cost control', 'hr', 'payroll', 'system', 'administrator'].some((term) => actorText.includes(term));
+  });
+}
+
+export async function advanceProjectTimesheetApproval(
+  headerId: string,
+  action: 'APPROVE' | 'REJECT' | 'RETURN',
+  actor: string,
+  options: { projectCode: string; stage: 'Project Manager' | 'Cost Control'; comment?: string | null },
+): Promise<{ header: TimesheetHeader; projectApprovals: ProjectTimesheetApproval[] }> {
+  const { headers, lines } = await readTimesheetData();
+  const projects = await readProjects();
+  const header = headers.find((item) => item.id === headerId);
+  if (!header) throw new Error('Timesheet header not found.');
+  const status = normalizeTimesheetStatus(header.status);
+  if (!['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
+    throw new Error('Only submitted or in-review timesheets can be approved by project.');
+  }
+  const headerLines = lines.filter((line) => line.headerId === header.id);
+  const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
+  const target = projectApprovals.find((item) => item.projectCode.toLowerCase() === options.projectCode.toLowerCase());
+  if (!target) throw new Error(`Project ${options.projectCode} was not found on this timesheet.`);
+  if (options.stage === 'Project Manager' && target.projectManager && target.projectManager !== 'Unassigned' && !target.projectManager.toLowerCase().includes(actor.toLowerCase()) && !['cost control', 'hr', 'payroll', 'system', 'admin'].some((term) => actor.toLowerCase().includes(term))) {
+    throw new Error(`Only ${target.projectManager} can approve project ${target.projectCode}.`);
+  }
+
+  const decision: TimesheetWorkflowDecision = action === 'APPROVE' ? 'Approved' : action === 'REJECT' ? 'Rejected' : 'Returned';
+  const comment = `${projectApprovalMarker(options.stage, target.projectCode)} ${options.comment || `${options.stage} ${decision.toLowerCase()} ${target.projectCode}.`}`;
+  const event: TimesheetWorkflowEvent = { stage: options.stage, decision, by: actor, actedAt: new Date().toISOString(), comment };
+  header.workflowHistory = [...(header.workflowHistory || []), event];
+
+  if (action === 'REJECT') {
+    header.status = 'Rejected';
+    header.currentApprovalStage = options.stage;
+    header.currentApprover = actor;
+  } else if (action === 'RETURN') {
+    header.status = 'Returned';
+    header.currentApprovalStage = options.stage;
+    header.currentApprover = actor;
+  } else {
+    const refreshed = buildProjectTimesheetApprovals(header, headerLines, projects);
+    const allPmApproved = refreshed.length > 0 && refreshed.every((item) => item.projectManagerStatus === 'Approved');
+    const allCostApproved = refreshed.length > 0 && refreshed.every((item) => item.costControlStatus === 'Approved');
+    if (allPmApproved && !allCostApproved) {
+      header.status = 'Project_Manager_Reviewed';
+      header.currentApprovalStage = 'Cost Control';
+      header.currentApprover = 'Cost Control';
+    }
+    if (allPmApproved && allCostApproved) {
+      header.status = 'Cost_Control_Reviewed';
+      header.currentApprovalStage = 'HR';
+      header.currentApprover = 'HR';
+      header.workflowHistory = [
+        ...(header.workflowHistory || []),
+        { stage: 'HR', decision: 'Submitted', by: 'System', actedAt: new Date().toISOString(), comment: 'Project-specific approvals consolidated into employee/period timesheet summary for HR and payroll.' },
+      ];
+    }
+  }
+
+  await writeTimesheetData({ headers, lines });
+  return { header, projectApprovals: buildProjectTimesheetApprovals(header, headerLines, projects) };
+}
+
 export async function syncAttendanceForTimesheet(date: string, supervisorId: string, workCenterName: string) {
   const liveAttendance = await readLiveClockingActivity(date);
   const clockingRecords = liveAttendance.records;

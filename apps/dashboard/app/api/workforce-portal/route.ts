@@ -108,7 +108,6 @@ export async function GET(request: Request) {
     const annualSalary = Number(employee.annualSalary || (employee.periodSalary ? Number(employee.periodSalary) * 12 : 0));
     const monthlyPay = Number(employee.periodSalary || (annualSalary ? annualSalary / 12 : 0));
     const leaveUsed = employee.employeeId.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 9;
-    const leaveEntitlement = 21;
     const attendanceRate = round(92 + (employee.employeeDbId % 70) / 10);
 
     const seededRequests: EssRequest[] = [
@@ -140,6 +139,36 @@ export async function GET(request: Request) {
 
     const requests = employeeRequests.length ? employeeRequests : seededRequests;
 
+    const employmentText = `${employee.employmentType || ''} ${employee.employeeCategory || ''} ${employee.staffCategory || ''}`.toLowerCase();
+    const contractEmployee = /contract|lumpsum|daily rate/.test(employmentText);
+    const confirmedPermanent = String(employee.status || '').toLowerCase().includes('confirmed') || (employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() <= Date.now() : false);
+    const leaveYear = new Date().getFullYear();
+    const annualEntitlement = contractEmployee ? 14 : confirmedPermanent ? 30 : 0;
+    const carryForward = Math.min(7, employee.employeeDbId % 8);
+    const sickUsed = employee.employeeDbId % 3;
+    const casualUsed = employee.employeeDbId % 2;
+    const compassionateUsed = employee.employeeDbId % 2;
+    const examUsed = employee.employeeDbId % 2;
+    const maternityEligible = !contractEmployee && /female/i.test(String((employee as any).gender || (employee as any).title || ''));
+    const leavePolicyCards = [
+      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: 0, balance: Math.max(0, annualEntitlement - leaveUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Eligible - contract annual entitlement' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: 'Eligible only from 10 current-year Annual Leave working days', policyNote: contractEmployee ? 'Contract employees receive 14 working days annually.' : 'Permanent employees receive 30 working days after confirmation.' },
+      { id: 'sick-leave', type: 'Sick Leave', entitlement: contractEmployee ? 0 : 10, basis: 'Working days', used: sickUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 10) - sickUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Medical certificate may be required.' },
+      { id: 'casual-leave', type: 'Casual Leave', entitlement: contractEmployee ? 0 : 5, basis: 'Working days', used: casualUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 5) - casualUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Short-duration absence subject to manager approval.' },
+      { id: 'compassionate-leave', type: 'Compassionate Leave', entitlement: contractEmployee ? 0 : 5, basis: 'Working days', used: compassionateUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 5) - compassionateUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Supporting document required where applicable.' },
+      { id: 'exam-leave', type: 'Exam Leave', entitlement: contractEmployee ? 0 : 5, basis: 'Working days', used: examUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 5) - examUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Exam timetable or institution evidence required.' },
+      { id: 'maternity-leave', type: 'Maternity Leave', entitlement: maternityEligible ? 90 : 0, basis: 'Calendar days', used: 0, pending: 0, balance: maternityEligible ? 90 : 0, expiryDate: '', eligibilityStatus: maternityEligible ? 'Eligible' : 'Gender/category eligibility not met', allowanceStatus: 'No leave allowance', policyNote: '90 calendar days for eligible female employees.' },
+      { id: 'carry-forward-leave', type: 'Carry Forward Leave', entitlement: carryForward, basis: 'Working days', used: Math.min(carryForward, employee.employeeDbId % 3), pending: 0, balance: Math.max(0, carryForward - Math.min(carryForward, employee.employeeDbId % 3)), expiryDate: `${leaveYear}-03-31`, eligibilityStatus: carryForward ? 'Available until 31 March' : 'No carry-forward balance', allowanceStatus: 'Does not trigger leave allowance', policyNote: 'Unused Annual Leave rolls over on 1 January up to 7 working days.' },
+    ];
+    const allowanceEligible = annualEntitlement - leaveUsed >= 10;
+    const leaveWorkflow = [
+      { stage: 'Employee', owner: employee.fullName, status: 'Submitted', sla: 'Immediate' },
+      { stage: 'Supervisor/Line Manager', owner: employee.managerName || 'Line Manager', status: 'Pending', sla: '2 business days' },
+      { stage: 'Department Manager / GM', owner: 'Department approver', status: 'Not started', sla: '2 business days' },
+      { stage: 'HR', owner: 'HR Officer', status: 'Not started', sla: '1 business day' },
+      { stage: 'Payroll', owner: 'Payroll Officer', status: allowanceEligible ? 'Conditional' : 'Skipped unless allowance/unpaid leave applies', sla: '1 payroll cycle' },
+      { stage: 'Completed', owner: 'System', status: 'Not started', sla: 'After all approvals' },
+    ];
+
     return ok({
       generatedAt: new Date().toISOString(),
       locale,
@@ -168,7 +197,7 @@ export async function GET(request: Request) {
         salaryGrade: employee.salaryGrade || employee.jobGrade || 'Unassigned',
       },
       widgets: {
-        leave: { entitlement: leaveEntitlement, used: leaveUsed, balance: leaveEntitlement - leaveUsed, pending: requests.filter((item) => item.category === 'Leave' && !['Approved', 'Rejected', 'Closed'].includes(item.status)).length },
+        leave: { entitlement: annualEntitlement, used: leaveUsed, balance: Math.max(0, annualEntitlement - leaveUsed), pending: requests.filter((item) => item.category === 'Leave' && !['Approved', 'Rejected', 'Closed'].includes(item.status)).length },
         attendance: { monthRate: attendanceRate, lateArrivals: employee.employeeDbId % 3, overtimeHours: (employee.employeeDbId % 6) * 2, remoteDays: employee.remoteWorker ? 4 : 0 },
         payroll: { monthlyPay, currency: employee.payCurrency || 'NGN', payslips: 12, deductions: Math.round(monthlyPay * 0.18), pension: Math.round(monthlyPay * 0.08), allowances: Math.round(monthlyPay * 0.22) },
         requests: { pending: requests.filter((item) => !['Approved', 'Rejected', 'Closed'].includes(item.status)).length, approved: requests.filter((item) => item.status === 'Approved').length, total: requests.length },
@@ -218,18 +247,34 @@ export async function GET(request: Request) {
         { id: 'certifications', label: 'Certifications', status: 'Document-backed', approvalRequired: true, fields: ['Certificate', 'Issuer', 'Expiry', 'Attachment'] },
       ],
       leave: {
-        balances: [
-          { type: 'Annual Leave', entitlement: 21, used: leaveUsed, balance: 21 - leaveUsed },
-          { type: 'Sick Leave', entitlement: 10, used: 1, balance: 9 },
-          { type: 'Compassionate Leave', entitlement: 5, used: 0, balance: 5 },
-        ],
+        balances: leavePolicyCards,
         calendar: [
-          { id: 'lv-cal-001', label: 'Approved annual leave', from: sampleDate(10), to: sampleDate(14), status: 'Approved' },
-          { id: 'lv-cal-002', label: 'Team leave blackout', from: sampleDate(20), to: sampleDate(24), status: 'Policy' },
+          { id: 'lv-cal-001', label: 'My approved annual leave', from: sampleDate(10), to: sampleDate(14), status: 'Approved', type: 'Annual Leave', scope: 'My leave schedule' },
+          { id: 'lv-cal-002', label: 'Team leave blackout', from: sampleDate(20), to: sampleDate(24), status: 'Blackout', type: 'Policy', scope: employee.department || 'Department' },
+          { id: 'lv-cal-003', label: 'Carry forward expiry', from: `${leaveYear}-03-31`, to: `${leaveYear}-03-31`, status: 'Reminder', type: 'Carry Forward Leave', scope: 'ESS notification' },
+          { id: 'lv-cal-004', label: 'Public holiday', from: `${leaveYear}-10-01`, to: `${leaveYear}-10-01`, status: 'Holiday', type: 'Public Holiday', scope: 'Nigeria' },
         ],
         history: [
-          { id: 'lv-his-001', type: 'Annual Leave', from: sampleDate(-40), to: sampleDate(-35), days: 5, status: 'Completed' },
-          { id: 'lv-his-002', type: 'Sick Leave', from: sampleDate(-12), to: sampleDate(-12), days: 1, status: 'Completed' },
+          { id: 'lv-his-001', type: 'Annual Leave', from: sampleDate(-40), to: sampleDate(-35), days: 5, year: leaveYear, status: 'Completed', approvalStage: 'Completed', approvers: 'Supervisor, HR', reliever: 'Assigned colleague', payrollImpact: 'None', allowanceStatus: 'Not eligible below 10 days', attachments: 'None', comments: 'Completed', auditTrail: 'Submitted -> Approved -> Completed' },
+          { id: 'lv-his-002', type: 'Sick Leave', from: sampleDate(-12), to: sampleDate(-12), days: 1, year: leaveYear, status: 'Completed', approvalStage: 'Completed', approvers: 'Supervisor, HR', reliever: 'Not required', payrollImpact: 'None', allowanceStatus: 'Not applicable', attachments: 'Medical certificate', comments: 'Approved', auditTrail: 'Submitted -> HR approved' },
+        ],
+        workflows: leaveWorkflow,
+        allowance: [
+          { label: 'Leave Allowance Status', value: allowanceEligible ? 'Eligible when applying for 10+ current-year Annual Leave working days' : 'Not currently eligible', status: allowanceEligible ? 'Ready' : 'Review' },
+          { label: 'Payroll Integration', value: 'Payroll is notified after eligible Annual Leave approval', status: 'Enabled' },
+          { label: 'Carry Forward Rule', value: 'Carry Forward Leave does not trigger allowance', status: 'Enforced' },
+        ],
+        approvals: [
+          { id: 'app-001', employee: 'Team member', type: 'Annual Leave', days: 10, stage: 'Supervisor/Line Manager', status: 'Pending', reliever: employee.fullName, handover: 'Project notes attached', conflict: 'No conflict' },
+          { id: 'app-002', employee: 'Team member', type: 'Sick Leave', days: 2, stage: 'HR', status: 'Under Review', reliever: 'Not required', handover: 'Medical attachment pending', conflict: 'Attachment required' },
+        ],
+        reports: ['Employee leave balance', 'Department leave utilization', 'Leave liability', 'Carry forward leave', 'Expired/forfeited leave', 'Leave allowance eligibility', 'Payroll-impact leave', 'Sick leave trend', 'Absenteeism', 'Employees currently on leave', 'Upcoming leave', 'Approval SLA report', 'Leave audit trail'].map((title, index) => ({ id: `ess-rpt-${index + 1}`, title, format: 'Excel / PDF / CSV', status: 'Available' })),
+        notifications: ['Leave submitted', 'Approval pending', 'Leave approved', 'Leave rejected', 'Leave cancelled', 'Leave recalled', 'Carry forward balance created', 'Carry forward expiry reminder', 'Return-to-work reminder', 'Payroll leave allowance processing', 'Blackout conflict warning', 'Reliever assignment'].map((title, index) => ({ id: `leave-ntf-${index + 1}`, title, channel: 'Email, In-app, ESS', status: 'Enabled' })),
+        security: [
+          { role: 'Employee', access: 'Apply and view own leave only' },
+          { role: 'Supervisor/Manager', access: 'Approve team leave and view team calendar' },
+          { role: 'HR Officer', access: 'Final approval and leave record management' },
+          { role: 'Payroll Officer', access: 'Payroll-impact leave only' },
         ],
       },
       attendance: {

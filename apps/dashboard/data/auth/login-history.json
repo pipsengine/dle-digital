@@ -1,0 +1,47 @@
+[
+  {
+    "id": "login-1781441203384-2fe804b3",
+    "at": "2026-06-14T12:46:43.384Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "::1",
+    "device": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "status": "Success"
+  },
+  {
+    "id": "login-1781441189012-24912dcd",
+    "at": "2026-06-14T12:46:29.013Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "::1",
+    "device": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "status": "Logout"
+  },
+  {
+    "id": "login-1781441188318-705e14ff",
+    "at": "2026-06-14T12:46:28.318Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "::1",
+    "device": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "status": "Logout"
+  },
+  {
+    "id": "login-1781441188129-915a6359",
+    "at": "2026-06-14T12:46:28.130Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "::1",
+    "device": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "status": "Logout"
+  },
+  {
+    "id": "login-1781440594103-8d111192",
+    "at": "2026-06-14T12:36:34.103Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "::1",
+    "device": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "status": "Success"
+  }
+]

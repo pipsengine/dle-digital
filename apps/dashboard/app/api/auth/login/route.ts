@@ -1,0 +1,25 @@
+import { NextResponse } from 'next/server';
+import { authenticate } from '@/lib/auth/auth-store';
+import { AUTH_COOKIE, createSessionToken, roleHome, SESSION_MAX_AGE_SECONDS } from '@/lib/auth/session';
+
+const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const user = await authenticate(String(body.login || ''), String(body.password || ''), request.headers);
+    const token = await createSessionToken(user);
+    const redirectTo = user.firstLoginRequired || user.passwordResetRequired ? '/change-password' : roleHome(user.roles);
+    const response = NextResponse.json({ status: 'success', data: { user, redirectTo } });
+    response.cookies.set(AUTH_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: SESSION_MAX_AGE_SECONDS,
+    });
+    return response;
+  } catch (error) {
+    return err(401, error instanceof Error ? error.message : 'Unable to login.');
+  }
+}

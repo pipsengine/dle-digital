@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
+import { listEnterpriseNotifications } from '@/lib/enterprise-notifications-store';
 
 type CurrentUserContext = 'enterprise' | 'hris' | 'ess';
 
@@ -133,12 +135,49 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const contextParam = compact(url.searchParams.get('context')).toLowerCase();
   const context = contexts.has(contextParam as CurrentUserContext) ? contextParam as CurrentUserContext : 'enterprise';
+  const token = cookieFirst(request, AUTH_COOKIE);
+  const session = await verifySessionToken(token);
+  const notificationCount = session ? (await listEnterpriseNotifications(session, 'all')).counts.unread : 0;
 
   const employeeSource = await readPayrollEmployees();
-  const configuredIdentities = configuredEmployeeIdentities(request, context);
+  if (session?.isGlobalAdmin) {
+    return NextResponse.json({
+      status: 'success',
+      data: {
+        name: session.fullName,
+        role: 'Emergency System Administration',
+        employeeCode: 'Admin',
+        department: 'System Administration',
+        photoUrl: '/brand/dorman-long-logo.jpg',
+        profileHref: '/hris/administration/user-management/user-accounts',
+        email: '',
+        grade: 'System',
+        location: 'Application Level',
+        employmentStatus: 'Active',
+        dateJoined: '',
+        yearsOfService: 0,
+        reportingManager: 'Protected global account',
+        availabilityStatus: 'Online',
+        onlineStatus: 'Online',
+        notificationCount,
+        pendingApprovals: 0,
+        teamSize: 0,
+        rbacRole: 'Super Administrator',
+        linked: false,
+        source: 'application-level-global-admin',
+        employeeSource: payrollDataSourceInfo(employeeSource),
+      },
+    });
+  }
+
+  const configuredIdentities = [
+    session?.employeeCode,
+    session?.employeeId,
+    session?.username,
+    ...configuredEmployeeIdentities(request, context),
+  ].filter(Boolean) as string[];
   const configuredEmployee = findEmployee(employeeSource.employees, configuredIdentities);
-  const demoEmployee = configuredEmployee ? null : findEmployee(employeeSource.employees, [demoEmployeeIdentity()]);
-  const employee = configuredEmployee || demoEmployee;
+  const employee = configuredEmployee;
   const linked = Boolean(employee);
   const teamMembers = teamMembersFor(employeeSource.employees, employee);
   const activeTeamMembers = teamMembers.filter(isActiveEmployee);
@@ -163,7 +202,7 @@ export async function GET(request: Request) {
       reportingManager: employee?.managerName || employee?.functionalManager || employee?.departmentHead || 'Not assigned',
       availabilityStatus: availabilityStatus(employee),
       onlineStatus: availabilityStatus(employee) === 'Online' ? 'Online' : 'Offline',
-      notificationCount: pendingApprovals + 3,
+      notificationCount,
       pendingApprovals,
       teamSize: activeTeamMembers.length,
       rbacRole: role,

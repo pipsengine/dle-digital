@@ -2,8 +2,11 @@ import { NextResponse } from 'next/server';
 import { getUiPermissions, resolveAccessContext } from '@/lib/hris-access';
 import {
   advanceTimesheetWorkflow,
+  advanceProjectTimesheetApproval,
+  buildProjectTimesheetApprovals,
   normalizePaidWorkHours,
   normalizeTimesheetStatus,
+  readProjects,
   readTimesheetData,
   readTimesheetPayrollUpdates,
   readTimesheetPeriod,
@@ -17,6 +20,7 @@ const err = (status: number, error: string) => NextResponse.json({ status: 'erro
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
 type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN';
+type ProjectApprovalStage = 'Project Manager' | 'Cost Control' | 'HR';
 
 const stageByStatus: Partial<Record<TimesheetStatus, TimesheetWorkflowStage>> = {
   Submitted: 'Project Manager',
@@ -49,6 +53,7 @@ const buildPayload = async (request: Request) => {
   const access = resolveAccessContext(request);
   const permissions = getUiPermissions(access);
   const { headers, lines } = await readTimesheetData();
+  const projects = await readProjects();
   const payrollUpdates = await readTimesheetPayrollUpdates();
   const nonDraftHeaders = headers.filter((header) => normalizeTimesheetStatus(header.status) !== 'Draft');
 
@@ -57,6 +62,8 @@ const buildPayload = async (request: Request) => {
     const headerLines = lines.filter((line) => line.headerId === header.id);
     const period = await readTimesheetPeriod(new Date(header.timesheetDate));
     const payrollUpdate = payrollUpdates.find((update) => update.headerIds.includes(header.id));
+    const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects, access.actor);
+    const allProjectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
 
     return {
       id: header.id,
@@ -78,6 +85,15 @@ const buildPayload = async (request: Request) => {
       periodName: period.name,
       periodStatus: period.status,
       workflowSteps: workflowSteps(header),
+      projectApprovals,
+      projectApprovalSummary: {
+        totalProjects: allProjectApprovals.length,
+        projectManagerApproved: allProjectApprovals.filter((item) => item.projectManagerStatus === 'Approved').length,
+        costControlApproved: allProjectApprovals.filter((item) => item.costControlStatus === 'Approved').length,
+        projectManagerPending: allProjectApprovals.filter((item) => item.projectManagerStatus === 'Pending').length,
+        costControlPending: allProjectApprovals.filter((item) => item.costControlStatus === 'Pending').length,
+        consolidatedForHr: status === 'Cost_Control_Reviewed' || status === 'HR_Acknowledged',
+      },
     };
   }));
   pendingTimesheets.sort((a, b) => new Date(b.timesheetDate).getTime() - new Date(a.timesheetDate).getTime());
@@ -88,6 +104,9 @@ const buildPayload = async (request: Request) => {
     costControlCount: pendingTimesheets.filter((item) => item.status === 'Project_Manager_Reviewed').length,
     hrAcknowledgementCount: pendingTimesheets.filter((item) => item.status === 'Cost_Control_Reviewed').length,
     payrollReadyCount: pendingTimesheets.filter((item) => item.status === 'HR_Acknowledged').length,
+    projectSplitCount: pendingTimesheets.reduce((sum, item) => sum + item.projectApprovalSummary.totalProjects, 0),
+    projectManagerPendingLines: pendingTimesheets.reduce((sum, item) => sum + item.projectApprovalSummary.projectManagerPending, 0),
+    costControlPendingLines: pendingTimesheets.reduce((sum, item) => sum + item.projectApprovalSummary.costControlPending, 0),
   };
 
   return {
@@ -126,13 +145,21 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const payload = await request.json() as { action?: ApprovalAction; headerId?: string; comment?: string };
+    const payload = await request.json() as { action?: ApprovalAction; headerId?: string; comment?: string; projectCode?: string; stage?: ProjectApprovalStage };
     if (!payload.headerId) return err(400, 'Timesheet header ID is required.');
     if (!payload.action || !['APPROVE', 'REJECT', 'RETURN'].includes(payload.action)) {
       return err(400, 'Action must be APPROVE, REJECT, or RETURN.');
     }
 
-    await advanceTimesheetWorkflow(payload.headerId, payload.action, access.actor, payload.comment);
+    if (payload.projectCode && payload.stage && payload.stage !== 'HR') {
+      await advanceProjectTimesheetApproval(payload.headerId, payload.action, access.actor, {
+        projectCode: payload.projectCode,
+        stage: payload.stage,
+        comment: payload.comment,
+      });
+    } else {
+      await advanceTimesheetWorkflow(payload.headerId, payload.action, access.actor, payload.comment);
+    }
     return ok(await buildPayload(request));
   } catch (error) {
     console.error('Approval API Error:', error);

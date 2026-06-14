@@ -48,6 +48,27 @@ type TimesheetSummary = {
   periodName: string;
   periodStatus: 'Open' | 'Closed' | 'Locked';
   workflowSteps: WorkflowStep[];
+  projectApprovals: Array<{
+    headerId: string;
+    projectCode: string;
+    projectName: string;
+    projectManager: string;
+    employeeCount: number;
+    totalHours: number;
+    billableHours: number;
+    costControlStatus: 'Pending' | 'Approved' | 'Rejected' | 'Returned';
+    projectManagerStatus: 'Pending' | 'Approved' | 'Rejected' | 'Returned';
+    visibilityScope: string;
+    lineIds: string[];
+  }>;
+  projectApprovalSummary: {
+    totalProjects: number;
+    projectManagerApproved: number;
+    costControlApproved: number;
+    projectManagerPending: number;
+    costControlPending: number;
+    consolidatedForHr: boolean;
+  };
 };
 
 type ApprovalPayload = {
@@ -112,14 +133,14 @@ export default function TimesheetApprovalClient() {
     void load();
   }, []);
 
-  const act = async (headerId: string, action: 'APPROVE' | 'REJECT' | 'RETURN', defaultComment: string) => {
-    setSubmittingId(headerId);
+  const act = async (headerId: string, action: 'APPROVE' | 'REJECT' | 'RETURN', defaultComment: string, projectCode?: string, stage?: 'Project Manager' | 'Cost Control' | 'HR') => {
+    setSubmittingId(projectCode ? `${headerId}-${projectCode}-${stage}` : headerId);
     setError(null);
     try {
       const res = await fetch('/api/hris/time-and-logs/timesheet-approval', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headerId, action, comment: defaultComment }),
+        body: JSON.stringify({ headerId, action, comment: defaultComment, projectCode, stage }),
       });
       const json = await res.json();
       if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to update approval');
@@ -209,7 +230,7 @@ export default function TimesheetApprovalClient() {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
-                  {['Timesheet', 'Workflow', 'Hours', 'Payroll', 'Status', 'Actions'].map((header) => (
+                  {['Timesheet', 'Project Split Workflow', 'Hours', 'Payroll', 'Status', 'Actions'].map((header) => (
                     <th key={header} className="px-5 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">{header}</th>
                   ))}
                 </tr>
@@ -217,6 +238,7 @@ export default function TimesheetApprovalClient() {
               <tbody className="divide-y divide-slate-50">
                 {filteredTimesheets.map((item) => {
                   const awaitingAction = ['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status);
+                  const canHeaderApprove = item.status === 'Cost_Control_Reviewed';
                   const approveLabel = item.status === 'Cost_Control_Reviewed' ? 'Acknowledge' : 'Approve';
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/70">
@@ -233,6 +255,44 @@ export default function TimesheetApprovalClient() {
                               <div className="mt-0.5 text-[10px] font-bold">{step.status}</div>
                             </div>
                           ))}
+                        </div>
+                        <div className="mt-3 grid min-w-[520px] grid-cols-1 gap-2">
+                          {item.projectApprovals.map((project) => {
+                            const pmKey = `${item.id}-${project.projectCode}-Project Manager`;
+                            const ccKey = `${item.id}-${project.projectCode}-Cost Control`;
+                            const pmPending = project.projectManagerStatus === 'Pending' && ['Submitted', 'Project_Manager_Reviewed'].includes(item.status);
+                            const ccPending = project.costControlStatus === 'Pending' && ['Submitted', 'Project_Manager_Reviewed'].includes(item.status);
+                            return (
+                              <div key={project.projectCode} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <div className="text-xs font-black text-slate-950">{project.projectCode} - {project.projectName}</div>
+                                    <div className="mt-1 text-[10px] font-bold uppercase tracking-tight text-slate-500">{project.totalHours}h / {project.employeeCount} employees / PM: {project.projectManager}</div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${project.projectManagerStatus === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>PM {project.projectManagerStatus}</span>
+                                    <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${project.costControlStatus === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>Cost {project.costControlStatus}</span>
+                                  </div>
+                                </div>
+                                {(pmPending || ccPending) && (
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {pmPending ? (
+                                      <>
+                                        <button type="button" onClick={() => act(item.id, 'APPROVE', `Project Manager approved ${project.projectCode}.`, project.projectCode, 'Project Manager')} disabled={!canApprove || submittingId === pmKey} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-white hover:bg-emerald-700 disabled:opacity-50">PM Approve</button>
+                                        <button type="button" onClick={() => act(item.id, 'RETURN', `Project Manager returned ${project.projectCode} for correction.`, project.projectCode, 'Project Manager')} disabled={!canApprove || submittingId === pmKey} className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-amber-700 disabled:opacity-50">PM Return</button>
+                                      </>
+                                    ) : null}
+                                    {ccPending ? (
+                                      <>
+                                        <button type="button" onClick={() => act(item.id, 'APPROVE', `Cost Control approved ${project.projectCode} allocation.`, project.projectCode, 'Cost Control')} disabled={!canApprove || submittingId === ccKey} className="rounded-lg bg-blue-600 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-white hover:bg-blue-700 disabled:opacity-50">Cost Approve</button>
+                                        <button type="button" onClick={() => act(item.id, 'RETURN', `Cost Control returned ${project.projectCode} allocation.`, project.projectCode, 'Cost Control')} disabled={!canApprove || submittingId === ccKey} className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-amber-700 disabled:opacity-50">Cost Return</button>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </td>
                       <td className="px-5 py-4">
@@ -254,9 +314,9 @@ export default function TimesheetApprovalClient() {
                           </Link>
                           {awaitingAction && (
                             <>
-                              <button type="button" onClick={() => act(item.id, 'APPROVE', item.nextActionLabel || approveLabel)} disabled={!canApprove || submittingId === item.id} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-emerald-700 disabled:opacity-50">
+                              {canHeaderApprove ? <button type="button" onClick={() => act(item.id, 'APPROVE', item.nextActionLabel || approveLabel, undefined, 'HR')} disabled={!canApprove || submittingId === item.id} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-emerald-700 disabled:opacity-50">
                                 <CheckCircle2 className="h-3.5 w-3.5" /> {approveLabel}
-                              </button>
+                              </button> : null}
                               <button type="button" onClick={() => act(item.id, 'RETURN', 'Returned for correction.')} disabled={!canApprove || submittingId === item.id} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-700 hover:bg-amber-100 disabled:opacity-50">
                                 <RotateCcw className="h-3.5 w-3.5" /> Return
                               </button>

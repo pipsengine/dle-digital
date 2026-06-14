@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { NotificationCenter } from '@/components/layout/notification-center';
 import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
 import {
   Activity,
@@ -73,7 +74,17 @@ type Payload = {
   events: Array<{ id: string; label: string; date: string; type: string }>;
   documents: Array<{ id: string; title: string; category: string; version: string; status: string }>;
   profileSections: Array<{ id: string; label: string; status: string; approvalRequired: boolean; fields: string[] }>;
-  leave: { balances: SimpleRecord[]; calendar: SimpleRecord[]; history: SimpleRecord[] };
+  leave: {
+    balances: SimpleRecord[];
+    calendar: SimpleRecord[];
+    history: SimpleRecord[];
+    workflows: SimpleRecord[];
+    allowance: SimpleRecord[];
+    approvals: SimpleRecord[];
+    reports: SimpleRecord[];
+    notifications: SimpleRecord[];
+    security: SimpleRecord[];
+  };
   attendance: { records: SimpleRecord[]; shifts: SimpleRecord[]; timesheets: SimpleRecord[] };
   payrollHistory: SimpleRecord[];
   performance: { goals: SimpleRecord[]; kpis: SimpleRecord[]; reviews: SimpleRecord[]; developmentPlans: SimpleRecord[] };
@@ -98,7 +109,14 @@ type Tab = 'dashboard' | 'profile' | 'leave' | 'time' | 'payroll' | 'documents' 
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
 const numFmt = new Intl.NumberFormat('en-GB');
 const money = (value: number) => moneyFmt.format(value || 0);
-const dateText = (value: string) => new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+const stableDateTime = (value: string) => {
+  const iso = new Date(value).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+};
+const dateText = (value: string) => {
+  const iso = new Date(value).toISOString();
+  return `${iso.slice(8, 10)} ${iso.slice(5, 7)} ${iso.slice(0, 4)}`;
+};
 const statusTone = (status: string) => {
   if (['Approved', 'Closed'].includes(status)) return 'bg-emerald-100 text-emerald-800';
   if (status === 'Rejected') return 'bg-red-100 text-red-800';
@@ -223,6 +241,144 @@ function ActionGrid({ items }: { items: Array<[string, any, string?]> }) {
   );
 }
 
+const leaveTabs = ['Leave Dashboard', 'Apply Leave', 'My Applications', 'Leave Calendar', 'Leave History', 'Approvals', 'Policy & Entitlement'] as const;
+type LeaveTab = typeof leaveTabs[number];
+
+const leaveRequiresAttachment = (type: string) => ['Sick Leave', 'Maternity Leave', 'Exam Leave', 'Compassionate Leave'].includes(type);
+const dayMs = 24 * 60 * 60 * 1000;
+const calcLeaveDays = (from: string, to: string, basis: string) => {
+  if (!from || !to) return 0;
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
+  if (basis === 'Calendar days') return Math.floor((end.getTime() - start.getTime()) / dayMs) + 1;
+  let days = 0;
+  for (let d = new Date(start); d <= end; d = new Date(d.getTime() + dayMs)) {
+    if (![0, 6].includes(d.getDay())) days += 1;
+  }
+  return days;
+};
+
+function EssLeaveWorkspace({ payload, employee }: { payload: Payload | null; employee?: Payload['employee'] }) {
+  const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
+  const [leaveType, setLeaveType] = useState('Annual Leave');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [reason, setReason] = useState('');
+  const [reliever, setReliever] = useState('');
+  const [handover, setHandover] = useState('');
+  const [contact, setContact] = useState(employee?.phone || '');
+  const [address, setAddress] = useState(employee?.location || '');
+  const [ack, setAck] = useState(false);
+  const selected = (payload?.leave.balances || []).find((item) => String(item.type) === leaveType) || payload?.leave.balances?.[0];
+  const basis = String(selected?.basis || 'Working days');
+  const days = calcLeaveDays(startDate, endDate, basis);
+  const balance = Number(selected?.balance || 0);
+  const allowanceEligible = leaveType === 'Annual Leave' && days >= 10;
+  const usesCarryForward = leaveType === 'Carry Forward Leave';
+  const validations = [
+    ...(days > balance ? ['Selected days exceed available balance.'] : []),
+    ...(leaveType === 'Annual Leave' && String(selected?.eligibilityStatus || '').toLowerCase().includes('locked') ? ['Annual Leave is available only after confirmation of appointment.'] : []),
+    ...(leaveRequiresAttachment(leaveType) ? ['Attachment is mandatory for this leave type.'] : []),
+    ...(usesCarryForward && endDate > `${new Date().getFullYear()}-03-31` ? ['Carry Forward Leave must be consumed on or before 31 March.'] : []),
+    ...(leaveType === 'Annual Leave' && days > 0 && days < 10 ? ['This request does not qualify for Leave Allowance.'] : []),
+    ...(!ack ? ['Policy acknowledgement is required before submission.'] : []),
+  ];
+
+  const metricRows = [
+    ['Annual Leave Balance', payload?.leave.balances.find((x) => x.type === 'Annual Leave')?.balance ?? 0, 'Current entitlement'],
+    ['Sick Leave Balance', payload?.leave.balances.find((x) => x.type === 'Sick Leave')?.balance ?? 0, 'Working days'],
+    ['Casual Leave Balance', payload?.leave.balances.find((x) => x.type === 'Casual Leave')?.balance ?? 0, 'Working days'],
+    ['Compassionate Balance', payload?.leave.balances.find((x) => x.type === 'Compassionate Leave')?.balance ?? 0, 'Working days'],
+    ['Exam Leave Balance', payload?.leave.balances.find((x) => x.type === 'Exam Leave')?.balance ?? 0, 'Working days'],
+    ['Maternity Balance', payload?.leave.balances.find((x) => x.type === 'Maternity Leave')?.balance ?? 0, 'Calendar days'],
+    ['Carry Forward', payload?.leave.balances.find((x) => x.type === 'Carry Forward Leave')?.balance ?? 0, 'Expires 31 Mar'],
+    ['Pending Applications', payload?.widgets.requests.pending ?? 0, 'Workflow queue'],
+    ['Approved This Year', payload?.widgets.requests.approved ?? 0, 'Approved requests'],
+    ['Leave Allowance', allowanceEligible ? 'Eligible' : 'Conditional', '10+ annual days'],
+    ['Next Scheduled Leave', String(payload?.leave.calendar[0]?.from || '-'), 'Approved schedule'],
+    ['Return-to-Work Pending', 0, 'No pending action'],
+  ];
+
+  return (
+    <section className="space-y-4">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {leaveTabs.map((tab) => (
+          <button key={tab} type="button" onClick={() => setActive(tab)} className={`h-10 shrink-0 rounded-lg px-3 text-xs font-black ${active === tab ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{tab}</button>
+        ))}
+      </div>
+
+      {active === 'Leave Dashboard' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-4">
+            {metricRows.map(([label, value, detail]) => <MetricCard key={String(label)} label={String(label)} value={String(value)} detail={String(detail)} icon={CalendarCheck} tone="bg-emerald-100 text-emerald-700" />)}
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {(payload?.leave.balances || []).map((item) => (
+              <button key={String(item.id)} type="button" onClick={() => { setLeaveType(String(item.type)); setActive('Apply Leave'); }} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-emerald-300 hover:bg-emerald-50/40">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-black text-slate-950">{String(item.type)}</p><p className="mt-1 text-xs font-semibold text-slate-500">{String(item.policyNote)}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-black ${statusTone(String(item.eligibilityStatus))}`}>{String(item.eligibilityStatus)}</span></div>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <p><span className="font-black text-slate-500">Entitlement:</span> {String(item.entitlement)} {String(item.basis).toLowerCase()}</p>
+                  <p><span className="font-black text-slate-500">Used:</span> {String(item.used)} days</p>
+                  <p><span className="font-black text-slate-500">Pending:</span> {String(item.pending)} days</p>
+                  <p><span className="font-black text-slate-500">Balance:</span> {String(item.balance)} days</p>
+                </div>
+                {item.expiryDate ? <p className="mt-2 text-xs font-bold text-amber-700">Expires: {String(item.expiryDate)}</p> : null}
+                <p className="mt-3 text-xs font-bold text-blue-700">{String(item.allowanceStatus)}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {active === 'Apply Leave' && (
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-black text-slate-950">Guided Leave Application</h2>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold">{(payload?.leave.balances || []).map((item) => <option key={String(item.id)}>{String(item.type)}</option>)}</select>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+              <input value={`${days} ${basis.toLowerCase()}`} readOnly className="h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-800" />
+              <input value={reliever} onChange={(e) => setReliever(e.target.value)} placeholder="Reliever / acting person" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+              <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Contact number while on leave" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+              <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Leave address / location" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold md:col-span-2" />
+              <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason" className="min-h-24 rounded-lg border border-slate-200 p-3 text-sm font-bold md:col-span-2" />
+              <textarea value={handover} onChange={(e) => setHandover(e.target.value)} placeholder="Handover notes" className="min-h-24 rounded-lg border border-slate-200 p-3 text-sm font-bold md:col-span-2" />
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-bold text-slate-600 md:col-span-2">Attachment upload placeholder {leaveRequiresAttachment(leaveType) ? '(mandatory for this leave type)' : '(optional)'}</div>
+              <label className="flex items-start gap-2 text-sm font-bold text-slate-700 md:col-span-2"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1" /> I acknowledge Dorman Long leave policy, balance, allowance, reliever, and audit requirements.</label>
+            </div>
+          </div>
+          <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Policy Validation</h3>
+            <p className="text-xs font-semibold text-slate-600">Allowance: {allowanceEligible && !usesCarryForward ? 'Eligible after approval and payroll notification' : 'Not eligible for this selection'}</p>
+            <p className="text-xs font-semibold text-slate-600">Available balance: {balance} days</p>
+            <div className="space-y-2">{validations.map((item, index) => <div key={`${item}-${index}`} className={`rounded-lg border px-3 py-2 text-xs font-bold ${item.includes('does not qualify') ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{item}</div>)}</div>
+            {!validations.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">{'Ready to submit. Workflow: Employee -> Supervisor -> Manager/GM -> HR -> Payroll when applicable -> Completed.'}</div> : null}
+            <button type="button" disabled={Boolean(validations.filter((item) => !item.includes('does not qualify')).length)} className="h-11 w-full rounded-lg bg-blue-600 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-500">Submit Leave Application</button>
+          </div>
+        </section>
+      )}
+
+      {active === 'My Applications' && <DataList rows={(payload?.requests.filter((item) => item.category === 'Leave').map((item) => ({ id: item.id, title: item.title, status: item.status, submittedAt: item.submittedAt, updatedAt: item.updatedAt, approvers: item.approvers.join(', ') })) || [])} titleKey="title" subtitleKeys={['status', 'submittedAt', 'updatedAt', 'approvers']} />}
+      {active === 'Leave Calendar' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Calendar" rows={payload?.leave.calendar || []} keys={['label', 'from', 'to', 'status', 'scope']} /><InfoListLike title="Notifications" rows={payload?.leave.notifications || []} keys={['title', 'channel', 'status']} /></section>}
+      {active === 'Leave History' && <DataList rows={payload?.leave.history || []} titleKey="type" subtitleKeys={['from', 'to', 'days', 'approvalStage', 'allowanceStatus']} />}
+      {active === 'Approvals' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Approval Workflow" rows={payload?.leave.workflows || []} keys={['stage', 'owner', 'status', 'sla']} /><InfoListLike title="Manager/HR Queue" rows={payload?.leave.approvals || []} keys={['employee', 'type', 'days', 'stage', 'status', 'conflict']} /></section>}
+      {active === 'Policy & Entitlement' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Payroll & Allowance" rows={payload?.leave.allowance || []} keys={['label', 'value', 'status']} /><InfoListLike title="Reports & RBAC" rows={[...(payload?.leave.reports || []), ...(payload?.leave.security || [])]} keys={['title', 'role', 'access', 'format', 'status']} /></section>}
+    </section>
+  );
+}
+
+function InfoListLike({ title, rows, keys }: { title: string; rows: SimpleRecord[]; keys: string[] }) {
+  return (
+    <Section title={title}>
+      <div className="space-y-3">
+        {rows.map((row, index) => <div key={`${title}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-sm font-black text-slate-950">{String(row[keys[0]] || row[keys[1]] || 'Record')}</p><p className="mt-1 text-xs font-semibold text-slate-600">{keys.slice(1).map((key) => row[key]).filter(Boolean).join(' - ')}</p></div>)}
+      </div>
+    </Section>
+  );
+}
+
 export default function WorkforcePortalClient({ initialNow }: { initialNow: string }) {
   const searchParams = useSearchParams();
   const [payload, setPayload] = useState<Payload | null>(null);
@@ -340,6 +496,8 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
             <select value={locale} onChange={(e) => setLocale(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 outline-none">
               {['en-NG', 'fr-FR', 'ar', 'es-ES'].map((item) => <option key={item}>{item}</option>)}
             </select>
+            <NotificationCenter scope="notifications" />
+            <NotificationCenter scope="messages" />
             <EnterpriseUserProfile
               context="ess"
               name={employee?.fullName}
@@ -385,7 +543,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">Standalone ESS Module</span>
                   <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">Cloud-ready</span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Loaded {new Date(payload?.generatedAt || initialNow).toLocaleString('en-GB')}</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Loaded {stableDateTime(payload?.generatedAt || initialNow)}</span>
                 </div>
                 <h2 className="mt-4 text-2xl font-black tracking-tight text-slate-950">My HR workspace</h2>
                 <p className="mt-2 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
@@ -521,25 +679,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           )}
 
           {tab === 'leave' && widgets && (
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <Section title="Leave Balances, Applications & Approvals">
-                <DataList rows={payload?.leave.balances || []} titleKey="type" subtitleKeys={['entitlement', 'used', 'balance']} statusKey="type" />
-                <div className="mt-4">
-                  <ActionGrid items={[
-                    ['Apply leave', CalendarCheck, 'Real-time balance'],
-                    ['Cancel leave', FileText, 'Approval required'],
-                    ['Confirm resumption', CheckCircle2, 'Return-to-work'],
-                    ['Leave approval', BadgeCheck, 'Pending actions'],
-                  ]} />
-                </div>
-              </Section>
-              <Section title="Leave Calendar, History & Status Tracking">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div><p className="mb-2 text-xs font-black uppercase tracking-normal text-slate-500">Calendar</p><DataList rows={payload?.leave.calendar || []} titleKey="label" subtitleKeys={['from', 'to']} /></div>
-                  <div><p className="mb-2 text-xs font-black uppercase tracking-normal text-slate-500">History</p><DataList rows={payload?.leave.history || []} titleKey="type" subtitleKeys={['from', 'to', 'days']} /></div>
-                </div>
-              </Section>
-            </section>
+            <EssLeaveWorkspace payload={payload} employee={employee} />
           )}
 
           {tab === 'time' && widgets && (

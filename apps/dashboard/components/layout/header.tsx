@@ -1,6 +1,7 @@
 'use client';
 
-import { Search, Bell, Menu } from 'lucide-react';
+import { Search, Menu } from 'lucide-react';
+import { NotificationCenter } from '@/components/layout/notification-center';
 import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
 
 export function Header({ 
@@ -31,10 +32,7 @@ export function Header({
           Systems Optimal
         </div>
 
-        <button className="relative hidden h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-50 min-[360px]:flex">
-          <Bell className="w-5 h-5" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-dle-red border-2 border-white"></span>
-        </button>
+        <NotificationCenter scope="notifications" />
 
         <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block"></div>
 

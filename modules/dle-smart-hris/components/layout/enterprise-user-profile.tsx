@@ -141,7 +141,7 @@ const linksFor = (context: EnterpriseUserProfileContext, user: ProfileUser) => {
     { label: 'My Profile', href: user.profileHref || (ess ? '/workforce-portal?tab=profile' : hrisProfile), icon: UserRound },
     { label: 'My Documents', href: ess ? '/workforce-portal?tab=documents' : '/hris/employees/employee-documents', icon: FileText },
     { label: 'My Payslips', href: ess ? '/workforce-portal?tab=payroll' : '/hris/payroll/payslip-generation', icon: ReceiptText },
-    { label: 'My Leave', href: ess ? '/workforce-portal?tab=leave' : '/hris/leave-management/leave-application', icon: CalendarDays },
+    { label: 'My Leave', href: ess ? '/workforce-portal?tab=leave' : '/hris/leave-management/applications', icon: CalendarDays },
     { label: 'My Requests', href: ess ? '/workforce-portal?tab=services' : '/hris/employees/employee-timeline', icon: CheckSquare },
     { label: 'My Approvals', href: ess ? '/workforce-portal?tab=workflow' : '/hris/employees/reporting-line', icon: ShieldCheck, count: user.pendingApprovals || 0 },
   ];
@@ -198,6 +198,10 @@ export function EnterpriseUserProfile({
   const notificationCount = Number(user.notificationCount || 0);
   const pendingApprovals = Number(user.pendingApprovals || 0);
   const isManager = pendingApprovals > 0 || Number(user.teamSize || 0) > 0 || compact(user.rbacRole).match(/manager|executive/i);
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
+    window.location.assign('/login');
+  };
 
   return (
     <details className="group relative">
@@ -245,7 +249,7 @@ export function EnterpriseUserProfile({
             <Link href={user.profileHref} className={`flex min-h-11 items-center justify-center rounded-lg px-3 py-2 text-center text-xs font-black text-white ${tone.action}`}>
               View Profile
             </Link>
-            <Link href={context === 'ess' ? '/workforce-portal?tab=leave' : '/hris/leave-management/leave-application'} className="flex min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-xs font-black text-slate-800 hover:bg-slate-50">
+            <Link href={context === 'ess' ? '/workforce-portal?tab=leave' : '/hris/leave-management/applications'} className="flex min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-xs font-black text-slate-800 hover:bg-slate-50">
               Apply Leave
             </Link>
             <Link href={context === 'ess' ? '/workforce-portal?tab=payroll' : '/hris/payroll/payslip-generation'} className="flex min-h-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-xs font-black text-slate-800 hover:bg-slate-50">
@@ -309,7 +313,7 @@ export function EnterpriseUserProfile({
         </div>
 
         <div className="p-2">
-          <button type="button" className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-bold text-red-700 hover:bg-red-50">
+          <button type="button" onClick={() => void logout()} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-bold text-red-700 hover:bg-red-50">
             <LogOut className="h-4 w-4" />
             Logout
           </button>

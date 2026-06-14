@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { AUTH_COOKIE, hasPermission, isPublicPath, verifySessionToken } from '@/lib/auth/session';
+
+const requiredPermission = (pathname: string) => {
+  if (pathname.startsWith('/api/current-user') || pathname.startsWith('/api/auth/me') || pathname.startsWith('/api/notifications')) return '';
+  if (pathname.startsWith('/api/admin/users') || pathname.startsWith('/hris/administration/user-management')) return 'admin.users.view';
+  if (pathname.startsWith('/api/admin/roles') || pathname.startsWith('/hris/administration/roles-and-permissions')) return 'admin.roles.view';
+  if (pathname.startsWith('/api/admin/audit') || pathname.startsWith('/hris/administration/audit-trail')) return 'audit.view';
+  if (pathname.startsWith('/api/hris/payroll') || pathname.startsWith('/hris/payroll')) return 'payroll.view';
+  if (pathname.startsWith('/api/hris/employees') || pathname.startsWith('/hris/employees')) return 'employees.view';
+  if (pathname.startsWith('/api/hris/leave') || pathname.startsWith('/hris/leave-management')) return 'leave.view';
+  if (pathname.startsWith('/api/hris/time-and-logs') || pathname.startsWith('/api/hris/workforce-management') || pathname.startsWith('/hris/workforce-management')) return 'hris.view';
+  if (pathname.startsWith('/api/hris') || pathname.startsWith('/hris')) return 'hris.view';
+  if (pathname.startsWith('/workforce-portal')) return 'ess.view';
+  if (pathname.startsWith('/finance-accounting')) return 'finance.view';
+  if (pathname.startsWith('/procurement')) return 'procurement.view';
+  if (pathname.startsWith('/projects-engineering')) return 'project.view';
+  if (pathname.startsWith('/hse-management')) return 'hse.view';
+  if (pathname.startsWith('/quality-management')) return 'quality.view';
+  if (pathname.startsWith('/document-management')) return 'documents.view';
+  return 'enterprise.view';
+};
+
+const denied = (request: NextRequest, status = 403) => {
+  if (request.nextUrl.pathname.startsWith('/api')) {
+    return NextResponse.json({ status: 'error', error: status === 401 ? 'Unauthenticated' : 'Forbidden' }, { status });
+  }
+  const url = request.nextUrl.clone();
+  url.pathname = status === 401 ? '/login' : '/access-denied';
+  if (status === 401) url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
+  return NextResponse.redirect(url);
+};
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (isPublicPath(pathname)) return NextResponse.next();
+
+  const session = await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
+  if (!session) return denied(request, 401);
+
+  if ((session.firstLoginRequired || session.passwordResetRequired) && !pathname.startsWith('/change-password') && !pathname.startsWith('/api/auth/change-password')) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/change-password';
+    url.searchParams.set('next', pathname + request.nextUrl.search);
+    return NextResponse.redirect(url);
+  }
+
+  const permission = requiredPermission(pathname);
+  if (permission && !hasPermission(session.permissions, permission)) return denied(request, 403);
+
+  const response = NextResponse.next();
+  response.headers.set('x-auth-user', session.username);
+  response.headers.set('x-auth-roles', session.roles.join(','));
+  return response;
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};

@@ -56,6 +56,14 @@ type Role =
   | 'Employee'
   | 'Executive Management';
 
+type AuthSession = {
+  username: string;
+  employeeId?: string;
+  employeeCode?: string;
+  roles?: string[];
+  isGlobalAdmin?: boolean;
+};
+
 type EmployeeStatus =
   | 'Active'
   | 'On Leave'
@@ -327,6 +335,23 @@ const rolePermissions = (role: Role, subjectEmployeeId: string, viewerEmployeeId
     canViewSensitivePersonal,
     canViewDocuments,
   };
+};
+
+const profileRoleFromSession = (session: AuthSession | null): Role => {
+  if (!session) return 'Employee';
+  const value = (session.roles || []).join(' ').toLowerCase();
+  if (session.isGlobalAdmin || value.includes('super administrator')) return 'Super Admin';
+  if (value.includes('executive')) return 'Executive Management';
+  if (value.includes('payroll')) return 'Payroll Officer';
+  if (value.includes('hse')) return 'HSE Officer';
+  if (value.includes('compliance')) return 'Compliance Officer';
+  if (value.includes('auditor') || value.includes('audit')) return 'Auditor';
+  if (value.includes('it administrator')) return 'IT Administrator';
+  if (value.includes('department head')) return 'Department Head';
+  if (value.includes('manager') || value.includes('supervisor')) return 'Line Manager';
+  if (value.includes('hr administrator') || value.includes('hr manager')) return 'HR Manager';
+  if (value.includes('hr officer') || value.includes('employee records')) return 'HR Officer';
+  return 'Employee';
 };
 
 const Card = ({ children, className }: { children: React.ReactNode; className?: string }) => (
@@ -841,7 +866,7 @@ const OverviewTab = ({
 
 export default function EmployeeProfileClient({ employeeId, initialNow }: { employeeId: string; initialNow: string }) {
   const router = useRouter();
-  const [role, setRole] = useState<Role>('HR Manager');
+  const [role, setRole] = useState<Role>('Employee');
   const [viewerEmployeeId, setViewerEmployeeId] = useState<string | undefined>(undefined);
   const [tab, setTab] = useState<TabKey>('overview');
   const [toast, setToast] = useState<{ title: string; detail: string; tone: 'ok' | 'warn' | 'err' } | null>(null);
@@ -857,6 +882,25 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
   const [overview, setOverview] = useState<ApiState<EmployeeOverview>>({ status: 'idle' });
   const [insights, setInsights] = useState<ApiState<AIInsight[]>>({ status: 'idle' });
   const [audit, setAudit] = useState<ApiState<AuditLog[]>>({ status: 'idle' });
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAuthContext = async () => {
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' });
+        const json = (await res.json()) as { status: string; data?: AuthSession };
+        if (!res.ok || json.status !== 'success' || !json.data || cancelled) return;
+        setRole(profileRoleFromSession(json.data));
+        if (!json.data.isGlobalAdmin) setViewerEmployeeId(json.data.employeeCode || json.data.employeeId || json.data.username);
+      } catch {
+        if (!cancelled) setRole('Employee');
+      }
+    };
+    void loadAuthContext();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

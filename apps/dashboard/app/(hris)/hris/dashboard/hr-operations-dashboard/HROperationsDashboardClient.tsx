@@ -558,7 +558,7 @@ export default function HROperationsDashboardClient({ employees, attendanceRecor
             <ToneKpi label="On Leave" value={formatNumber(attendance.onLeave.length)} detail="Approved leave coverage" icon={CalendarClock} tone="blue" onClick={() => setDrilldown({ title: 'Employees on Leave', rows: attendance.onLeave, note: `Live attendance leave/excused records for ${attendanceDate || 'the resolved attendance date'}.` })} />
             <ToneKpi label="Late Arrivals" value={formatNumber(attendance.late.length)} detail="Attention required" icon={Timer} tone={attendance.late.length ? 'amber' : 'green'} onClick={() => setDrilldown({ title: 'Late Arrivals', rows: attendance.late, note: `Live biometric late records for ${attendanceDate || 'the resolved attendance date'}.` })} />
             <ToneKpi label="Overtime Employees" value={formatNumber(attendance.overtime.length)} detail="Operational overtime watch" icon={TrendingUp} tone="cyan" onClick={() => setDrilldown({ title: 'Overtime Employees', rows: attendance.overtime, note: `Live biometric overtime records for ${attendanceDate || 'the resolved attendance date'}.` })} />
-            <ToneKpi label="Leave Requests Pending" value={formatNumber(attendance.pendingLeaveRequests)} detail="Manager/HR approval queue" icon={FileText} tone={attendance.pendingLeaveRequests > 8 ? 'red' : 'amber'} href="/hris/leave-management/leave-approval" />
+            <ToneKpi label="Leave Requests Pending" value={formatNumber(attendance.pendingLeaveRequests)} detail="Manager/HR approval queue" icon={FileText} tone={attendance.pendingLeaveRequests > 8 ? 'red' : 'amber'} href="/hris/leave-management/approvals" />
           </div>
         </Card>
 

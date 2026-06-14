@@ -77,6 +77,7 @@ type LeaveTypeRule = {
   name: string;
   active: boolean;
   entitlementDays: number;
+  durationBasis: 'Working days' | 'Calendar days';
   eligibility: string;
   waitingPeriodDays: number;
   gradeRestrictions: string[];
@@ -87,9 +88,11 @@ type LeaveTypeRule = {
   accrualRule: string;
   carryForwardRule: string;
   encashmentRule: string;
+  allowanceRule: string;
 };
 type AuditEntry = { id: string; at: string; user: string; role: string; action: string; record: string; oldValue: string | null; newValue: string | null; comments?: string; reason?: string };
-type SectionConfig = { id: string; label: string; description: string; actions: string[]; controls: string[]; reports?: string[] };
+type SectionArea = 'Dashboard' | 'Transactions' | 'Planning & Balances' | 'Administration' | 'Reports & Analytics';
+type SectionConfig = { id: string; label: string; area: SectionArea; description: string; actions: string[]; controls: string[]; reports?: string[] };
 type Payload = {
   generatedAt: string;
   source: string;
@@ -140,6 +143,10 @@ const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: '
 const numberFmt = new Intl.NumberFormat('en-GB');
 const money = (value: number | undefined) => moneyFmt.format(value || 0);
 const number = (value: number | undefined) => numberFmt.format(value || 0);
+const stableDateTime = (value: string) => {
+  const iso = new Date(value).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+};
 
 const toneStyles: Record<LeaveTone, { card: string; icon: string; chip: string; button: string }> = {
   blue: { card: 'border-blue-200 bg-blue-50', icon: 'bg-blue-600 text-white', chip: 'bg-blue-100 text-blue-800', button: 'bg-blue-600 text-white hover:bg-blue-700' },
@@ -221,7 +228,7 @@ function StatusPanel({ payload }: { payload: Payload | null }) {
         <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3">
           <p className="text-xs font-black uppercase text-red-800">Exception Indicators</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {payload.current.exceptionIndicators.map((item) => <span key={item} className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">{item}</span>)}
+            {payload.current.exceptionIndicators.map((item, index) => <span key={`${item}-${index}`} className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-800">{item}</span>)}
           </div>
         </div>
       ) : null}
@@ -229,7 +236,22 @@ function StatusPanel({ payload }: { payload: Payload | null }) {
   );
 }
 
-export default function LeaveManagementClient({ initialNow, initialSection = 'leave-dashboard' }: { initialNow: string; initialSection?: string }) {
+const workspaces: Array<{ id: string; label: SectionArea; defaultSection: string; description: string }> = [
+  { id: 'dashboard', label: 'Dashboard', defaultSection: 'dashboard', description: 'Executive overview, command center metrics, exceptions, workflow status, and leave governance signals.' },
+  { id: 'transactions', label: 'Transactions', defaultSection: 'applications', description: 'Employee requests, manager approvals, recalls, cancellations, encashments, workflow actions, and audit-ready transaction controls.' },
+  { id: 'planning-and-balances', label: 'Planning & Balances', defaultSection: 'leave-calendar', description: 'Calendars, team coverage planning, balance administration, holiday controls, liability values, and scheduling governance.' },
+  { id: 'administration', label: 'Administration', defaultSection: 'leave-types', description: 'Configurable leave types, policies, accruals, carry-forward, adjustments, year-end processing, RBAC, and compliance controls.' },
+  { id: 'reports-and-analytics', label: 'Reports & Analytics', defaultSection: 'leave-reports', description: 'Operational reports, utilization, liability, trends, approval analytics, exports, and scheduled reporting.' },
+];
+
+const workspaceForSection = (section: string, payload: Payload | null) => {
+  const direct = workspaces.find((item) => item.id === section);
+  if (direct) return direct;
+  const config = payload?.operationalSections.find((item) => item.id === section);
+  return workspaces.find((item) => item.label === config?.area) || workspaces[0];
+};
+
+export default function LeaveManagementClient({ initialNow, initialSection = 'dashboard' }: { initialNow: string; initialSection?: string }) {
   const [role, setRole] = useState<LeaveRole>('Leave Administrator');
   const [section, setSection] = useState(initialSection);
   const [payload, setPayload] = useState<Payload | null>(null);
@@ -241,6 +263,8 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
   const [auditOpen, setAuditOpen] = useState(false);
 
   const activeSection = useMemo(() => payload?.operationalSections.find((item) => item.id === section) || payload?.operationalSections[0], [payload?.operationalSections, section]);
+  const activeWorkspace = useMemo(() => workspaceForSection(section, payload), [payload, section]);
+  const workspaceTabs = useMemo(() => (payload?.operationalSections || []).filter((item) => item.area === activeWorkspace.label && item.id !== 'dashboard'), [activeWorkspace.label, payload?.operationalSections]);
 
   const load = async (nextSection = section, nextRole = role) => {
     setLoading(true);
@@ -250,6 +274,7 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
       const json = (await res.json()) as ApiResponse<Payload>;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Leave request failed (${res.status})`);
       setPayload(json.data);
+      if (json.data.section !== nextSection) setSection(json.data.section);
     } catch (event) {
       setError(event instanceof Error ? event.message : 'Unable to load Leave Management');
     } finally {
@@ -322,7 +347,7 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-800">Production workflow ready</span>
             <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-extrabold text-blue-800">{payload?.source || 'Loading source'}</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700">Loaded: {new Date(payload?.generatedAt || initialNow).toLocaleString('en-GB')}</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700">Loaded: {stableDateTime(payload?.generatedAt || initialNow)}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -353,14 +378,14 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
 
       <div className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-[300px_1fr]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <p className="px-2 pb-2 text-xs font-black uppercase text-slate-500">Leave Menu</p>
+          <p className="px-2 pb-2 text-xs font-black uppercase text-slate-500">Leave Management</p>
           <nav className="grid grid-cols-2 gap-1 xl:grid-cols-1" aria-label="Leave Management pages">
-            {(payload?.operationalSections || []).map((item) => (
+            {workspaces.map((item) => (
               <Link
                 key={item.id}
                 href={`/hris/leave-management/${item.id}`}
-                onClick={() => setSection(item.id)}
-                className={`rounded-xl px-3 py-2 text-xs font-black transition-colors ${section === item.id ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-50'}`}
+                onClick={() => setSection(item.defaultSection)}
+                className={`rounded-xl px-3 py-2.5 text-xs font-black transition-colors ${activeWorkspace.id === item.id ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-50'}`}
               >
                 {item.label}
               </Link>
@@ -372,8 +397,9 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h2 className="text-xl font-black text-slate-950">{activeSection?.label || 'Leave Dashboard'}</h2>
-                <p className="mt-1 max-w-4xl text-sm font-semibold text-slate-600">{activeSection?.description}</p>
+                <h2 className="text-xl font-black text-slate-950">{activeWorkspace.label}</h2>
+                <p className="mt-1 max-w-4xl text-sm font-semibold text-slate-600">{activeWorkspace.description}</p>
+                {activeSection && activeSection.id !== 'dashboard' ? <p className="mt-2 text-xs font-black uppercase tracking-normal text-emerald-700">{activeSection.label}</p> : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 {(payload?.actions || []).map((item) => {
@@ -387,6 +413,20 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
                 })}
               </div>
             </div>
+            {workspaceTabs.length ? (
+              <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                {workspaceTabs.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSection(item.id)}
+                    className={`h-10 shrink-0 rounded-xl px-3 text-xs font-black transition-colors ${section === item.id ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <StatusPanel payload={payload} />
@@ -402,13 +442,13 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
             {query ? <button type="button" onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"><X className="h-4 w-4" /></button> : null}
           </div>
 
-          {section === 'leave-dashboard' ? <DashboardView payload={payload} /> : null}
-          {section === 'leave-application' ? <ApplicationView rows={filteredApplications} /> : null}
-          {section === 'leave-approval' ? <ApprovalView rows={filteredApplications} /> : null}
+          {section === 'dashboard' ? <DashboardView payload={payload} /> : null}
+          {section === 'applications' ? <ApplicationView rows={filteredApplications} /> : null}
+          {section === 'approvals' ? <ApprovalView rows={filteredApplications} /> : null}
           {section === 'leave-calendar' ? <CalendarView payload={payload} /> : null}
-          {section === 'leave-balance' ? <BalanceView rows={filteredBalances} /> : null}
-          {['annual-leave', 'sick-leave', 'maternity-leave', 'paternity-leave', 'compassionate-leave', 'study-leave', 'casual-leave', 'unpaid-leave'].includes(section) ? <LeaveTypeView payload={payload} section={section} /> : null}
-          {['leave-recall', 'leave-cancellation', 'leave-encashment', 'leave-policy-setup', 'leave-reports'].includes(section) ? <OperationalView payload={payload} section={section} /> : null}
+          {section === 'leave-balances' ? <BalanceView rows={filteredBalances} /> : null}
+          {section === 'leave-types' ? <LeaveTypeView payload={payload} /> : null}
+          {['recalls', 'cancellations', 'encashments', 'team-leave-planner', 'holiday-calendar', 'leave-policies', 'leave-accruals', 'carry-forward-processing', 'balance-adjustments', 'leave-year-end-processing', 'leave-reports', 'leave-utilization', 'leave-liability', 'leave-trends', 'approval-reports'].includes(section) ? <OperationalView payload={payload} section={section} /> : null}
 
           <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <InfoList title="Notifications" icon={Bell} rows={payload?.notifications || []} primaryKey="event" secondaryKeys={['channels', 'status']} />
@@ -424,9 +464,42 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'le
 
 function DashboardView({ payload }: { payload: Payload | null }) {
   return (
-    <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <InfoList title="Upcoming Leave Schedule" icon={CalendarDays} rows={payload?.calendar || []} primaryKey="label" secondaryKeys={['from', 'to', 'status']} />
-      <InfoList title="Workflow Matrix" icon={ShieldCheck} rows={payload?.workflowMatrix || []} primaryKey="dimension" secondaryKeys={['rule']} />
+    <div className="space-y-4">
+      <LeaveTypeDashboardCards payload={payload} />
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <InfoList title="Upcoming Leave Schedule" icon={CalendarDays} rows={payload?.calendar || []} primaryKey="label" secondaryKeys={['from', 'to', 'status']} />
+        <InfoList title="Workflow Matrix" icon={ShieldCheck} rows={payload?.workflowMatrix || []} primaryKey="dimension" secondaryKeys={['rule']} />
+      </section>
+    </div>
+  );
+}
+
+function LeaveTypeDashboardCards({ payload }: { payload: Payload | null }) {
+  const rows = payload?.leaveTypes || [];
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-black text-slate-950">Dorman Long Leave Policy</h3>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Entitlements, eligibility, payroll allowance, carry-forward, ESS visibility, and approval controls.</p>
+        </div>
+        <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">Policy configured</span>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {rows.map((item) => (
+          <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-slate-950">{item.name}</p>
+                <p className="mt-1 text-2xl font-black text-slate-900">{item.entitlementDays}</p>
+                <p className="text-xs font-bold text-slate-500">{item.durationBasis}</p>
+              </div>
+              <Chip value={item.active ? 'Active' : 'Inactive'} />
+            </div>
+            <p className="mt-3 line-clamp-3 text-xs font-semibold text-slate-600">{item.eligibility}</p>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -483,23 +556,34 @@ function BalanceView({ rows }: { rows: BalanceRecord[] }) {
   );
 }
 
-function LeaveTypeView({ payload, section }: { payload: Payload | null; section: string }) {
-  const rule = payload?.leaveTypes.find((item) => item.id === section);
-  if (!rule) return null;
-  const rows = [
-    ['Entitlement limits', `${rule.entitlementDays} days`],
-    ['Eligibility rules', rule.eligibility],
-    ['Waiting periods', `${rule.waitingPeriodDays} days`],
-    ['Grade restrictions', rule.gradeRestrictions.join(', ') || 'None'],
-    ['Employee category restrictions', rule.categoryRestrictions.join(', ') || 'None'],
-    ['Gender restrictions', rule.genderRestriction],
-    ['Document requirements', rule.documentRequirements.join(', ') || 'None'],
-    ['Approval levels', rule.approvalLevels.join(' -> ')],
-    ['Accrual rules', rule.accrualRule],
-    ['Carry forward rules', rule.carryForwardRule],
-    ['Encashment rules', rule.encashmentRule],
-  ].map(([control, value]) => ({ control, value }));
-  return <InfoList title={`${rule.name} Rules`} icon={FileText} rows={rows} primaryKey="control" secondaryKeys={['value']} />;
+function LeaveTypeView({ payload }: { payload: Payload | null }) {
+  const rows = payload?.leaveTypes || [];
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <TableHeader title="Leave Types" detail="Centralized configurable records for statutory, company, unpaid, paid, evidence-based, and future leave categories." />
+      <div className="overflow-x-auto">
+        <table className="min-w-[1200px] w-full divide-y divide-slate-100">
+          <thead className="bg-slate-50"><tr>{['Leave Type', 'Entitlement', 'Eligibility', 'Categories', 'Documents', 'Approvals', 'Accrual', 'Carry Forward', 'Allowance', 'Status'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>)}</tr></thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map((item) => (
+              <tr key={item.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3"><div className="font-black text-slate-950">{item.name}</div><div className="text-xs font-semibold text-slate-500">{item.genderRestriction} eligibility</div></td>
+                <td className="px-4 py-3 text-sm font-black text-slate-900">{item.entitlementDays} {item.durationBasis.toLowerCase()}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.eligibility}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.categoryRestrictions.join(', ') || 'All'}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.documentRequirements.join(', ') || 'None'}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.approvalLevels.join(' -> ')}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.accrualRule}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.carryForwardRule}</td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.allowanceRule}</td>
+                <td className="px-4 py-3"><Chip value={item.active ? 'Active' : 'Inactive'} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 function OperationalView({ payload, section }: { payload: Payload | null; section: string }) {
@@ -575,7 +659,7 @@ function AuditPanel({ rows, onClose }: { rows: AuditEntry[]; onClose: () => void
               <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-black text-slate-950">{item.action} - {item.record}</p>
-                  <span className="text-xs font-bold text-slate-500">{new Date(item.at).toLocaleString('en-GB')}</span>
+                  <span className="text-xs font-bold text-slate-500">{stableDateTime(item.at)}</span>
                 </div>
                 <p className="mt-1 text-xs font-semibold text-slate-600">{item.user} / {item.role}</p>
                 <p className="mt-2 text-xs font-semibold text-slate-700">{item.newValue || item.comments || 'Action logged'}</p>

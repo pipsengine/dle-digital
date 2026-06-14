@@ -1,5 +1,5 @@
-import TimeAndLogsManagementClient from './TimeAndLogsManagementClient';
+import { redirect } from 'next/navigation';
 
 export default function TimeAndLogsPage() {
-  return <TimeAndLogsManagementClient initialNow={new Date().toISOString()} />;
+  redirect('/hris/workforce-management/time-tracking');
 }

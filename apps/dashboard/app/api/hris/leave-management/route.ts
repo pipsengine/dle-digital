@@ -7,7 +7,7 @@ const jsonErr = (status: number, error: string) => NextResponse.json({ status: '
 export async function GET(request: NextRequest) {
   try {
     const role = request.headers.get('x-hris-role') || request.nextUrl.searchParams.get('role');
-    const section = request.nextUrl.searchParams.get('section') || 'leave-dashboard';
+    const section = request.nextUrl.searchParams.get('section') || 'dashboard';
     const payload = await readLeaveManagementPayload(section, role);
     if (request.nextUrl.searchParams.get('format') === 'csv') {
       const rows = payload.applications.map((item) => [
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     const role = request.headers.get('x-hris-role') || 'Leave Administrator';
     const body = await request.json().catch(() => ({}));
     const action = String(body.action || '') as LeaveActionId;
-    const section = String(body.section || 'leave-dashboard');
+    const section = String(body.section || 'dashboard');
     const payload = await readLeaveManagementPayload(section, role);
     const validation = validateLeaveAction(action, role, payload, body);
     if (!validation.ok) return jsonErr(validation.status, validation.message);

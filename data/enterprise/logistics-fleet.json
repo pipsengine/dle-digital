@@ -1,0 +1,229 @@
+{
+  "generatedAt": "2026-06-14T13:02:24.750Z",
+  "vehicles": [
+    {
+      "id": "veh-001",
+      "assetCode": "FLT-LAG-001",
+      "plateNumber": "LND-482-KJ",
+      "vehicleType": "Pickup",
+      "makeModel": "Toyota Hilux",
+      "year": 2022,
+      "department": "Operations",
+      "location": "Lagos HQ",
+      "custodian": "Operations Logistics",
+      "status": "Available",
+      "odometerKm": 68420,
+      "nextServiceKm": 70000,
+      "insuranceExpiry": "2026-08-21T08:00:00.000Z",
+      "roadWorthinessExpiry": "2026-07-26T08:00:00.000Z"
+    },
+    {
+      "id": "veh-002",
+      "assetCode": "FLT-YRD-014",
+      "plateNumber": "BDG-225-QA",
+      "vehicleType": "Flatbed Truck",
+      "makeModel": "MAN TGM",
+      "year": 2020,
+      "department": "Projects",
+      "location": "Nigerian Naval Dockyard",
+      "custodian": "Project Logistics",
+      "status": "Assigned",
+      "odometerKm": 142880,
+      "nextServiceKm": 145000,
+      "insuranceExpiry": "2026-07-02T08:00:00.000Z",
+      "roadWorthinessExpiry": "2026-06-22T08:00:00.000Z"
+    },
+    {
+      "id": "veh-003",
+      "assetCode": "FLT-MAR-006",
+      "plateNumber": "RIV-903-LA",
+      "vehicleType": "Bus",
+      "makeModel": "Toyota Coaster",
+      "year": 2019,
+      "department": "Marine Logistics",
+      "location": "Bonny",
+      "custodian": "Marine Base",
+      "status": "In Maintenance",
+      "odometerKm": 99010,
+      "nextServiceKm": 100000,
+      "insuranceExpiry": "2026-09-27T08:00:00.000Z",
+      "roadWorthinessExpiry": "2026-09-17T08:00:00.000Z"
+    }
+  ],
+  "drivers": [
+    {
+      "id": "drv-001",
+      "employeeCode": "D0142",
+      "fullName": "Musa Ibrahim",
+      "phone": "+234 801 000 0142",
+      "licenseNumber": "DL-LAG-77822",
+      "licenseExpiry": "2027-01-10T08:00:00.000Z",
+      "assignedVehicleId": "veh-001",
+      "status": "Available",
+      "safetyScore": 94
+    },
+    {
+      "id": "drv-002",
+      "employeeCode": "C2678",
+      "fullName": "Abayomi Isaac Adewunmi",
+      "phone": "+234 801 000 2678",
+      "licenseNumber": "DL-LAG-88109",
+      "licenseExpiry": "2026-07-18T08:00:00.000Z",
+      "assignedVehicleId": "veh-002",
+      "status": "On Trip",
+      "safetyScore": 88
+    },
+    {
+      "id": "drv-003",
+      "employeeCode": "P0146",
+      "fullName": "Amina Bello",
+      "phone": "+234 801 000 0146",
+      "licenseNumber": "DL-LAG-33174",
+      "licenseExpiry": "2027-07-19T08:00:00.000Z",
+      "assignedVehicleId": "",
+      "status": "Available",
+      "safetyScore": 91
+    }
+  ],
+  "trips": [
+    {
+      "id": "trp-001",
+      "requestNo": "TRP-2026-0001",
+      "vehicleId": "veh-002",
+      "driverId": "drv-002",
+      "requester": "Project Controls",
+      "origin": "Lagos HQ",
+      "destination": "Nigerian Naval Dockyard",
+      "purpose": "Material movement for welding campaign",
+      "startDate": "2026-06-13T08:00:00.000Z",
+      "endDate": "2026-06-15T08:00:00.000Z",
+      "projectCode": "PRJ-004",
+      "costCenter": "OPS-003",
+      "status": "Dispatched",
+      "approvedBy": "Fleet Manager"
+    },
+    {
+      "id": "trp-002",
+      "requestNo": "TRP-2026-0002",
+      "vehicleId": "veh-001",
+      "driverId": "drv-001",
+      "requester": "Human Capital",
+      "origin": "Lagos HQ",
+      "destination": "Training Centre",
+      "purpose": "Employee movement",
+      "startDate": "2026-06-16T08:00:00.000Z",
+      "endDate": "2026-06-16T08:00:00.000Z",
+      "projectCode": "ADMIN",
+      "costCenter": "HR-001",
+      "status": "Submitted"
+    }
+  ],
+  "maintenance": [
+    {
+      "id": "mnt-001",
+      "vehicleId": "veh-003",
+      "maintenanceType": "Preventive Service",
+      "vendor": "Certified Auto Care",
+      "scheduledDate": "2026-06-14T08:00:00.000Z",
+      "completedDate": "",
+      "cost": 285000,
+      "status": "Scheduled",
+      "notes": "Brake inspection and oil service."
+    },
+    {
+      "id": "mnt-002",
+      "vehicleId": "veh-002",
+      "maintenanceType": "Tyre Replacement",
+      "vendor": "Fleet Support Ltd",
+      "scheduledDate": "2026-06-18T08:00:00.000Z",
+      "cost": 420000,
+      "status": "Submitted",
+      "notes": "Two front tyres due for replacement."
+    }
+  ],
+  "fuel": [
+    {
+      "id": "ful-001",
+      "vehicleId": "veh-001",
+      "driverId": "drv-001",
+      "date": "2026-06-12T08:00:00.000Z",
+      "litres": 68,
+      "amount": 64600,
+      "odometerKm": 68420,
+      "station": "Mobil Ikoyi",
+      "projectCode": "ADMIN"
+    },
+    {
+      "id": "ful-002",
+      "vehicleId": "veh-002",
+      "driverId": "drv-002",
+      "date": "2026-06-13T08:00:00.000Z",
+      "litres": 120,
+      "amount": 114000,
+      "odometerKm": 142880,
+      "station": "Total Dockyard",
+      "projectCode": "PRJ-004"
+    }
+  ],
+  "compliance": [
+    {
+      "id": "cmp-001",
+      "vehicleId": "veh-001",
+      "documentType": "Insurance",
+      "reference": "INS-2026-001",
+      "issueDate": "2025-08-21T08:00:00.000Z",
+      "expiryDate": "2026-08-21T08:00:00.000Z",
+      "status": "Valid"
+    },
+    {
+      "id": "cmp-002",
+      "vehicleId": "veh-002",
+      "documentType": "Road Worthiness",
+      "reference": "RW-2026-014",
+      "issueDate": "2025-06-22T08:00:00.000Z",
+      "expiryDate": "2026-06-22T08:00:00.000Z",
+      "status": "Expiring Soon"
+    },
+    {
+      "id": "cmp-003",
+      "vehicleId": "veh-003",
+      "documentType": "Insurance",
+      "reference": "INS-2026-006",
+      "issueDate": "2025-09-27T08:00:00.000Z",
+      "expiryDate": "2026-09-27T08:00:00.000Z",
+      "status": "Valid"
+    }
+  ],
+  "requests": [
+    {
+      "id": "req-001",
+      "requestType": "Vehicle Request",
+      "requester": "Human Capital",
+      "department": "HR",
+      "details": "Vehicle for offsite employee engagement.",
+      "priority": "Normal",
+      "status": "Submitted",
+      "createdAt": "2026-06-13T08:00:00.000Z"
+    },
+    {
+      "id": "req-002",
+      "requestType": "Fuel Card Request",
+      "requester": "Marine Logistics",
+      "department": "Operations",
+      "details": "Fuel card limit review for Bonny route.",
+      "priority": "High",
+      "status": "Approved",
+      "createdAt": "2026-06-10T08:00:00.000Z"
+    }
+  ],
+  "auditTrail": [
+    {
+      "id": "aud-001",
+      "at": "2026-06-10T08:00:00.000Z",
+      "actor": "System",
+      "action": "Seeded module data",
+      "entity": "Logistics & Fleet",
+      "details": "Initial fleet register, trips, compliance, and fuel records created."
+    }
+  ]
+}

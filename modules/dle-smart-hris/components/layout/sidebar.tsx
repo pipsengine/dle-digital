@@ -43,10 +43,9 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
         <div className="flex flex-col gap-1">
           {items.map((item) => {
             const hasSubMenu = item.subItems && item.subItems.length > 0;
-            const isExpanded = expandedGroups[item.id];
-            
             // For simple paths, determine active state
             const isActivePrimary = currentPath === item.route || (item.subItems && item.subItems.some(sub => currentPath === sub.route));
+            const isExpanded = expandedGroups[item.id] ?? Boolean(isActivePrimary);
 
             return (
               <div key={item.id}>

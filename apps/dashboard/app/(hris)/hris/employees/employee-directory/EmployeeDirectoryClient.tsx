@@ -21,7 +21,6 @@ import {
   Download,
   Eye,
   Filter,
-  Fingerprint,
   FileText,
   Globe2,
   History,
@@ -35,7 +34,6 @@ import {
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   UserCheck,
   UserCog,
   Users,
@@ -656,7 +654,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [directoryLoading, setDirectoryLoading] = useState(true);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
-  const syncedStamp = useMemo(() => (syncedAt ? formatTimeUtc(syncedAt) : nowStamp), [nowStamp, syncedAt]);
 
   const loadEmployees = useCallback(async () => {
     setDirectoryLoading(true);
@@ -744,28 +741,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
     }
     return chips;
   }, [filters]);
-
-  const aiInsights = useMemo(
-    () => {
-      const missingManagers = employees.filter((e) => !e.hasManagerAssigned).length;
-      const missingEmergencyContacts = employees.filter((e) => !e.emergencyContactsComplete).length;
-      const contractExpiring = employees.filter((e) => {
-        if (!e.contractEndDate) return false;
-        const days = Math.ceil((new Date(e.contractEndDate).getTime() - nowMs) / (24 * 3600 * 1000));
-        return days >= 0 && days <= 14;
-      }).length;
-      const staleProfileFields = employees.filter((e) => !e.email || !e.phone || !e.dateJoined).length;
-
-      return [
-        { severity: contractExpiring > 0 ? ('high' as const) : ('low' as const), icon: AlertTriangle, title: `${formatNumber(contractExpiring)} contract employees expiring within 14 days`, confidence: 0.86, action: 'Open Contract Expiry Queue' },
-        { severity: missingManagers > 0 ? ('medium' as const) : ('low' as const), icon: CircleAlert, title: `${formatNumber(missingManagers)} employees without assigned managers`, confidence: 0.88, action: 'Assign Managers' },
-        { severity: missingEmergencyContacts > 0 ? ('medium' as const) : ('low' as const), icon: Phone, title: `${formatNumber(missingEmergencyContacts)} employees missing emergency contacts`, confidence: 0.84, action: 'Request Emergency Contacts' },
-        { severity: staleProfileFields > 0 ? ('medium' as const) : ('low' as const), icon: Fingerprint, title: `${formatNumber(staleProfileFields)} system records missing HR profile fields`, confidence: 0.9, action: 'Review HRIS Profile Fields' },
-        { severity: 'low' as const, icon: BarChart3, title: `${formatNumber(employees.length)} employees loaded from ${directorySource}`, confidence: 0.99, action: 'Review Headcount' },
-      ];
-    },
-    [directorySource, employees, nowMs]
-  );
 
   const suggestions = useMemo(() => {
     if (debouncedQuery.length < 2) return [];
@@ -1387,14 +1362,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       </button>
       <button
         type="button"
-        onClick={() => setFilterPanelOpen(true)}
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
-      >
-        <Sparkles className="w-4 h-4 text-violet-600" />
-        AI Insights
-      </button>
-      <button
-        type="button"
         onClick={loadEmployees}
         disabled={directoryLoading}
         className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold border border-slate-200 bg-white text-slate-700 transition-colors ${
@@ -1475,57 +1442,6 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
           {directoryWarning}
         </div>
       )}
-
-      <div className="mt-6 bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <span className="w-10 h-10 rounded-2xl bg-violet-600/10 border border-slate-200/60 flex items-center justify-center text-violet-700">
-              <Sparkles className="w-5 h-5" />
-            </span>
-            <div>
-              <div className="text-sm font-extrabold text-slate-900">AI Workforce Intelligence</div>
-              <div className="text-xs text-slate-500 font-semibold mt-0.5">Signal detection, anomaly alerts, and workflow-ready recommendations.</div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-600/10 text-emerald-700">Confidence: 0.86</span>
-            <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-slate-700/10 text-slate-700">Last scan: {syncedStamp}</span>
-          </div>
-        </div>
-
-        <div className="p-6 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-5 gap-4">
-          {aiInsights.map((ins) => {
-            const Icon = ins.icon;
-            const severity =
-              ins.severity === 'high'
-                ? { fg: 'text-red-700', bg: 'bg-red-600/10', border: 'border-red-200/70' }
-                : ins.severity === 'medium'
-                  ? { fg: 'text-amber-700', bg: 'bg-amber-600/10', border: 'border-amber-200/70' }
-                  : { fg: 'text-blue-700', bg: 'bg-blue-600/10', border: 'border-blue-200/70' };
-
-            return (
-              <div key={ins.title} className={`rounded-2xl border ${severity.border} bg-white p-4`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`w-10 h-10 rounded-2xl flex items-center justify-center ${severity.bg} ${severity.fg}`}>
-                      <Icon className="w-5 h-5" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 leading-snug">{ins.title}</div>
-                      <div className="text-xs text-slate-500 font-semibold mt-1">AI confidence: {Math.round(ins.confidence * 100)}%</div>
-                    </div>
-                  </div>
-                </div>
-                <button type="button" onClick={() => aiAction(ins.action)} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 transition-colors">
-                  <ChevronRight className="w-4 h-4" />
-                  {ins.action}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
       <div className="mt-6 mb-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
         <MetricCard

@@ -295,11 +295,18 @@ const resolveProjectManagerForSubmission = (lines: TimesheetLine[], projects: Pr
       hoursByProject.set(allocation.projectCode, (hoursByProject.get(allocation.projectCode) || 0) + allocation.hours);
     }
   }
+  const missingProjectManagers = [...hoursByProject.keys()].filter((projectCode) => {
+    const project = projects.find((item) => item.code.toLowerCase() === projectCode.toLowerCase());
+    return !project?.projectManager?.trim();
+  });
+  if (missingProjectManagers.length) {
+    throw new Error(`Project Manager is required before submission for: ${missingProjectManagers.join(', ')}.`);
+  }
   const primaryProjectCode = [...hoursByProject.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
   if (!primaryProjectCode) return null;
   const project = projects.find((item) => item.code.toLowerCase() === primaryProjectCode.toLowerCase());
-  if (!project?.projectManager?.trim()) {
-    throw new Error(`Project Manager is required for project ${primaryProjectCode} before this timesheet can be submitted.`);
+  if (!project) {
+    throw new Error(`Project ${primaryProjectCode} is not available in the project catalog.`);
   }
   return {
     projectCode: project.code,
