@@ -5,6 +5,7 @@ import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { isTimesheetPayrollReadyStatus, normalizePaidWorkHours, readTimesheetData, STANDARD_TIMESHEET_HOURS, type TimesheetHeader, type TimesheetLine } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
+import { calculatePayrollOvertime } from '@/lib/payroll-earnings-engine';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type DayType = 'Weekday' | 'Saturday' | 'Sunday' | 'Public Holiday';
@@ -107,13 +108,13 @@ const buildPayload = async (request: Request) => {
       if (!header || !employee) return null;
       const date = header.timesheetDate;
       const dayType = dayTypeFor(date, holidays);
-      const multiplier = dayType === 'Weekday' ? 1.5 : 2;
       const hoursPerDay = STANDARD_TIMESHEET_HOURS;
       const workedHours = Math.max(normalizePaidWorkHours(num(line.attendanceDuration)), normalizePaidWorkHours(num(line.totalHours)), normalizePaidWorkHours(num(line.usedHours) + num(line.idleHours)));
       const overtimeHours = Math.max(0, round2(normalizePaidWorkHours(num(line.totalHours)) - hoursPerDay));
       const payableHours = dayType === 'Weekday' ? overtimeHours : workedHours;
-      const hourlyRate = hourlyRateFor(employee, hoursPerDay);
-      const grossPay = payableHours * hourlyRate * multiplier;
+      const overtime = calculatePayrollOvertime(employee, dayType, payableHours);
+      const hourlyRate = overtime.hourlyRate || hourlyRateFor(employee, hoursPerDay);
+      const grossPay = overtime.amount || payableHours * hourlyRate * overtime.multiplier;
       const payrollReady = isTimesheetPayrollReadyStatus(header.status);
       const issues: string[] = [];
       if (!hourlyRate) issues.push('Hourly rate cannot be derived from payroll setup');
@@ -133,7 +134,12 @@ const buildPayload = async (request: Request) => {
         payCurrency: employee.payCurrency || 'NGN',
         date,
         dayType,
-        multiplier,
+        earningCode: overtime.code,
+        earningName: overtime.name,
+        earningProfile: overtime.earningProfileName,
+        multiplier: overtime.multiplier,
+        divisor: overtime.divisor,
+        basis: overtime.basis,
         timesheetStatus: header.status,
         payrollReady,
         standardHours: round2(hoursPerDay),
@@ -208,9 +214,9 @@ const buildPayload = async (request: Request) => {
     rule: {
       weekdayMultiplier: 1.5,
       saturdayMultiplier: 2,
-      sundayMultiplier: 2,
+      sundayMultiplier: 2.5,
       publicHolidayMultiplier: 2,
-      weekdayBasis: 'Hours above standard day',
+      weekdayBasis: 'Hours above standard day using Basic / 176',
       specialDayBasis: 'Hours worked for that day',
     },
     summary: {

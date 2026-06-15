@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { normalizePayrollMatchKey, readActiveSagePayrollEmployees } from '@/lib/sage-people-payroll-store';
 
 export type PayrollEmployeeSource = {
   employees: DleEmployeeDirectoryRow[];
@@ -57,6 +58,47 @@ const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string)
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+};
+
+const jsonValue = (raw: string | null | undefined, keys: string[]) => {
+  if (!raw) return '';
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const found = keys.map((key) => parsed[key]).find((value) => String(value || '').trim());
+    return String(found || '').trim();
+  } catch {
+    return '';
+  }
+};
+
+const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
+  try {
+    const sageEmployees = await withTimeout(readActiveSagePayrollEmployees(), Number(process.env.SAGE_PAYROLL_ENRICH_TIMEOUT_MS || 5000), 'Sage payroll enrichment timed out.');
+    const sageByKey = new Map(sageEmployees.flatMap((employee) => {
+      const keys = [employee.directoryEmployeeCode, employee.employeeCode, employee.employeeCodeDisplay].map(normalizePayrollMatchKey).filter(Boolean);
+      return keys.map((key) => [key, employee] as const);
+    }));
+    return employees.map((employee) => {
+      const sage = sageByKey.get(normalizePayrollMatchKey(employee.employeeCode)) || sageByKey.get(normalizePayrollMatchKey(employee.employeeId));
+      if (!sage) return employee;
+      const pensionProvider = jsonValue(sage.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName']);
+      const pensionPin = jsonValue(sage.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'RSAPIN', 'RsaPin']);
+      return {
+        ...employee,
+        bankName: employee.bankName || sage.bankName || '',
+        accountNo: employee.accountNo || sage.accountNo || '',
+        accountName: employee.accountName || sage.accountName || '',
+        pensionProvider: employee.pensionProvider || pensionProvider,
+        pensionPin: employee.pensionPin || pensionPin,
+        taxIdentificationNumber: employee.taxIdentificationNumber || sage.taxNo || '',
+        payCurrency: employee.payCurrency || sage.companyCurrency || 'NGN',
+        paymentRun: employee.paymentRun || sage.paymentRunLong || sage.paymentRunShort || '',
+        paymentType: employee.paymentType || sage.paymentType || '',
+      };
+    });
+  } catch {
+    return employees;
   }
 };
 
@@ -121,6 +163,12 @@ const emptyEmployee = (employeeId: string, fullName: string): DleEmployeeDirecto
   payCurrency: 'NGN',
   paymentRun: 'Monthly',
   paymentType: 'Bank Transfer',
+  bankName: '',
+  accountNo: '',
+  accountName: '',
+  pensionProvider: '',
+  pensionPin: '',
+  taxIdentificationNumber: '',
   periodSalary: null,
   annualSalary: null,
   ratePerHour: null,
@@ -175,7 +223,7 @@ const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
   try {
     const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
     if (employees?.length) {
-      return { employees, source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
+      return { employees: await enrichEmployeesFromSagePayroll(employees), source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
     }
   } catch {
     // Fall through to cache; payroll pages should stay operational while DB connectivity is restored.

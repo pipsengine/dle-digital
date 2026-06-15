@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig, type PayrollTaxVersion } from '@/lib/payroll-tax-engine';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
@@ -39,11 +40,7 @@ const periodLabel = (period: string) => {
 };
 
 const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxVersion) => {
-  const basePay = num(employee.periodSalary || (employee.annualSalary ? num(employee.annualSalary) / 12 : 0));
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  const allowances = basePay * allowanceRate;
-  const grossPay = basePay + allowances;
+  const earnings = calculatePayrollEarnings(employee);
   const tax = calculatePayrollTax(payrollInputFromEmployee(employee), taxVersion);
   const annualComponent = (id: string) => tax.statutoryItems.find((item) => item.id === id)?.amount || 0;
   const pension = annualComponent('pension') / 12;
@@ -54,9 +51,13 @@ const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxV
   const otherDeductions = annualComponent('other-statutory') / 12;
   const totalDeductions = pension + paye + nhf + loan + unionDues + otherDeductions;
   return {
-    basePay: roundMoney(basePay),
-    allowances: roundMoney(allowances),
-    grossPay: roundMoney(grossPay),
+    basePay: roundMoney(earnings.basePay),
+    allowances: roundMoney(earnings.allowances),
+    grossPay: roundMoney(earnings.grossPay),
+    taxablePay: roundMoney(earnings.taxablePay),
+    nonTaxablePay: roundMoney(earnings.nonTaxablePay),
+    earningProfile: earnings.profileName,
+    earningProfileId: earnings.profileId,
     pension: roundMoney(pension),
     paye: roundMoney(paye),
     nhf: roundMoney(nhf),
@@ -64,8 +65,8 @@ const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxV
     unionDues: roundMoney(unionDues),
     otherDeductions: roundMoney(otherDeductions),
     totalDeductions: roundMoney(totalDeductions),
-    netPay: roundMoney(Math.max(0, grossPay - totalDeductions)),
-    deductionRatio: grossPay > 0 ? round1((totalDeductions / grossPay) * 100) : 0,
+    netPay: roundMoney(Math.max(0, earnings.grossPay - totalDeductions)),
+    deductionRatio: earnings.grossPay > 0 ? round1((totalDeductions / earnings.grossPay) * 100) : 0,
   };
 };
 

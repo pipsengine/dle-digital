@@ -82,6 +82,12 @@ export type DleEmployeeDirectoryRow = {
   payCurrency: string;
   paymentRun: string;
   paymentType: string;
+  bankName?: string;
+  accountNo?: string;
+  accountName?: string;
+  pensionProvider?: string;
+  pensionPin?: string;
+  taxIdentificationNumber?: string;
   periodSalary: number | null;
   annualSalary: number | null;
   ratePerHour: number | null;
@@ -409,7 +415,7 @@ const employeeTypeCodeFromRawCode = (employeeCode: string) => {
 };
 
 const normalizeEmployeeCodeForType = (employeeCode: string, typeCode: string | null) => {
-  const raw = str(employeeCode).toUpperCase();
+  const raw = str(employeeCode).toUpperCase().replace(/_/g, '');
   if (!raw) return raw;
   if ((typeCode === 'N' || typeCode === 'I') && raw.startsWith(`P${typeCode}`)) return raw.slice(1);
   if (typeCode && !/^[PCLNI]/.test(raw)) return `${typeCode}${raw}`;
@@ -435,6 +441,36 @@ const sageEmployeeType = (employeeCode: string) => {
   if (employeeCode.startsWith('L')) return 'Lumpsum';
   if (employeeCode.startsWith('C')) return 'Daily Rate';
   return 'Permanent';
+};
+
+const monthlyGrossFromSagePayroll = (employee: SagePayrollEmployeeImportRow) => {
+  const periodSalary = numOrNull(employee.periodSalary) || 0;
+  if (periodSalary > 0) return periodSalary;
+  const annualSalary = numOrNull(employee.annualSalary) || 0;
+  return annualSalary > 0 ? annualSalary / 12 : null;
+};
+
+const annualGrossFromSagePayroll = (employee: SagePayrollEmployeeImportRow, monthlyGross: number | null) => {
+  const annualSalary = numOrNull(employee.annualSalary) || 0;
+  if (annualSalary > 0) return annualSalary;
+  return monthlyGross && monthlyGross > 0 ? monthlyGross * 12 : null;
+};
+
+const permanentBasicRate = (jobGrade: unknown, employeeType: string) => {
+  if (employeeType === 'Lumpsum') return 0.6;
+  const grade = str(jobGrade).toUpperCase();
+  if (/MGTCOLA|MGT COLA|MANAGEMENTCOLA|MANAGEMENT COLA/.test(grade)) return 0.4;
+  if (/^(SNM|SMGT|SENIOR MANAGEMENT)/.test(grade)) return 0.2;
+  if (/^(MGT|MGMT|MANAGEMENT)/.test(grade)) return 0.25;
+  if (/^(SS|SNR|SENIOR)/.test(grade)) return 0.416;
+  if (/^(JS|JNR|JR|JUNIOR)/.test(grade)) return 0.4;
+  return 1;
+};
+
+const migratedBasicSalaryFromGross = (employee: SagePayrollEmployeeImportRow, employeeType: string, monthlyGross: number | null) => {
+  if (!monthlyGross || monthlyGross <= 0) return null;
+  if (!['Permanent', 'Lumpsum'].includes(employeeType)) return monthlyGross;
+  return monthlyGross * permanentBasicRate(employee.jobGradeCode || employee.jobGrade, employeeType);
 };
 
 const sageStatus = (statusName: unknown, statusCode: unknown) => {
@@ -767,6 +803,12 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       payroll.pay_currency,
       payroll.payment_run,
       payroll.payment_type,
+      payroll.bank_name,
+      payroll.account_number,
+      payroll.account_name,
+      payroll.pension_provider,
+      payroll.pension_pin,
+      payroll.tax_identification_number,
       payroll.period_salary,
       payroll.annual_salary,
       payroll.rate_per_hour,
@@ -882,6 +924,12 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       payCurrency: str(row.pay_currency),
       paymentRun: str(row.payment_run),
       paymentType: str(row.payment_type),
+      bankName: str(row.bank_name),
+      accountNo: str(row.account_number),
+      accountName: str(row.account_name),
+      pensionProvider: str(row.pension_provider),
+      pensionPin: str(row.pension_pin),
+      taxIdentificationNumber: str(row.tax_identification_number),
       periodSalary: Number(row.period_salary || 0) || null,
       annualSalary: Number(row.annual_salary || 0) || null,
       ratePerHour: Number(row.rate_per_hour || 0) || null,
@@ -1139,6 +1187,9 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
     const sourceEmployeeId = String(employee.employeeId);
     const nationality = str(employee.nationality);
     const isExpatriate = Boolean(nationality && !isLocalNationality(nationality));
+    const monthlyGrossSalary = monthlyGrossFromSagePayroll(employee);
+    const annualGrossSalary = annualGrossFromSagePayroll(employee, monthlyGrossSalary);
+    const migratedBasicSalary = migratedBasicSalaryFromGross(employee, employeeType, monthlyGrossSalary);
     const rawPayloadJson = JSON.stringify({ ...employee, directoryEmployeeCode: employeeCode });
     const sourceFieldsJson = sourceFieldValuesJson(employee);
     const tx = new sql.Transaction(p);
@@ -1192,8 +1243,9 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         .input('bank_name', sql.NVarChar(150), str(employee.bankName) || null)
         .input('account_number', sql.NVarChar(50), str(employee.accountNo) || null)
         .input('account_name', sql.NVarChar(250), str(employee.accountName) || null)
-        .input('annual_salary', sql.Decimal(19, 4), numOrNull(employee.annualSalary))
-        .input('period_salary', sql.Decimal(19, 4), numOrNull(employee.periodSalary))
+        .input('annual_salary', sql.Decimal(19, 4), annualGrossSalary)
+        .input('period_salary', sql.Decimal(19, 4), monthlyGrossSalary)
+        .input('basic_salary', sql.Decimal(19, 4), migratedBasicSalary)
         .input('rate_per_hour', sql.Decimal(19, 4), numOrNull(employee.ratePerHour))
         .input('rate_per_day', sql.Decimal(19, 4), numOrNull(employee.ratePerDay))
         .input('hours_per_day', sql.Decimal(9, 4), numOrNull(employee.hoursPerDay))
@@ -1342,7 +1394,7 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         WHEN MATCHED THEN UPDATE SET
           payroll_group = @company_code,
           salary_grade = @job_grade,
-          basic_salary = @period_salary,
+          basic_salary = @basic_salary,
           pay_frequency = @payment_run,
           bank_name = @bank_name,
           account_number = @account_number,
@@ -1366,7 +1418,7 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
           period_salary, rate_per_hour, rate_per_day, hours_per_day, hours_per_period, setup_assigned_to_payroll
         )
         VALUES (
-          @employee_id, @company_code, @job_grade, @period_salary, @payment_run, @bank_name, @account_number, @account_name,
+          @employee_id, @company_code, @job_grade, @basic_salary, @payment_run, @bank_name, @account_number, @account_name,
           @tax_no, @company_currency, @payment_type, @payment_run, @remuneration_definition, @annual_salary,
           @period_salary, @rate_per_hour, @rate_per_day, @hours_per_day, @hours_per_period, 1
         );
@@ -1617,6 +1669,88 @@ export const updateEmployeeDailyRatePayInDb = async (input: {
       ) VALUES (
         @employee_id, @payroll_group, @salary_grade, @pay_currency, @payment_run, @payment_type,
         @period_salary, @rate_per_day, @rate_per_hour, @hours_per_day, @hours_per_period, 1
+      );
+    `);
+  return true;
+};
+
+export type PayrollIdentityMigrationInput = {
+  employeeDbId: number;
+  payrollGroup?: string | null;
+  salaryGrade?: string | null;
+  payCurrency?: string | null;
+  paymentRun?: string | null;
+  paymentType?: string | null;
+  periodSalary?: number | null;
+  annualSalary?: number | null;
+  ratePerDay?: number | null;
+  ratePerHour?: number | null;
+  hoursPerDay?: number | null;
+  hoursPerPeriod?: number | null;
+  bankName?: string | null;
+  accountNo?: string | null;
+  accountName?: string | null;
+  pensionProvider?: string | null;
+  pensionPin?: string | null;
+  taxIdentificationNumber?: string | null;
+};
+
+export const upsertEmployeePayrollIdentityFromSageInDb = async (input: PayrollIdentityMigrationInput) => {
+  const p = await pool();
+  if (!p) return false;
+  await p.request()
+    .input('employee_id', sql.BigInt, input.employeeDbId)
+    .input('payroll_group', sql.NVarChar(100), nullable(input.payrollGroup))
+    .input('salary_grade', sql.NVarChar(80), nullable(input.salaryGrade))
+    .input('pay_currency', sql.NVarChar(10), nullable(input.payCurrency || 'NGN'))
+    .input('payment_run', sql.NVarChar(80), nullable(input.paymentRun))
+    .input('payment_type', sql.NVarChar(80), nullable(input.paymentType))
+    .input('period_salary', sql.Decimal(19, 4), numOrNull(input.periodSalary))
+    .input('annual_salary', sql.Decimal(19, 4), numOrNull(input.annualSalary))
+    .input('rate_per_day', sql.Decimal(19, 4), numOrNull(input.ratePerDay))
+    .input('rate_per_hour', sql.Decimal(19, 4), numOrNull(input.ratePerHour))
+    .input('hours_per_day', sql.Decimal(9, 4), numOrNull(input.hoursPerDay))
+    .input('hours_per_period', sql.Decimal(9, 4), numOrNull(input.hoursPerPeriod))
+    .input('bank_name', sql.NVarChar(150), nullable(input.bankName))
+    .input('account_number', sql.NVarChar(50), nullable(input.accountNo))
+    .input('account_name', sql.NVarChar(250), nullable(input.accountName))
+    .input('pension_provider', sql.NVarChar(150), nullable(input.pensionProvider))
+    .input('pension_pin', sql.NVarChar(80), nullable(input.pensionPin))
+    .input('tax_identification_number', sql.NVarChar(80), nullable(input.taxIdentificationNumber))
+    .query(`
+      MERGE [hris].[EmployeePayrollSetup] AS target
+      USING (SELECT @employee_id AS employee_id) AS source
+      ON target.employee_id = source.employee_id
+      WHEN MATCHED THEN UPDATE SET
+        payroll_group = COALESCE(@payroll_group, target.payroll_group),
+        salary_grade = COALESCE(@salary_grade, target.salary_grade),
+        pay_currency = COALESCE(@pay_currency, target.pay_currency),
+        payment_run = COALESCE(@payment_run, target.payment_run),
+        payment_type = COALESCE(@payment_type, target.payment_type),
+        period_salary = COALESCE(@period_salary, target.period_salary),
+        annual_salary = COALESCE(@annual_salary, target.annual_salary),
+        rate_per_day = COALESCE(@rate_per_day, target.rate_per_day),
+        rate_per_hour = COALESCE(@rate_per_hour, target.rate_per_hour),
+        hours_per_day = COALESCE(@hours_per_day, target.hours_per_day),
+        hours_per_period = COALESCE(@hours_per_period, target.hours_per_period),
+        bank_name = COALESCE(@bank_name, target.bank_name),
+        account_number = COALESCE(@account_number, target.account_number),
+        account_name = COALESCE(@account_name, target.account_name),
+        pension_provider = COALESCE(@pension_provider, target.pension_provider),
+        pension_pin = COALESCE(@pension_pin, target.pension_pin),
+        tax_identification_number = COALESCE(@tax_identification_number, target.tax_identification_number),
+        setup_assigned_to_payroll = 1,
+        modified_at = SYSUTCDATETIME()
+      WHEN NOT MATCHED THEN INSERT (
+        employee_id, payroll_group, salary_grade, pay_currency, payment_run, payment_type,
+        period_salary, annual_salary, rate_per_day, rate_per_hour, hours_per_day, hours_per_period,
+        bank_name, account_number, account_name, pension_provider, pension_pin, tax_identification_number,
+        setup_assigned_to_payroll
+      ) VALUES (
+        @employee_id, @payroll_group, @salary_grade, @pay_currency, @payment_run, @payment_type,
+        @period_salary, @annual_salary, @rate_per_day, @rate_per_hour, @hours_per_day, @hours_per_period,
+        @bank_name, @account_number, @account_name, @pension_provider, @pension_pin, @tax_identification_number,
+        1
       );
     `);
   return true;

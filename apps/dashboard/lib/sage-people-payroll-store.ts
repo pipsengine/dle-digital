@@ -145,16 +145,77 @@ activeEmployeeCodes AS (
     AND ISNULL(es.Code, 'A') = 'A'
     AND ge.Status = 'A'
     AND c.Status = 'A'
+),
+activeContractEmployees AS (
+  SELECT e.EmployeeID, e.EmployeeCode
+  FROM Employee.Employee e
+  JOIN Entity.GenEntity ge
+    ON ge.GenEntityID = e.GenEntityID
+  JOIN Company.Company c
+    ON c.CompanyID = e.CompanyID
+  LEFT JOIN Employee.EmployeeStatus es
+    ON es.EmployeeStatusID = e.EmployeeStatusID
+  WHERE
+    UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%'
+    AND e.TerminationDate IS NULL
+    AND ISNULL(es.Code, 'A') = 'A'
+    AND ge.Status = 'A'
+    AND c.Status = 'A'
+),
+contractWeekdayRates AS (
+  SELECT
+    ce.EmployeeID,
+    epp.EmployeePayPeriodID,
+    edef.DefCode,
+    MAX(CASE WHEN peu.EmployeeRate > 0 THEN peu.EmployeeRate ELSE NULL END) AS EmployeeRate
+  FROM activeContractEmployees ce
+  JOIN Employee.EmployeePayPeriod epp
+    ON epp.EmployeeID = ce.EmployeeID
+  JOIN Payroll.Payslip p
+    ON p.EmployeePayPeriodID = epp.EmployeePayPeriodID
+  JOIN Payroll.PayslipEarnLine pel
+    ON pel.PayslipID = p.PayslipID
+  JOIN Payroll.EarningDef edef
+    ON edef.EarningDefID = pel.DefID
+  JOIN Payroll.PayslipEarnUnit peu
+    ON peu.PayslipEarnLineID = pel.PayslipEarnLineID
+  WHERE
+    edef.DefCode IN ('JCWEEKDAY', 'JCWEEKDAY_NT')
+    AND ISNULL(peu.EmployeeRate, 0) > 0
+  GROUP BY ce.EmployeeID, epp.EmployeePayPeriodID, edef.DefCode
+),
+contractRatePeriods AS (
+  SELECT
+    EmployeeID,
+    EmployeePayPeriodID,
+    ROW_NUMBER() OVER (PARTITION BY EmployeeID ORDER BY EmployeePayPeriodID DESC) AS rn
+  FROM (
+    SELECT DISTINCT EmployeeID, EmployeePayPeriodID
+    FROM contractWeekdayRates
+  ) periods
+),
+contractDailyRates AS (
+  SELECT
+    wr.EmployeeID,
+    SUM(wr.EmployeeRate) AS ratePerDay
+  FROM contractWeekdayRates wr
+  JOIN contractRatePeriods rp
+    ON rp.EmployeeID = wr.EmployeeID
+    AND rp.EmployeePayPeriodID = wr.EmployeePayPeriodID
+    AND rp.rn = 1
+  GROUP BY wr.EmployeeID
 )
 SELECT
   e.EmployeeID AS employeeId,
   e.EmployeeCode AS employeeCode,
   CASE
     WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'L%'
-      THEN LTRIM(RTRIM(e.EmployeeCode))
+      THEN REPLACE(LTRIM(RTRIM(e.EmployeeCode)), '_', '')
     WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'P%'
-      THEN LTRIM(RTRIM(e.EmployeeCode))
-    ELSE CONCAT('P', LTRIM(RTRIM(e.EmployeeCode)))
+      THEN REPLACE(LTRIM(RTRIM(e.EmployeeCode)), '_', '')
+    WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'IT%' OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'I%' OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'N%' OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'NYSC%'
+      THEN REPLACE(LTRIM(RTRIM(e.EmployeeCode)), '_', '')
+    ELSE CONCAT('P', REPLACE(LTRIM(RTRIM(e.EmployeeCode)), '_', ''))
   END AS directoryEmployeeCode,
   ed.EmployeeCodeDisplay AS employeeCodeDisplay,
   ge.EntityCode AS entityCode,
@@ -242,9 +303,9 @@ SELECT
   ed.AccountName AS accountName,
   ed.AccountTypeID AS accountTypeId,
   ed.AnnualSalary AS annualSalary,
-  ed.PeriodSalary AS periodSalary,
-  ed.RatePerHour AS ratePerHour,
-  ed.RatePerDay AS ratePerDay,
+  COALESCE(NULLIF(ed.PeriodSalary, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' THEN cdr.ratePerDay ELSE NULL END) AS periodSalary,
+  COALESCE(NULLIF(ed.RatePerHour, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' AND cdr.ratePerDay > 0 THEN cdr.ratePerDay / 8.0 ELSE NULL END) AS ratePerHour,
+  COALESCE(NULLIF(ed.RatePerDay, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' THEN cdr.ratePerDay ELSE NULL END) AS ratePerDay,
   ed.HoursPerDay AS hoursPerDay,
   ed.HoursPerPeriod AS hoursPerPeriod,
   ed.WorkMonday AS workMonday,
@@ -289,12 +350,32 @@ LEFT JOIN Entity.GenEntity reverseMgrGe
 LEFT JOIN latestContract lc
   ON lc.EmployeeID = e.EmployeeID
   AND lc.rn = 1
+LEFT JOIN contractDailyRates cdr
+  ON cdr.EmployeeID = e.EmployeeID
 WHERE
   ge.Status = 'A'
   AND c.Status = 'A'
   AND (
     (e.TerminationDate IS NULL AND ISNULL(es.Code, 'A') = 'A')
     OR UPPER(REPLACE(LTRIM(RTRIM(e.EmployeeCode)), '_', '')) IN (SELECT normalizedEmployeeCode FROM activeEmployeeCodes)
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM Employee.Employee e2
+    JOIN Entity.GenEntity ge2
+      ON ge2.GenEntityID = e2.GenEntityID
+    JOIN Company.Company c2
+      ON c2.CompanyID = e2.CompanyID
+    LEFT JOIN Employee.EmployeeStatus es2
+      ON es2.EmployeeStatusID = e2.EmployeeStatusID
+    WHERE
+      e.EmployeeCode LIKE '%[_]%'
+      AND e2.EmployeeCode NOT LIKE '%[_]%'
+      AND UPPER(REPLACE(LTRIM(RTRIM(e2.EmployeeCode)), '_', '')) = UPPER(REPLACE(LTRIM(RTRIM(e.EmployeeCode)), '_', ''))
+      AND e2.TerminationDate IS NULL
+      AND ISNULL(es2.Code, 'A') = 'A'
+      AND ge2.Status = 'A'
+      AND c2.Status = 'A'
   )
 ORDER BY e.EmployeeCode;
 `;

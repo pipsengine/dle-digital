@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { pensionablePayrollInputFromEmployee, resolvePayrollEarningProfile, type PayrollEarningsOptions } from '@/lib/payroll-earnings-engine';
 
 export type PensionStatus = 'Draft' | 'Active' | 'Retired';
 export type PensionRules = {
@@ -75,17 +76,19 @@ export const activePensionVersion = (config: PensionConfig, asOf = new Date().to
   );
 };
 
-export const pensionInputFromEmployee = (employee: DleEmployeeDirectoryRow): PensionInput => {
-  const monthlyBasePay = Number(employee.periodSalary || (employee.annualSalary ? Number(employee.annualSalary) / 12 : 0) || 0);
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  return { employee, monthlyBasePay, monthlyAllowances: monthlyBasePay * allowanceRate };
+export const pensionInputFromEmployee = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions): PensionInput => {
+  const earnings = pensionablePayrollInputFromEmployee(employee, options);
+  return { employee, monthlyBasePay: earnings.monthlyBasePay, monthlyAllowances: earnings.monthlyAllowances };
 };
 
 export const calculatePension = (input: PensionInput, version: PensionVersion) => {
   const type = compact(input.employee.employmentType || input.employee.staffCategory || input.employee.employeeCategory);
   const typeLower = type.toLowerCase();
-  const eligible = version.rules.eligibleEmploymentTypes.some((item) => typeLower.includes(item.toLowerCase())) && !version.rules.excludedEmploymentTypes.some((item) => typeLower.includes(item.toLowerCase()));
+  const profileId = resolvePayrollEarningProfile(input.employee);
+  const eligible =
+    !String(profileId).startsWith('contract-') &&
+    version.rules.eligibleEmploymentTypes.some((item) => typeLower.includes(item.toLowerCase())) &&
+    !version.rules.excludedEmploymentTypes.some((item) => typeLower.includes(item.toLowerCase()));
   const pensionableEmolument = roundMoney(Math.max(0, Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0)));
   const employeeContribution = eligible ? roundMoney(pensionableEmolument * Number(version.rules.employeeRate || 0)) : 0;
   const employerContribution = eligible ? roundMoney(pensionableEmolument * Number(version.rules.employerRate || 0)) : 0;

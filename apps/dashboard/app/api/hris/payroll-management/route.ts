@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { calculatePayrollEarnings, sageOpeningPayslipReconciliation } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig, type PayrollTaxVersion } from '@/lib/payroll-tax-engine';
+import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig, type PensionVersion } from '@/lib/payroll-pension-engine';
 
 type Role =
   | 'Super Admin'
@@ -61,6 +63,7 @@ const jsonErr = (status: number, error: string) => NextResponse.json({ status: '
 const nowIso = () => new Date().toISOString();
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
+const PAYROLL_SETUP_PREVIEW_PERIOD = '2026-06';
 
 const getRole = (request: Request): Role => {
   const value = request.headers.get('x-hris-role');
@@ -108,20 +111,42 @@ const periodLabel = (period: string) => {
   return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 };
 
-const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxVersion) => {
-  const basePay = Number(employee.periodSalary || (employee.annualSalary ? employee.annualSalary / 12 : 0) || 0);
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  const allowance = basePay * allowanceRate;
-  const tax = calculatePayrollTax(payrollInputFromEmployee(employee), taxVersion);
-  const pension = (tax.statutoryItems.find((item) => item.id === 'pension')?.amount || 0) / 12;
-  const paye = tax.monthlyPaye;
-  const otherDeductions = (tax.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12;
-  const grossPay = basePay + allowance;
+const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxVersion, pensionVersion: PensionVersion) => {
+  const earnings = calculatePayrollEarnings(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true });
+  const tax = calculatePayrollTax(payrollInputFromEmployee(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true }), taxVersion);
+  const sageReconciliation = sageOpeningPayslipReconciliation(employee, PAYROLL_SETUP_PREVIEW_PERIOD);
+  const pension = sageReconciliation?.pensionEmployee ?? calculatePension(pensionInputFromEmployee(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true }), pensionVersion).employeeContribution;
+  const paye = sageReconciliation?.paye ?? tax.monthlyPaye;
+  const otherDeductions = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12;
+  const grossPay = earnings.grossPay;
   const deductions = pension + paye + otherDeductions;
   return {
-    basePay: roundMoney(basePay),
-    allowances: roundMoney(allowance),
+    basePay: roundMoney(earnings.basePay),
+    allowances: roundMoney(earnings.allowances),
+    taxablePay: roundMoney(earnings.taxablePay),
+    nonTaxablePay: roundMoney(earnings.nonTaxablePay),
+    earningProfile: earnings.profileName,
+    earningProfileId: earnings.profileId,
+    earningLines: earnings.earningLines.map((line) => ({
+      code: line.code,
+      name: line.name,
+      taxable: line.taxable,
+      percentOfGross: line.percentOfGross,
+      calculation: line.calculation || (line.percentOfGross ? `${Math.round(line.percentOfGross * 10000) / 100}% of gross` : 'Formula-based earning'),
+      runFrequency: line.runFrequency || 'monthly',
+      includeInMonthlyPayroll: line.includeInMonthlyPayroll !== false,
+      amount: roundMoney(line.amount),
+    })),
+    annualBenefitLines: earnings.annualBenefitLines.map((line) => ({
+      code: line.code,
+      name: line.name,
+      taxable: line.taxable,
+      percentOfGross: line.percentOfGross,
+      calculation: line.calculation || 'Paid once yearly',
+      runFrequency: line.runFrequency || 'leave-period',
+      includeInMonthlyPayroll: false,
+      amount: roundMoney(line.amount),
+    })),
     pension: roundMoney(pension),
     paye: roundMoney(paye),
     otherDeductions: roundMoney(otherDeductions),
@@ -143,9 +168,9 @@ const riskFor = (employee: DleEmployeeDirectoryRow, cost: ReturnType<typeof empl
   return { issues, severity };
 };
 
-const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollTaxVersion) =>
+const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollTaxVersion, pensionVersion: PensionVersion) =>
   employees.map((employee) => {
-    const cost = employeeCost(employee, taxVersion);
+    const cost = employeeCost(employee, taxVersion, pensionVersion);
     const risk = riskFor(employee, cost);
     const payrollStatus = risk.issues.length === 0 ? 'Ready' : risk.severity === 'High' ? 'Blocked' : 'Review';
     return {
@@ -179,6 +204,10 @@ const maskMoney = (record: any) => ({
   pension: null,
   paye: null,
   otherDeductions: null,
+  taxablePay: null,
+  nonTaxablePay: null,
+  earningLines: record.earningLines.map((line: any) => ({ ...line, amount: null })),
+  annualBenefitLines: record.annualBenefitLines.map((line: any) => ({ ...line, amount: null })),
   grossPay: null,
   deductions: null,
   netPay: null,
@@ -211,11 +240,12 @@ const grouped = (records: any[], key: string) =>
 const buildPayload = async (request: Request) => {
   const role = getRole(request);
   const perms = permissions(role);
-  const [employeeSource, taxConfig] = await Promise.all([readPayrollEmployees(), readPayrollTaxConfig()]);
+  const [employeeSource, taxConfig, pensionConfig] = await Promise.all([readPayrollEmployees(), readPayrollTaxConfig(), readPayrollPensionConfig()]);
   const employeeRows = employeeSource.employees;
   const taxVersion = activeTaxVersion(taxConfig);
-  if (!taxVersion) throw new Error('No active payroll tax configuration is available.');
-  const records = buildRecords(employeeRows, taxVersion);
+  const pensionVersion = activePensionVersion(pensionConfig);
+  if (!taxVersion || !pensionVersion) throw new Error('No active payroll tax or pension configuration is available.');
+  const records = buildRecords(employeeRows, taxVersion, pensionVersion);
   const eligible = records.filter((record) => !['Terminated', 'Resigned', 'Retired', 'Inactive'].includes(record.employmentStatus));
   const ready = records.filter((record) => record.payrollStatus === 'Ready');
   const blocked = records.filter((record) => record.payrollStatus === 'Blocked');
@@ -230,7 +260,7 @@ const buildPayload = async (request: Request) => {
     }),
     { grossPay: 0, deductions: 0, netPay: 0, basePay: 0, allowances: 0 }
   );
-  const period = monthPeriod();
+  const period = PAYROLL_SETUP_PREVIEW_PERIOD;
   if (runStore.size === 0) {
     const run: PayrollRun = {
       id: `payroll-${period}`,

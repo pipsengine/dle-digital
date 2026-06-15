@@ -215,6 +215,7 @@ const sections: SectionConfig[] = [
       { id: 'salary-structure', label: 'Salary Structure', description: 'Grade bands, compa-ratio, distribution, health monitoring, exceptions, and compensation governance.', legacyHref: '/hris/payroll/salary-structure', items: ['Salary grades and bands', 'Minimum, midpoint, and maximum salary ranges', 'Compa-ratio analysis', 'Payroll distribution analysis', 'Grade health monitoring', 'Salary exception management', 'Compensation governance'] },
       { id: 'salary-grades', label: 'Salary Grades', description: 'Grade hierarchy and eligibility controls with effective-dated maintenance.', items: ['Grade creation and maintenance', 'Grade hierarchy', 'Grade-to-position mapping', 'Grade eligibility rules', 'Effective date management'] },
       { id: 'employee-salary-setup', label: 'Employee Salary Setup', description: 'Employee compensation profiles, payroll eligibility, and cost center assignment.', legacyHref: '/hris/payroll/employee-salary-setup', items: ['Basic salary assignment', 'Salary structure assignment', 'Employee compensation profile', 'Payroll eligibility configuration', 'Cost center assignment'] },
+      { id: 'sage-migration-review', label: 'Sage Migration Review', description: 'Detailed Sage 300 gross salary reconciliation for permanent and lump-sum payroll migration.', legacyHref: '/hris/payroll/sage-migration-review', items: ['Permanent employee gross salary migration', 'Lump-sum gross salary migration', 'Sage versus HRIS variance review', 'Earning profile mapping', 'Migration exceptions and missing gross controls'] },
       { id: 'compensation-planning', label: 'Compensation Planning', description: 'Salary review exercises, simulations, budget impact, and market comparison.', items: ['Salary review exercises', 'Annual increment planning', 'Compensation simulations', 'Budget impact analysis', 'Market comparison analysis'] },
     ],
   },
@@ -657,6 +658,183 @@ function FeaturePanel({ tab, section, payload, canViewMoney }: { tab: TabConfig;
   );
 }
 
+function SalaryManagementWorkspace({ activeTab, payload, canViewMoney }: { activeTab: TabConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
+  const records = payload?.records || [];
+  const gradeMap = new Map<string, { employees: number; grossPay: number; netPay: number; exceptions: number }>();
+  records.forEach((record) => {
+    const grade = record.salaryGrade || 'Unassigned';
+    const current = gradeMap.get(grade) || { employees: 0, grossPay: 0, netPay: 0, exceptions: 0 };
+    current.employees += 1;
+    current.grossPay += record.grossPay || 0;
+    current.netPay += record.netPay || 0;
+    current.exceptions += record.exceptionCount || 0;
+    gradeMap.set(grade, current);
+  });
+  const gradeRows = Array.from(gradeMap.entries())
+    .map(([grade, values]) => ({ grade, ...values }))
+    .sort((a, b) => b.employees - a.employees)
+    .slice(0, 10);
+  const missingSalaryRows = records.filter((record) => !record.grossPay || record.exceptions.some((item) => item.toLowerCase().includes('salary'))).slice(0, 6);
+  const permanentCount = records.filter((record) => /permanent/i.test(`${record.employmentType} ${record.payrollGroup}`)).length;
+  const lumpSumCount = records.filter((record) => /lump|gross/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`)).length;
+  const dailyRateCount = records.filter((record) => /daily|day/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`)).length;
+  const salaryWorkspaces = [
+    {
+      title: 'Salary Structure',
+      detail: 'Grades, bands, midpoint, compa-ratio, distribution, and structure exceptions.',
+      href: '/hris/payroll/salary-structure',
+      tone: 'blue' as Tone,
+      icon: GitBranch,
+      value: number(gradeRows.length),
+      label: 'active grade groups',
+    },
+    {
+      title: 'Employee Salary Setup',
+      detail: 'Employee gross pay, basic pay, payroll group, salary grade, and eligibility setup.',
+      href: '/hris/payroll/employee-salary-setup',
+      tone: 'green' as Tone,
+      icon: Users,
+      value: number(payload?.summary.payrollEligible),
+      label: 'payroll eligible',
+    },
+    {
+      title: 'Sage Migration Review',
+      detail: 'Permanent and lump-sum gross salary reconciliation from Sage 300 into HRIS.',
+      href: '/hris/payroll/sage-migration-review',
+      tone: 'violet' as Tone,
+      icon: DatabaseZap,
+      value: number(permanentCount + lumpSumCount),
+      label: 'migration records',
+    },
+  ];
+  const profileRows = [
+    { label: 'Permanent Staff', employees: permanentCount, detail: 'Monthly gross salary and permanent earning profile', tone: 'blue' as Tone },
+    { label: 'Lump-Sum Staff', employees: lumpSumCount, detail: 'Monthly gross split into taxable and non-taxable lump-sum earnings', tone: 'violet' as Tone },
+    { label: 'Daily-Rate Staff', employees: dailyRateCount, detail: 'Day-rate payroll driven by attendance and approved days worked', tone: 'amber' as Tone },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h3 className="text-lg font-black text-slate-950">Salary Management Control Desk</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Maintain salary structures, reconcile Sage gross salaries, map employees to payroll profiles, and clear salary setup exceptions before payroll processing.</p>
+          </div>
+          {activeTab.legacyHref ? (
+            <Link href={activeTab.legacyHref} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">
+              Open {activeTab.label} <ChevronRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <InfoTile label="Salary Records" value={number(records.length)} detail={`${number(payload?.summary.payrollEligible)} payroll eligible`} tone="blue" />
+          <InfoTile label="Gross Payroll" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.basePay, canViewMoney)} basic/base pay`} tone="green" />
+          <InfoTile label="Setup Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked records`} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        {salaryWorkspaces.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link key={item.title} href={item.href} className={`block rounded-lg border p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[item.tone].card}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{item.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{item.detail}</p>
+                </div>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneStyles[item.tone].icon}`}>
+                  <Icon className="h-5 w-5" />
+                </span>
+              </div>
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-2xl font-black text-slate-950">{item.value}</p>
+                  <p className="text-xs font-bold text-slate-600">{item.label}</p>
+                </div>
+                <span className="inline-flex items-center gap-1 text-xs font-black text-slate-700">Open <ChevronRight className="h-4 w-4" /></span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-sm font-black text-slate-950">Salary Structure Register</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Current employee distribution by salary grade and payroll value.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[760px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase tracking-normal text-slate-500">
+                <tr>{['Grade', 'Employees', 'Gross', 'Net', 'Exceptions', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {gradeRows.map((row) => (
+                  <tr key={row.grade} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-sm font-black text-slate-950">{row.grade}</td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">{number(row.employees)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(row.grossPay, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(row.netPay, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">{number(row.exceptions)}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${row.exceptions ? toneStyles.red.chip : toneStyles.green.chip}`}>{row.exceptions ? 'Review' : 'Ready'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Employee Pay Profiles</h3>
+          <div className="mt-3 space-y-3">
+            {profileRows.map((row) => (
+              <div key={row.label} className={`rounded-lg border p-3 ${toneStyles[row.tone].card}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-950">{row.label}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-600">{row.detail}</p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-black ${toneStyles[row.tone].chip}`}>{number(row.employees)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase text-slate-500">Active Tab</p>
+            <p className="mt-1 text-sm font-black text-slate-950">{activeTab.label}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{activeTab.description}</p>
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Salary Setup Exceptions</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Records requiring salary, grade, payroll group, or migration review before payroll run.</p>
+            </div>
+            <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${missingSalaryRows.length ? toneStyles.red.chip : toneStyles.green.chip}`}>{number(missingSalaryRows.length)} visible</span>
+          </div>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {missingSalaryRows.length ? missingSalaryRows.map((record) => (
+            <div key={record.employeeId} className="grid grid-cols-1 gap-3 p-4 md:grid-cols-[1.2fr_0.8fr_0.8fr_1.2fr]">
+              <div><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</p></div>
+              <div><p className="text-xs font-black uppercase text-slate-500">Grade</p><p className="text-sm font-bold text-slate-800">{record.salaryGrade || 'Unassigned'}</p></div>
+              <div><p className="text-xs font-black uppercase text-slate-500">Gross</p><p className="text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</p></div>
+              <div><p className="text-xs font-black uppercase text-slate-500">Exception</p><p className="text-sm font-semibold text-slate-700">{record.exceptions[0] || 'Salary setup requires review'}</p></div>
+            </div>
+          )) : <div className="p-4 text-sm font-bold text-emerald-700">No salary setup exceptions are visible for this period.</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function PayrollManagementClient({ initialNow, initialSection = 'dashboard' }: { initialNow: string; initialSection?: string }) {
   const [sectionId, setSectionId] = useState<SectionId>(sectionById(initialSection).id);
   const [activeTabs, setActiveTabs] = useState<Record<string, string>>({});
@@ -770,8 +948,8 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
               <WalletCards className="h-6 w-6" />
             </span>
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-950">Payroll Management</h1>
-              <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Modern enterprise payroll with page-and-tab architecture for payroll operations, compliance, finance integration, Sage readiness, and reporting.</p>
+              <h1 className="text-2xl font-black tracking-tight text-slate-950">{section.id === 'dashboard' ? 'Payroll Management' : section.title}</h1>
+              <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">{section.id === 'dashboard' ? 'Modern enterprise payroll with page-and-tab architecture for payroll operations, compliance, finance integration, Sage readiness, and reporting.' : section.description}</p>
             </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -837,14 +1015,16 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             </div>
           </section>
 
-          <PayrollCommandBar
-            section={section}
-            activeTab={activeTab}
-            role={role}
-            payload={payload}
-            busyAction={busyAction}
-            onAction={triggerAction}
-          />
+          {section.id !== 'salary-management' ? (
+            <PayrollCommandBar
+              section={section}
+              activeTab={activeTab}
+              role={role}
+              payload={payload}
+              busyAction={busyAction}
+              onAction={triggerAction}
+            />
+          ) : null}
 
           <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white p-2">
             <div className="flex min-w-max gap-1">
@@ -859,6 +1039,8 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
           <div className="mt-4">
             {section.id === 'dashboard' ? (
               <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} />
+            ) : section.id === 'salary-management' ? (
+              <SalaryManagementWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
             ) : section.id === 'payroll-processing' && activeTab.id === 'payroll-period-management' ? (
               <PayrollPeriodManagementPanel payload={payload} activeTabId={periodTab} setActiveTabId={setPeriodTab} />
             ) : (

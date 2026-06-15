@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BadgeCheck, Banknote, CheckCircle2, Download, RefreshCcw, Search, Settings2, ShieldCheck, UserCog, Users, X } from 'lucide-react';
+import { AlertTriangle, BadgeCheck, Banknote, CheckCircle2, Download, ListTree, RefreshCcw, Search, Settings2, ShieldCheck, UserCog, Users, X } from 'lucide-react';
 
 type Role = 'Payroll Officer' | 'Finance Controller' | 'HR Director' | 'HR Manager' | 'Executive Management' | 'Auditor' | 'Employee';
 type Tone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
@@ -25,8 +25,14 @@ type PayrollRecord = {
   riskSeverity: 'Low' | 'Medium' | 'High';
   exceptionCount: number;
   exceptions: string[];
+  earningProfile: string;
+  earningProfileId: string;
   basePay: number | null;
   allowances: number | null;
+  taxablePay: number | null;
+  nonTaxablePay: number | null;
+  earningLines: Array<{ code: string; name: string; taxable: boolean; percentOfGross: number; calculation?: string; runFrequency?: string; includeInMonthlyPayroll?: boolean; amount: number | null }>;
+  annualBenefitLines: Array<{ code: string; name: string; taxable: boolean; percentOfGross: number; calculation?: string; runFrequency?: string; includeInMonthlyPayroll?: boolean; amount: number | null }>;
   pension: number | null;
   paye: number | null;
   otherDeductions: number | null;
@@ -52,6 +58,7 @@ const pctFmt = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
 
 const money = (value: number | null | undefined, canView = true) => (!canView || value === null || value === undefined ? 'Restricted' : moneyFmt.format(value));
 const number = (value: number) => numberFmt.format(value);
+const percent = (value: number | null | undefined) => `${pctFmt.format(Number(value || 0) * 100)}%`;
 
 const toneStyles: Record<Tone, { card: string; icon: string; chip: string; bar: string }> = {
   blue: { card: 'bg-blue-50 border-blue-200', icon: 'bg-blue-600 text-white', chip: 'bg-blue-100 text-blue-800', bar: 'bg-blue-600' },
@@ -113,7 +120,11 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
   };
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
   const payrollGroups = useMemo(() => ['All', ...Array.from(new Set((payload?.records || []).map((record) => record.payrollGroup))).sort()], [payload?.records]);
@@ -130,16 +141,36 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
     });
   }, [grade, group, payload?.records, query, status]);
 
-  const selected = (payload?.records || []).find((record) => record.employeeId === selectedId) || filtered[0] || null;
+  const selected = filtered.find((record) => record.employeeId === selectedId) || filtered[0] || null;
   const canViewMoney = Boolean(payload?.permissions.canViewMoney);
   const assigned = (payload?.records || []).filter((record) => record.setupAssignedToPayroll).length;
   const missingPay = (payload?.records || []).filter((record) => !record.basePay || record.basePay <= 0).length;
   const lastLoaded = payload?.generatedAt || initialNow;
 
   const exportCsv = () => {
-    const headers = ['Employee ID', 'Name', 'Department', 'Job Title', 'Payroll Group', 'Salary Grade', 'Currency', 'Payment Run', 'Payment Type', 'Base Pay', 'Gross Pay', 'Net Pay', 'Status', 'Exceptions'];
+    const headers = ['Employee ID', 'Name', 'Department', 'Job Title', 'Payroll Group', 'Salary Grade', 'Earning Profile', 'Currency', 'Payment Run', 'Payment Type', 'Basic Pay', 'Allowances', 'Taxable Pay', 'Non-Taxable Pay', 'Gross Pay', 'Net Pay', 'Components', 'Status', 'Exceptions'];
     const lines = filtered.map((record) =>
-      [record.employeeId, record.fullName, record.department, record.jobTitle, record.payrollGroup, record.salaryGrade, record.payCurrency, record.paymentRun, record.paymentType, record.basePay, record.grossPay, record.netPay, record.payrollStatus, record.exceptions.join('; ')]
+      [
+        record.employeeId,
+        record.fullName,
+        record.department,
+        record.jobTitle,
+        record.payrollGroup,
+        record.salaryGrade,
+        record.earningProfile,
+        record.payCurrency,
+        record.paymentRun,
+        record.paymentType,
+        record.basePay,
+        record.allowances,
+        record.taxablePay,
+        record.nonTaxablePay,
+        record.grossPay,
+        record.netPay,
+        record.earningLines.map((line) => `${line.code}: ${line.amount ?? ''}`).join('; '),
+        record.payrollStatus,
+        record.exceptions.join('; '),
+      ]
         .map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
         .join(',')
     );
@@ -234,7 +265,7 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
           <div className="overflow-x-auto">
             <table className="min-w-[1050px] w-full text-left">
               <thead className="bg-slate-50 text-xs font-black uppercase tracking-normal text-slate-500">
-                <tr>{['Employee', 'Grade', 'Group', 'Base Pay', 'Gross', 'Net', 'Setup', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+                <tr>{['Employee', 'Grade', 'Group', 'Profile', 'Basic', 'Gross', 'Net', 'Setup', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.slice(0, 120).map((record) => {
@@ -247,6 +278,10 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
                       </td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{record.salaryGrade}</td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{record.payrollGroup}</td>
+                      <td className="px-4 py-3">
+                        <p className="text-xs font-black text-slate-800">{record.earningProfile}</p>
+                        <p className="text-[11px] font-semibold text-slate-500">{number(record.earningLines.length)} monthly components</p>
+                      </td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.basePay, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.netPay, canViewMoney)}</td>
@@ -298,6 +333,14 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
                 </div>
               ))}
               <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                  <p className="text-xs font-black text-blue-800">Basic</p>
+                  <p className="mt-1 text-sm font-black text-slate-950">{money(selected.basePay, canViewMoney)}</p>
+                </div>
+                <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+                  <p className="text-xs font-black text-cyan-800">Allowances</p>
+                  <p className="mt-1 text-sm font-black text-slate-950">{money(selected.allowances, canViewMoney)}</p>
+                </div>
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
                   <p className="text-xs font-black text-emerald-800">Gross</p>
                   <p className="mt-1 text-sm font-black text-slate-950">{money(selected.grossPay, canViewMoney)}</p>
@@ -305,6 +348,82 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
                 <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
                   <p className="text-xs font-black text-violet-800">Net</p>
                   <p className="mt-1 text-sm font-black text-slate-950">{money(selected.netPay, canViewMoney)}</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200">
+                <div className="flex items-center gap-3 border-b border-slate-100 p-4">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
+                    <ListTree className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-black text-slate-950">Monthly Salary Component Breakdown</p>
+                    <p className="text-xs font-semibold text-slate-500">{selected.earningProfile} - {selected.earningProfileId}</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {selected.earningLines.length ? selected.earningLines.map((line) => (
+                    <div key={line.code} className={`grid grid-cols-[1fr_auto] gap-3 p-3 ${line.includeInMonthlyPayroll === false ? 'bg-amber-50/70' : ''}`}>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs font-black text-slate-950">{line.name}</p>
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-800">Monthly</span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{line.code} - {line.calculation || `${percent(line.percentOfGross)} of gross`} - {line.taxable ? 'Taxable' : 'Non-taxable'}</p>
+                      </div>
+                      <p className="text-right text-xs font-black text-slate-900">{money(line.amount, canViewMoney)}</p>
+                    </div>
+                  )) : <div className="p-4 text-xs font-bold text-slate-500">No salary components available for this employee.</div>}
+                </div>
+                <div className="grid grid-cols-2 gap-2 border-t border-slate-100 bg-slate-50 p-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase text-slate-500">Taxable Pay</p>
+                    <p className="text-xs font-black text-slate-950">{money(selected.taxablePay, canViewMoney)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-black uppercase text-slate-500">Non-Taxable Pay</p>
+                    <p className="text-xs font-black text-slate-950">{money(selected.nonTaxablePay, canViewMoney)}</p>
+                  </div>
+                </div>
+              </div>
+              {selected.annualBenefitLines.length ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/50">
+                  <div className="border-b border-amber-100 p-4">
+                    <p className="text-sm font-black text-slate-950">Once-Yearly Benefits</p>
+                    <p className="text-xs font-semibold text-slate-600">Not part of monthly gross; paid only when the approved payroll period triggers it.</p>
+                  </div>
+                  <div className="divide-y divide-amber-100">
+                    {selected.annualBenefitLines.map((line) => (
+                      <div key={line.code} className="grid grid-cols-[1fr_auto] gap-3 p-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-black text-slate-950">{line.name}</p>
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">Once yearly</span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{line.code} - {line.calculation || 'Annual leave allowance'} - {line.taxable ? 'Taxable when paid' : 'Non-taxable'}</p>
+                        </div>
+                        <p className="text-right text-xs font-black text-slate-900">{money(line.amount, canViewMoney)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="rounded-2xl border border-slate-200">
+                <div className="border-b border-slate-100 p-4">
+                  <p className="text-sm font-black text-slate-950">Payroll Deduction Estimate</p>
+                  <p className="text-xs font-semibold text-slate-500">Estimated deductions from current payroll configuration.</p>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {[
+                    ['PAYE', selected.paye],
+                    ['Pension', selected.pension],
+                    ['Other Deductions', selected.otherDeductions],
+                    ['Total Deductions', selected.deductions],
+                  ].map(([label, value]) => (
+                    <div key={label as string} className="flex items-center justify-between gap-3 p-3">
+                      <span className="text-xs font-black text-slate-600">{label as string}</span>
+                      <span className="text-xs font-black text-slate-950">{money(value as number | null, canViewMoney)}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="rounded-2xl border border-slate-200 p-4">

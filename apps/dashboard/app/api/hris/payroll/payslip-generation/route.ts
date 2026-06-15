@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
-import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { calculatePayrollEarnings, sageOpeningPayslipReconciliation } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
@@ -78,14 +78,6 @@ const writeBatches = async (batches: PayslipBatch[]) => {
   await writeFile(BATCH_PATH, JSON.stringify(batches, null, 2), 'utf8');
 };
 
-const payrollAmounts = (employee: DleEmployeeDirectoryRow) => {
-  const basic = Number(employee.periodSalary || (employee.annualSalary ? Number(employee.annualSalary) / 12 : 0) || 0);
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  const allowances = basic * allowanceRate;
-  return { basic: roundMoney(basic), allowances: roundMoney(allowances), grossPay: roundMoney(basic + allowances) };
-};
-
 const statusFrom = (issues: string[]): PayslipStatus => {
   if (issues.some((issue) => /missing|not payroll active|zero/i.test(issue))) return 'Blocked';
   return issues.length ? 'Review' : 'Ready';
@@ -117,13 +109,18 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     return map;
   }, new Map<string, ReturnType<typeof loanInputsFromApplications>>());
   const payslips = employeeSource.employees.map((employee) => {
-    const amounts = payrollAmounts(employee);
-    const tax = calculatePayrollTax(payrollInputFromEmployee(employee), taxVersion);
-    const pension = calculatePension(pensionInputFromEmployee(employee), pensionVersion);
-    const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length), fundsVersion);
+    const amounts = calculatePayrollEarnings(employee, { period: requestedPeriod, includePeriodAdjustments: true });
+    const tax = calculatePayrollTax({
+      ...payrollInputFromEmployee(employee, { period: requestedPeriod, includePeriodAdjustments: true }),
+      monthlyGrossPay: amounts.grossPay,
+      monthlyTaxablePay: amounts.taxablePay,
+    }, taxVersion);
+    const pension = calculatePension(pensionInputFromEmployee(employee, { period: requestedPeriod, includePeriodAdjustments: true }), pensionVersion);
+    const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length, { period: requestedPeriod, includePeriodAdjustments: true }), fundsVersion);
     const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
-    const paye = roundMoney(tax.monthlyPaye);
-    const pensionEmployee = roundMoney(pension.employeeContribution);
+    const sageReconciliation = sageOpeningPayslipReconciliation(employee, requestedPeriod);
+    const paye = roundMoney(sageReconciliation?.paye ?? tax.monthlyPaye);
+    const pensionEmployee = roundMoney(sageReconciliation?.pensionEmployee ?? pension.employeeContribution);
     const statutoryEmployee = roundMoney(funds.employeeDeductions);
     const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
     const totalDeductions = roundMoney(paye + pensionEmployee + statutoryEmployee + loanRecovery);
@@ -157,10 +154,18 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       maskedAccount: '**** ****',
       period: requestedPeriod,
       periodLabel: periodLabel(requestedPeriod),
-      earnings: [
-        { label: 'Basic Salary', amount: amounts.basic },
-        { label: 'Allowances', amount: amounts.allowances },
-      ],
+      earningProfile: amounts.profileName,
+      earningProfileId: amounts.profileId,
+      taxablePay: amounts.taxablePay,
+      nonTaxablePay: amounts.nonTaxablePay,
+      earnings: amounts.paidEarningLines.map((line) => ({
+        code: line.code,
+        label: line.name,
+        taxable: line.taxable,
+        runFrequency: line.runFrequency || 'monthly',
+        includeInMonthlyPayroll: line.includeInMonthlyPayroll !== false,
+        amount: line.amount,
+      })),
       deductions: [
         { label: 'PAYE', amount: paye },
         { label: 'Pension', amount: pensionEmployee },

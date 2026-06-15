@@ -41,6 +41,8 @@ const maskMoney = (record: any) => ({
   monthlyPaye: null,
   monthlyBasePay: null,
   monthlyAllowances: null,
+  monthlyGrossPay: null,
+  monthlyTaxablePay: null,
 });
 
 const buildRecord = (employee: any, version: PayrollTaxVersion) => {
@@ -66,6 +68,8 @@ const buildRecord = (employee: any, version: PayrollTaxVersion) => {
     taxState: employee.state || employee.workLocation || employee.location || 'Default',
     monthlyBasePay: roundMoney(input.monthlyBasePay),
     monthlyAllowances: roundMoney(input.monthlyAllowances),
+    monthlyGrossPay: roundMoney(Number(input.monthlyGrossPay ?? input.monthlyBasePay + input.monthlyAllowances)),
+    monthlyTaxablePay: roundMoney(Number(input.monthlyTaxablePay ?? input.monthlyBasePay + input.monthlyAllowances)),
     ...tax,
     status: issues.some((issue) => issue.includes('missing') || issue.includes('not payroll active')) ? 'Blocked' : issues.length ? 'Review' : 'Ready',
     issues,

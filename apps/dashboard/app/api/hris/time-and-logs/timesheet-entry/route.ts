@@ -7,6 +7,7 @@ import {
   generateProjectCode,
   idleReasons,
   normalizePaidWorkHours,
+  DAILY_BREAK_HOURS,
   STANDARD_TIMESHEET_HOURS,
   withDefaultIdleReason,
   readProjects,
@@ -138,6 +139,7 @@ type UpdatePayload = {
     | 'BULK_APPLY';
   date?: string;
   supervisorId?: string;
+  locationName?: string;
   workCenterName?: string;
   headerId?: string;
   lines?: TimesheetLine[];
@@ -190,8 +192,8 @@ async function handleBulkApply(request: Request, payload: UpdatePayload) {
       idleAllocations: line.idleAllocations.map(withDefaultIdleReason),
       usedHours,
       totalHours,
-      variance: round1(totalHours - (line.attendanceDuration || 0)),
-      validationStatus: totalHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : (totalHours > STANDARD_TIMESHEET_HOURS ? 'Error' : 'Incomplete'),
+      variance: round1(totalHours - GROSS_TIMESHEET_HOURS),
+      validationStatus: usedHours > STANDARD_TIMESHEET_HOURS || totalHours > GROSS_TIMESHEET_HOURS ? 'Error' : (totalHours === GROSS_TIMESHEET_HOURS && usedHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : 'Incomplete'),
     } as TimesheetLine;
   });
 
@@ -258,8 +260,8 @@ async function handleCopyPreviousDay(request: Request, date: string, supervisorI
       usedHours: prevLine.usedHours,
       idleHours: prevLine.idleHours,
       totalHours: prevLine.totalHours,
-      variance: round1(prevLine.totalHours - (line.attendanceDuration || 0)),
-      validationStatus: prevLine.totalHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : (prevLine.totalHours > STANDARD_TIMESHEET_HOURS ? 'Error' : 'Incomplete'),
+      variance: round1(prevLine.totalHours - GROSS_TIMESHEET_HOURS),
+      validationStatus: prevLine.usedHours > STANDARD_TIMESHEET_HOURS || prevLine.totalHours > GROSS_TIMESHEET_HOURS ? 'Error' : (prevLine.totalHours === GROSS_TIMESHEET_HOURS && prevLine.usedHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : 'Incomplete'),
       validationMessage: null,
     } as TimesheetLine;
   });
@@ -271,7 +273,38 @@ async function handleCopyPreviousDay(request: Request, date: string, supervisorI
 const ok = <T,>(data: T, status = 200) => NextResponse.json({ status: 'success', data }, { status });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 const round1 = (value: number) => Math.round(value * 10) / 10;
+const GROSS_TIMESHEET_HOURS = STANDARD_TIMESHEET_HOURS + DAILY_BREAK_HOURS;
 const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const matchKey = (value: unknown) => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  const compact = raw.replace(/[^A-Z0-9]/g, '');
+  return compact.replace(/^0+/, '') || compact;
+};
+
+const normalizeLineForGrossDay = (line: TimesheetLine): TimesheetLine => {
+  const usedHours = round1(line.projectAllocations.reduce((sum, item) => sum + Number(item.hours || 0), 0));
+  const idleHours = round1((line.idleAllocations || []).reduce((sum, item) => sum + Number(item.hours || 0), 0));
+  const totalHours = round1(usedHours + idleHours);
+  const variance = round1(totalHours - GROSS_TIMESHEET_HOURS);
+  const validationStatus =
+    usedHours > STANDARD_TIMESHEET_HOURS + 0.001 || totalHours > GROSS_TIMESHEET_HOURS + 0.001
+      ? 'Error'
+      : totalHours === GROSS_TIMESHEET_HOURS && usedHours === STANDARD_TIMESHEET_HOURS
+        ? 'Valid'
+        : line.validationStatus === 'Warning'
+          ? 'Warning'
+          : 'Incomplete';
+  const validationMessage =
+    validationStatus === 'Valid'
+      ? null
+      : validationStatus === 'Error'
+        ? usedHours > STANDARD_TIMESHEET_HOURS + 0.001
+          ? `Productive/payroll hours cannot exceed ${STANDARD_TIMESHEET_HOURS} hours per day.`
+          : `Total timesheet hours cannot exceed ${GROSS_TIMESHEET_HOURS} hours including break time.`
+        : line.validationMessage;
+  return { ...line, idleAllocations: line.idleAllocations.map(withDefaultIdleReason), usedHours, idleHours, totalHours, variance, validationStatus, validationMessage };
+};
 
 const employeeDisplay = (employee: { employeeCode?: string | null; fullName?: string | null }) => {
   const code = clean(employee.employeeCode);
@@ -395,7 +428,13 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     headers.find((h) => h.timesheetDate === targetDate && h.supervisorId === targetSupervisor && (!targetWorkCenter || h.workCenterName === targetWorkCenter)) ||
     headers.find((h) => h.timesheetDate === targetDate && h.supervisorId === targetSupervisor) ||
     null;
-  const lines = header ? allLines.filter((l) => l.headerId === header.id) : [];
+  const selectedEmployeeKeys = new Set(selectedSupervisorEmployees.map((employee) => matchKey(employee.employeeCode)).filter(Boolean));
+  const lines = header
+    ? allLines
+        .filter((l) => l.headerId === header.id)
+        .map(normalizeLineForGrossDay)
+        .filter((line) => selectedEmployeeKeys.size === 0 || selectedEmployeeKeys.has(matchKey(line.employeeNo)) || selectedEmployeeKeys.has(matchKey(line.employeeId)))
+    : [];
 
   const activeProjects = projects.filter(p => ['Active', 'Approved', 'Open'].includes(p.status));
 
@@ -508,7 +547,7 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const access = resolveAccessContext(request);
   const payload = (await request.json()) as UpdatePayload;
-  const { action, date, supervisorId, workCenterName, headerId, lines: updatedLines } = payload;
+  const { action, date, supervisorId, locationName, workCenterName, headerId, lines: updatedLines } = payload;
 
   try {
     if (action === 'CREATE_PROJECT') {
@@ -571,7 +610,7 @@ export async function PATCH(request: Request) {
       await requireOpenPeriod(date);
       const existingHeader = headers.find(h => h.timesheetDate === date && h.supervisorId === supervisorId && h.workCenterName === workCenterName);
       if (existingHeader) requireEditableTimesheet(existingHeader);
-      await syncAttendanceForTimesheet(date, supervisorId, workCenterName);
+      await syncAttendanceForTimesheet(date, supervisorId, workCenterName, locationName);
       return ok(await buildPayload(request, date, supervisorId, workCenterName));
     }
 
@@ -583,10 +622,13 @@ export async function PATCH(request: Request) {
       await requireOpenPeriod(header.timesheetDate);
       requireEditableTimesheet(header);
 
-      // Validate standard day rule, including break time.
+      // Validate gross day separately from payroll/productive hours.
       for (const line of updatedLines) {
-        if (line.totalHours > STANDARD_TIMESHEET_HOURS + 0.001) {
-          return err(400, `Total hours for ${line.employeeName} cannot exceed ${STANDARD_TIMESHEET_HOURS} hours.`);
+        if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
+          return err(400, `Productive/payroll hours for ${line.employeeName} cannot exceed ${STANDARD_TIMESHEET_HOURS} hours.`);
+        }
+        if (line.totalHours > GROSS_TIMESHEET_HOURS + 0.001) {
+          return err(400, `Total timesheet hours for ${line.employeeName} cannot exceed ${GROSS_TIMESHEET_HOURS} hours including break time.`);
         }
         if (Math.abs(line.usedHours + line.idleHours - line.totalHours) > 0.01) {
           return err(400, `Hours mismatch for ${line.employeeName}: Used + Idle must equal Total.`);

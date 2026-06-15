@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { PageTemplate } from '@/components/layout/page-template';
@@ -31,6 +31,8 @@ import type { StructureInsight } from '@/lib/organization-data';
 type TimesheetStatus = 'Draft' | 'Submitted' | 'Project_Manager_Reviewed' | 'Cost_Control_Reviewed' | 'HR_Acknowledged' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected' | 'Returned';
 type TimesheetWorkflowStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR';
 const STANDARD_TIMESHEET_HOURS = 8;
+const DAILY_BREAK_HOURS = 1;
+const GROSS_TIMESHEET_HOURS = STANDARD_TIMESHEET_HOURS + DAILY_BREAK_HOURS;
 const DEFAULT_IDLE_REASON_ID = 'idl-009';
 const DEFAULT_IDLE_REASON_NAME = 'Break Time';
 const editableTimesheetStatuses: TimesheetStatus[] = ['Draft', 'Returned', 'Rejected'];
@@ -342,6 +344,7 @@ export default function TimesheetEntryClient() {
   const [workCenters, setWorkCenters] = useState<Payload['workCenters']>([]);
   const [workCenterDraft, setWorkCenterDraft] = useState('');
   const [editingWorkCenter, setEditingWorkCenter] = useState<Payload['workCenters'][number] | null>(null);
+  const autoSyncKeyRef = useRef<string | null>(null);
 
   const load = useCallback(async (date?: string, supervisor?: string, location?: string, workCenter?: string) => {
     setLoading(true);
@@ -406,6 +409,7 @@ export default function TimesheetEntryClient() {
           action: 'SYNC_ATTENDANCE',
           date: selectedDate,
           supervisorId: selectedSupervisor,
+          locationName: selectedLocation,
           workCenterName: selectedWorkCenter,
         }),
       });
@@ -418,7 +422,19 @@ export default function TimesheetEntryClient() {
     } finally {
       setSubmitting(false);
     }
-  }, [payload?.period.status, selectedDate, selectedSupervisor, selectedWorkCenter]);
+  }, [payload?.period.status, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter]);
+
+  useEffect(() => {
+    if (!payload || loading || submitting) return;
+    if (payload.period.status !== 'Open') return;
+    if (payload.header || localLines.length > 0) return;
+    if (!selectedDate || !selectedSupervisor || !selectedLocation || !selectedWorkCenter) return;
+
+    const syncKey = [selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter].join('|');
+    if (autoSyncKeyRef.current === syncKey) return;
+    autoSyncKeyRef.current = syncKey;
+    void handleSyncAttendance();
+  }, [handleSyncAttendance, loading, localLines.length, payload, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter, submitting]);
 
   const saveWorkCenter = async () => {
     const nextName = workCenterDraft.trim();
@@ -507,12 +523,15 @@ export default function TimesheetEntryClient() {
     line.usedHours = round1(line.projectAllocations.reduce((sum, p) => sum + p.hours, 0));
     line.idleHours = round1(line.idleAllocations.reduce((sum, i) => sum + i.hours, 0));
     line.totalHours = round1(line.usedHours + line.idleHours);
-    line.variance = round1(line.totalHours - STANDARD_TIMESHEET_HOURS);
+    line.variance = round1(line.totalHours - GROSS_TIMESHEET_HOURS);
     
-    if (line.totalHours > STANDARD_TIMESHEET_HOURS + 0.001) {
+    if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
       line.validationStatus = 'Error';
-      line.validationMessage = `Total hours cannot exceed ${STANDARD_TIMESHEET_HOURS} hours per day.`;
-    } else if (line.totalHours === STANDARD_TIMESHEET_HOURS) {
+      line.validationMessage = `Productive/payroll hours cannot exceed ${STANDARD_TIMESHEET_HOURS} hours per day.`;
+    } else if (line.totalHours > GROSS_TIMESHEET_HOURS + 0.001) {
+      line.validationStatus = 'Error';
+      line.validationMessage = `Total timesheet hours cannot exceed ${GROSS_TIMESHEET_HOURS} hours including break time.`;
+    } else if (line.totalHours === GROSS_TIMESHEET_HOURS && line.usedHours === STANDARD_TIMESHEET_HOURS) {
       line.validationStatus = 'Valid';
       line.validationMessage = null;
     } else if (line.idleHours > 0 && line.idleAllocations.some(a => a.hours > 0 && !a.reasonId)) {
@@ -520,7 +539,7 @@ export default function TimesheetEntryClient() {
       line.validationMessage = 'Idle time requires a valid reason.';
     } else {
       line.validationStatus = 'Incomplete';
-      line.validationMessage = `Awaiting full ${STANDARD_TIMESHEET_HOURS}-hour allocation. Current: ${line.totalHours} hrs.`;
+      line.validationMessage = `Awaiting full ${GROSS_TIMESHEET_HOURS}-hour allocation including ${DAILY_BREAK_HOURS}h break. Current: ${line.totalHours} hrs.`;
     }
 
     next[index] = line;
@@ -712,8 +731,8 @@ export default function TimesheetEntryClient() {
         projectAllocations: nextAllocations,
         usedHours,
         totalHours,
-        variance: round1(totalHours - STANDARD_TIMESHEET_HOURS),
-        validationStatus: totalHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : (totalHours > STANDARD_TIMESHEET_HOURS + 0.001 ? 'Error' : 'Incomplete')
+        variance: round1(totalHours - GROSS_TIMESHEET_HOURS),
+        validationStatus: usedHours > STANDARD_TIMESHEET_HOURS + 0.001 || totalHours > GROSS_TIMESHEET_HOURS + 0.001 ? 'Error' : (totalHours === GROSS_TIMESHEET_HOURS && usedHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : 'Incomplete')
       } as TimesheetLine;
     });
     setLocalLines(nextLines);
@@ -783,13 +802,13 @@ export default function TimesheetEntryClient() {
   const headerStatus = payload?.header?.status ?? 'Draft';
   const isPayrollReady = payrollReadyStatuses.includes(headerStatus);
   const canEditTimesheet = periodIsOpen && editableTimesheetStatuses.includes(headerStatus);
-  const activeSiteDevices = payload?.attendanceWorkCenters.filter((workCenter) => workCenter.location === selectedWorkCenter) ?? [];
+  const activeSiteDevices = payload?.attendanceWorkCenters.filter((workCenter) => workCenter.location === selectedLocation || workCenter.site === selectedLocation) ?? [];
   const onlineSiteDevices = activeSiteDevices;
   const primarySiteDevice = [...activeSiteDevices].sort((a, b) => {
     return a.deviceName.localeCompare(b.deviceName);
   })[0];
   const lastHandshakeAt = payload?.biometricDevices
-    .filter((device) => device.location === selectedWorkCenter)
+    .filter((device) => device.location === selectedLocation || device.site === selectedLocation)
     .map((device) => device.lastSyncAt)
     .filter(Boolean)
     .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
@@ -1175,7 +1194,7 @@ export default function TimesheetEntryClient() {
                           </select>
                           {iIdx === line.idleAllocations.length - 1 && !isAbsent && canEditTimesheet && <button onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: DEFAULT_IDLE_REASON_ID, reasonName: DEFAULT_IDLE_REASON_NAME, hours: 0, remarks: null }] })} className="p-1 text-slate-400 hover:text-indigo-600"><Plus className="h-3 w-3" /></button>}</div>
                         ))}</div></td>
-                        <td className="px-4 py-4 text-center bg-indigo-50/20"><span className={`font-black ${line.totalHours === STANDARD_TIMESHEET_HOURS ? 'text-emerald-600' : 'text-indigo-600'}`}>{line.totalHours}</span></td>
+                        <td className="px-4 py-4 text-center bg-indigo-50/20"><span className={`font-black ${line.totalHours === GROSS_TIMESHEET_HOURS ? 'text-emerald-600' : 'text-indigo-600'}`}>{line.totalHours}</span></td>
                         <td className="px-4 py-4 text-center"><span className={`text-[10px] font-black ${line.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{line.variance > 0 ? `+${line.variance}` : line.variance}</span></td>
                         <td className="px-4 py-4 text-center"><div className="flex flex-col items-center gap-1 group relative">
                           {line.validationStatus === 'Valid' ? <><CheckCircle2 className="h-5 w-5 text-emerald-500" /><span className="text-[9px] font-black text-emerald-600">COMPLETE</span></> : <><AlertTriangle className={`h-5 w-5 ${line.validationStatus === 'Error' ? 'text-red-500' : 'text-amber-500'}`} /><span className={`text-[9px] font-black ${line.validationStatus === 'Error' ? 'text-red-600' : 'text-amber-600'}`}>{line.validationStatus}</span></>}
@@ -1303,7 +1322,7 @@ export default function TimesheetEntryClient() {
                     <div className="flex justify-between border-t border-slate-100 pt-4 text-center font-black">
                       <div><p className="text-[8px] text-slate-400">USED</p><p className="text-blue-700">{line.usedHours}h</p></div>
                       <div><p className="text-[8px] text-slate-400">IDLE</p><p className="text-amber-700">{line.idleHours}h</p></div>
-                      <div><p className="text-[8px] text-slate-400">TOTAL</p><p className={line.totalHours === STANDARD_TIMESHEET_HOURS ? 'text-emerald-600' : 'text-indigo-600'}>{line.totalHours}h</p></div>
+                      <div><p className="text-[8px] text-slate-400">TOTAL</p><p className={line.totalHours === GROSS_TIMESHEET_HOURS ? 'text-emerald-600' : 'text-indigo-600'}>{line.totalHours}h</p></div>
                     </div>
                   </div>
                 </div>

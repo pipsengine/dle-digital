@@ -4,6 +4,7 @@ import sql from 'mssql';
 import { buildBaseAttendanceRecords } from '@/lib/attendance-data';
 import { readLiveClockingActivity } from '@/lib/biometric-live-attendance-store';
 import { getDleEnterpriseDbPool } from '@/lib/dle-enterprise-db';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeeKeys, type SagePayrollEmployee } from '@/lib/sage-people-payroll-store';
 
 export type TimesheetStatus =
@@ -387,9 +388,6 @@ const formatSageEmployeeFullName = (employee: SagePayrollEmployee, fallback: str
 
 const sageTimesheetEmployeeCode = (employee: SagePayrollEmployee, fallback: string) =>
   (employee.directoryEmployeeCode || employee.employeeCode || fallback).trim().toUpperCase();
-
-const isContractTimesheetEmployee = (employee: SagePayrollEmployee, fallback: string) =>
-  sageTimesheetEmployeeCode(employee, fallback).startsWith('C');
 
 const buildAllocation = (employeeId: string, code: string, hours: number, labourRateNgn: number, suffix: string): TimesheetAllocation => {
   const meta = catalogByCode.get(code) || projectCatalog[0];
@@ -1016,10 +1014,6 @@ export async function readTimesheetPeriod(date: Date = new Date()): Promise<Time
 
 export async function updateTimesheetPeriodStatus(date: Date, status: TimesheetPeriod['status'], actor: string): Promise<TimesheetPeriod> {
   const calculated = calculateTimesheetPeriod(date);
-  const currentPeriodId = calculateTimesheetPeriod(new Date()).id;
-  if (status === 'Open' && calculated.id !== currentPeriodId) {
-    throw new Error('Only the current timesheet period can be opened.');
-  }
   const current = await readTimesheetPeriod(date);
   if (current.status === 'Locked' && status !== 'Locked') {
     throw new Error('Locked timesheet periods cannot be reopened.');
@@ -1879,35 +1873,116 @@ export async function advanceProjectTimesheetApproval(
   return { header, projectApprovals: buildProjectTimesheetApprovals(header, headerLines, projects) };
 }
 
-export async function syncAttendanceForTimesheet(date: string, supervisorId: string, workCenterName: string) {
-  const liveAttendance = await readLiveClockingActivity(date);
-  const clockingRecords = liveAttendance.records;
-  const activePayroll = await readActiveSagePayrollEmployeeKeys();
-  const activeEmployeeByKey = new Map<string, SagePayrollEmployee>();
+const normalizeAttendanceScope = (value: string | null | undefined) =>
+  String(value || '').trim().toLowerCase();
+const TIMESHEET_SAGE_ENRICH_TIMEOUT_MS = Number(process.env.TIMESHEET_SAGE_ENRICH_TIMEOUT_MS || 2500);
+const TIMESHEET_SUPERVISOR_SCOPE_TIMEOUT_MS = Number(process.env.TIMESHEET_SUPERVISOR_SCOPE_TIMEOUT_MS || 5000);
 
-  for (const employee of activePayroll.employees) {
+const withSyncTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+const cleanSupervisorLabel = (value: string) =>
+  value.replace(/\s+\(\d+\)\s*$/, '').trim();
+
+const supervisorMatchesEmployee = (managerName: string | null | undefined, supervisorId: string) => {
+  const manager = normalizeAttendanceScope(managerName);
+  const selected = normalizeAttendanceScope(cleanSupervisorLabel(supervisorId));
+  if (!manager || !selected) return false;
+  const selectedCode = selected.split(' - ')[0]?.trim();
+  const selectedName = selected.includes(' - ') ? selected.split(' - ').slice(1).join(' - ').trim() : selected;
+  return manager === selected || manager === selectedName || manager.includes(selected) || (selectedCode ? manager.includes(selectedCode) : false);
+};
+
+const supervisorEmployeeScope = async (supervisorId: string) => {
+  const selected = cleanSupervisorLabel(supervisorId);
+  if (!selected) return { keys: new Set<string>(), employees: [] as Array<{ employeeCode: string; fullName: string }> };
+  const source = await withSyncTimeout(
+    readPayrollEmployees(),
+    TIMESHEET_SUPERVISOR_SCOPE_TIMEOUT_MS,
+    'Supervisor employee scope timed out.',
+  );
+  const keys = new Set<string>();
+  const employees: Array<{ employeeCode: string; fullName: string }> = [];
+  for (const employee of source.employees) {
+    if (['Resigned', 'Terminated', 'Retired'].includes(employee.status)) continue;
+    if (!supervisorMatchesEmployee(employee.managerName, selected)) continue;
+    employees.push({ employeeCode: employee.employeeCode, fullName: employee.fullName });
     [
       employee.employeeId,
       employee.employeeCode,
-      employee.entityCode,
-      employee.displayName,
+      employee.fullName,
+      employee.sourceEmployeeId,
     ].forEach((value) => {
       const key = normalizePayrollMatchKey(value);
-      if (key && !activeEmployeeByKey.has(key)) activeEmployeeByKey.set(key, employee);
+      if (key) keys.add(key);
     });
+  }
+  return { keys, employees };
+};
+
+export async function syncAttendanceForTimesheet(date: string, supervisorId: string, workCenterName: string, locationName?: string) {
+  const liveAttendance = await readLiveClockingActivity(date);
+  const clockingRecords = liveAttendance.records;
+  const activeEmployeeByKey = new Map<string, SagePayrollEmployee>();
+  let allowedSupervisorKeys = new Set<string>();
+  let assignedSupervisorEmployees: Array<{ employeeCode: string; fullName: string }> = [];
+
+  try {
+    const scope = await supervisorEmployeeScope(supervisorId);
+    allowedSupervisorKeys = scope.keys;
+    assignedSupervisorEmployees = scope.employees;
+  } catch (error) {
+    console.warn('Timesheet attendance sync could not resolve supervisor employee scope:', error);
+  }
+
+  try {
+    const activePayroll = await withSyncTimeout(
+      readActiveSagePayrollEmployeeKeys(),
+      TIMESHEET_SAGE_ENRICH_TIMEOUT_MS,
+      'Sage payroll enrichment timed out.',
+    );
+    for (const employee of activePayroll.employees) {
+      [
+        employee.employeeId,
+        employee.employeeCode,
+        employee.directoryEmployeeCode,
+        employee.entityCode,
+        employee.displayName,
+      ].forEach((value) => {
+        const key = normalizePayrollMatchKey(value);
+        if (key && !activeEmployeeByKey.has(key)) activeEmployeeByKey.set(key, employee);
+      });
+    }
+  } catch (error) {
+    console.warn('Timesheet attendance sync proceeding without Sage payroll enrichment:', error);
   }
   
   // Business Rule: A timesheet is created for a Work Center / Site.
-  // We should find all employees who clocked in at this site OR are assigned to this supervisor.
-  const exactWorkCenterRecords = clockingRecords.filter(
-    (r) =>
-      r.site === workCenterName ||
-      r.location === workCenterName ||
-      r.supervisor === supervisorId ||
-      r.supervisor.includes(supervisorId),
-  );
+  // First find employees who clocked in at the selected device/site.
+  // Then enforce the selected supervisor's assigned employee list.
+  const workCenterKey = normalizeAttendanceScope(workCenterName);
+  const locationKey = normalizeAttendanceScope(locationName);
+  const exactWorkCenterRecords = clockingRecords.filter((r) => {
+    const site = normalizeAttendanceScope(r.site);
+    const location = normalizeAttendanceScope(r.location);
+    return (
+      (workCenterKey && (site === workCenterKey || location === workCenterKey)) ||
+      (locationKey && (site === locationKey || location === locationKey))
+    );
+  });
   const recordsInScope = exactWorkCenterRecords.length > 0 ? exactWorkCenterRecords : clockingRecords;
-  const attendanceForDay = recordsInScope
+  const attendanceCandidates = recordsInScope
     .map((attendance) => {
       const payrollEmployee = [
         attendance.employeeId,
@@ -1916,9 +1991,57 @@ export async function syncAttendanceForTimesheet(date: string, supervisorId: str
         .map((value) => activeEmployeeByKey.get(normalizePayrollMatchKey(value)))
         .find(Boolean);
 
-      return payrollEmployee && isContractTimesheetEmployee(payrollEmployee, attendance.employeeId) ? { attendance, payrollEmployee } : null;
+      return { attendance, payrollEmployee };
     })
-    .filter((record): record is { attendance: (typeof clockingRecords)[number]; payrollEmployee: SagePayrollEmployee } => Boolean(record));
+    .filter(({ attendance, payrollEmployee }) => {
+      if (allowedSupervisorKeys.size === 0) return false;
+      return [
+        attendance.employeeId,
+        attendance.employeeName,
+        payrollEmployee?.employeeCode,
+        payrollEmployee?.directoryEmployeeCode,
+        payrollEmployee?.entityCode,
+        payrollEmployee?.displayName,
+      ].some((value) => allowedSupervisorKeys.has(normalizePayrollMatchKey(value)));
+    });
+  const attendanceCandidateKeys = (candidate: (typeof attendanceCandidates)[number]) => [
+    candidate.attendance.employeeId,
+    candidate.attendance.employeeName,
+    candidate.payrollEmployee?.employeeCode,
+    candidate.payrollEmployee?.directoryEmployeeCode,
+    candidate.payrollEmployee?.entityCode,
+    candidate.payrollEmployee?.displayName,
+  ].map(normalizePayrollMatchKey).filter(Boolean);
+  const attendanceForDay = assignedSupervisorEmployees.length
+    ? assignedSupervisorEmployees.map((employee) => {
+        const employeeKeys = [employee.employeeCode, employee.fullName].map(normalizePayrollMatchKey).filter(Boolean);
+        const matched = attendanceCandidates.find((candidate) => attendanceCandidateKeys(candidate).some((key) => employeeKeys.includes(key)));
+        return matched || {
+          attendance: {
+            id: `no-att-${date}-${employee.employeeCode}`,
+            employeeId: employee.employeeCode,
+            employeeName: employee.fullName,
+            businessUnit: '',
+            department: '',
+            jobTitle: '',
+            location: locationName || '',
+            site: workCenterName,
+            shift: 'Day',
+            status: 'Absent',
+            checkInTime: null,
+            checkOutTime: null,
+            scheduledStart: '08:00',
+            scheduledEnd: '17:00',
+            minutesLate: 0,
+            overtimeHours: 0,
+            biometricSource: 'Supervisor Override',
+            supervisor: supervisorId,
+            punchCount: 0,
+          },
+          payrollEmployee: undefined,
+        };
+      })
+    : attendanceCandidates;
 
   const { headers, lines } = await readTimesheetData();
   const period = calculateTimesheetPeriod(new Date(date));
@@ -1949,8 +2072,8 @@ export async function syncAttendanceForTimesheet(date: string, supervisorId: str
   // Filter out lines for this header and rebuild
   const otherLines = lines.filter((l) => l.headerId !== header!.id);
   const newLines: TimesheetLine[] = attendanceForDay.map(({ attendance: att, payrollEmployee }) => {
-    const employeeCode = sageTimesheetEmployeeCode(payrollEmployee, att.employeeId);
-    const employeeName = formatSageEmployeeFullName(payrollEmployee, att.employeeName);
+    const employeeCode = payrollEmployee ? sageTimesheetEmployeeCode(payrollEmployee, att.employeeId) : att.employeeId.trim().toUpperCase();
+    const employeeName = payrollEmployee ? formatSageEmployeeFullName(payrollEmployee, att.employeeName) : att.employeeName;
     const existingLine = lines.find((l) => l.headerId === header!.id && l.employeeId === employeeCode);
     
     // Attendance duration in hours

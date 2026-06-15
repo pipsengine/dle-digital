@@ -3,6 +3,7 @@ import { updateEmployeeDailyRatePayInDb } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
+import { calculateContractDayRateEarnings } from '@/lib/payroll-earnings-engine';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 
@@ -95,7 +96,11 @@ const buildPayload = async (request: Request) => {
     const payMode = ratePerHour > 0 && ratePerDay <= 0 ? 'Hourly' : 'Daily';
     const payableDays = attendance.payrollReadyDays || attendance.daysWorked;
     const payableHours = attendance.payrollReadyHours || attendance.attendanceHours;
-    const grossPay = payMode === 'Hourly' ? payableHours * ratePerHour : payableDays * ratePerDay;
+    const dayRateEarnings = calculateContractDayRateEarnings({
+      ratePerDay: ratePerDay || ratePerHour * hoursPerDay,
+      weekdayDays: payMode === 'Hourly' ? payableHours / hoursPerDay : payableDays,
+    });
+    const grossPay = dayRateEarnings.grossPay || (payMode === 'Hourly' ? payableHours * ratePerHour : payableDays * ratePerDay);
     const issues: string[] = [];
     if (!ratePerDay && !ratePerHour) issues.push('Daily or hourly rate is missing');
     if (!attendance.daysWorked && !attendance.attendanceHours) issues.push('No daily timesheet found');
@@ -113,6 +118,8 @@ const buildPayload = async (request: Request) => {
       payCurrency: employee.payCurrency || 'NGN',
       paymentRun: employee.paymentRun || 'Daily Timesheet',
       paymentType: employee.paymentType || 'Timesheet Rate',
+      earningProfile: dayRateEarnings.profileName,
+      earningProfileId: dayRateEarnings.profileId,
       payMode,
       ratePerDay: roundMoney(ratePerDay),
       ratePerHour: roundMoney(ratePerHour),
@@ -124,6 +131,9 @@ const buildPayload = async (request: Request) => {
       payrollReadyDays: round2(attendance.payrollReadyDays),
       payrollReadyHours: round2(attendance.payrollReadyHours),
       grossPay: roundMoney(grossPay),
+      taxablePay: dayRateEarnings.taxablePay,
+      nonTaxablePay: dayRateEarnings.nonTaxablePay,
+      earnings: dayRateEarnings.earningLines,
       latestPayrollUpdate: attendance.latestPayrollUpdate,
       setupAssignedToPayroll: employee.setupAssignedToPayroll,
       status: statusFromIssues(issues),

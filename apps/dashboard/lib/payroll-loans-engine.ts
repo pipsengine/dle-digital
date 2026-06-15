@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
 
 export type LoanStatus = 'Draft' | 'Active' | 'Retired';
 export type LoanProduct = {
@@ -113,10 +114,8 @@ export const activeLoansVersion = (config: LoansConfig, asOf = new Date().toISOS
 };
 
 export const payrollAmountFromEmployee = (employee: DleEmployeeDirectoryRow) => {
-  const monthlyBasePay = Number(employee.periodSalary || (employee.annualSalary ? Number(employee.annualSalary) / 12 : 0) || 0);
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  return { monthlyBasePay, monthlyAllowances: monthlyBasePay * allowanceRate, netPayEstimate: (monthlyBasePay * (1 + allowanceRate)) * 0.78 };
+  const earnings = calculatePayrollEarnings(employee);
+  return { monthlyBasePay: earnings.basicPay, monthlyAllowances: earnings.allowances, netPayEstimate: earnings.grossPay * 0.78 };
 };
 
 export const generateLoanInputs = (employees: DleEmployeeDirectoryRow[], version: LoansVersion): LoanInput[] => {

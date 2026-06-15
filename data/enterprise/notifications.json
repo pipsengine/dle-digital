@@ -17,13 +17,15 @@
       "title": "Enterprise session secured",
       "body": "Your current enterprise access is protected by RBAC, session controls, and activity logging.",
       "severity": "success",
-      "status": "Unread",
+      "status": "Archived",
       "href": "/hris/administration/audit-trail",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Security Service",
       "metadata": {
         "persistentSeed": true
-      }
+      },
+      "readAt": "2026-06-15T08:05:36.172Z",
+      "archivedAt": "2026-06-15T08:06:08.199Z"
     },
     {
       "recipientUserId": "global-admin",
@@ -41,13 +43,15 @@
       "title": "Review your employee profile",
       "body": "Keep contact details, emergency contacts, bank details, and supporting documents up to date.",
       "severity": "info",
-      "status": "Unread",
+      "status": "Archived",
       "href": "/hris/employees/employee-profile",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "HRIS",
       "metadata": {
         "persistentSeed": true
-      }
+      },
+      "readAt": "2026-06-15T08:05:37.990Z",
+      "archivedAt": "2026-06-15T08:06:07.147Z"
     },
     {
       "recipientUserId": "global-admin",
@@ -65,13 +69,15 @@
       "title": "Payroll self-service available",
       "body": "Payslips, deductions, pension contributions, allowances, and loan deductions can be reviewed from payroll self-service.",
       "severity": "info",
-      "status": "Unread",
+      "status": "Archived",
       "href": "/hris/payroll/payslip-generation",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Payroll Service",
       "metadata": {
         "persistentSeed": true
-      }
+      },
+      "readAt": "2026-06-15T08:05:39.397Z",
+      "archivedAt": "2026-06-15T08:06:06.111Z"
     },
     {
       "recipientUserId": "global-admin",
@@ -89,14 +95,15 @@
       "title": "HR communication center is active",
       "body": "Company announcements, policy updates, request comments, and service messages will appear here.",
       "severity": "info",
-      "status": "Read",
+      "status": "Archived",
       "href": "/hris/announcements",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Human Capital",
       "metadata": {
         "persistentSeed": true
       },
-      "readAt": "2026-06-14T13:41:11.976Z"
+      "readAt": "2026-06-14T13:41:11.976Z",
+      "archivedAt": "2026-06-15T08:06:04.982Z"
     },
     {
       "recipientUserId": "global-admin",
@@ -114,14 +121,15 @@
       "title": "Approval queue requires review",
       "body": "Review pending HR, payroll, leave, workforce, and employee service requests according to your role permissions.",
       "severity": "warning",
-      "status": "Read",
+      "status": "Archived",
       "href": "/hris/administration/approval-workflow",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Workflow Engine",
       "metadata": {
         "persistentSeed": true
       },
-      "readAt": "2026-06-14T13:41:09.255Z"
+      "readAt": "2026-06-14T13:41:09.255Z",
+      "archivedAt": "2026-06-15T08:06:03.545Z"
     },
     {
       "recipientUserId": "global-admin",
@@ -139,14 +147,15 @@
       "title": "Timesheet and attendance actions available",
       "body": "Timesheet periods, project approvals, attendance exceptions, and payroll-ready hours are available for review.",
       "severity": "warning",
-      "status": "Read",
+      "status": "Archived",
       "href": "/hris/time-and-logs/timesheet-approval",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Workforce Management",
       "metadata": {
         "persistentSeed": true
       },
-      "readAt": "2026-06-14T13:41:05.452Z"
+      "readAt": "2026-06-14T13:41:05.452Z",
+      "archivedAt": "2026-06-15T08:06:00.591Z"
     }
   ]
 }

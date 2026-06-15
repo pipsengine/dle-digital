@@ -28,6 +28,7 @@ type RunStatus = 'Draft' | 'Calculated' | 'Submitted' | 'Finance Approved' | 'HR
 type RecordStatus = 'Ready' | 'Review' | 'Blocked';
 
 type PayrollRecord = {
+  recordKey: string;
   employeeId: string;
   employeeCode: string;
   fullName: string;
@@ -75,6 +76,14 @@ type PayrollRun = {
   audit: Array<{ at: string; actor: Role; action: string; from?: RunStatus; to?: RunStatus; note?: string }>;
 };
 
+type PayrollPeriodOption = {
+  period: string;
+  periodLabel: string;
+  status: RunStatus;
+  employeeCount: number;
+  netPay: number;
+};
+
 type Payload = {
   generatedAt: string;
   source: string;
@@ -93,6 +102,7 @@ type Payload = {
   };
   run: PayrollRun | null;
   runs: PayrollRun[];
+  availablePeriods: PayrollPeriodOption[];
   configurations: Record<string, { id: string; name: string; effectiveFrom: string }>;
   summary: {
     employees: number;
@@ -158,6 +168,7 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [role, setRole] = useState<Role>('Payroll Officer');
   const [period, setPeriod] = useState('');
+  const [periodQuery, setPeriodQuery] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('All');
   const [group, setGroup] = useState('All');
@@ -192,6 +203,13 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
   const lastLoaded = payload?.generatedAt || initialNow;
   const runStatus = payload?.run?.status || 'Draft';
   const groups = useMemo(() => ['All', ...Array.from(new Set((payload?.records || []).map((record) => record.payrollGroup || 'Unassigned'))).sort()], [payload?.records]);
+  const periodOptions = useMemo(() => {
+    const q = periodQuery.trim().toLowerCase();
+    return (payload?.availablePeriods || []).filter((item) => {
+      if (!q) return true;
+      return [item.period, item.periodLabel, item.status].some((value) => String(value || '').toLowerCase().includes(q));
+    });
+  }, [payload?.availablePeriods, periodQuery]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (payload?.records || []).filter((record) => {
@@ -258,7 +276,32 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none" />
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={periodQuery}
+                onChange={(event) => setPeriodQuery(event.target.value)}
+                placeholder="Search period"
+                className="h-10 w-40 rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs font-extrabold text-slate-800 outline-none"
+              />
+            </div>
+            <select
+              value={period}
+              onChange={(event) => {
+                const nextPeriod = event.target.value;
+                setPeriod(nextPeriod);
+                void load(nextPeriod);
+              }}
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none"
+            >
+              {periodOptions.map((item) => (
+                <option key={item.period} value={item.period}>{item.periodLabel} - {item.status}</option>
+              ))}
+              {!periodOptions.some((item) => item.period === period) && period ? <option value={period}>{period}</option> : null}
+            </select>
+            <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none" />
+          </div>
           <select value={role} onChange={(event) => setRole(event.target.value as Role)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none">
             {['Payroll Officer', 'Finance Controller', 'HR Director', 'HR Manager', 'Executive Management', 'Auditor', 'Employee', 'Super Admin'].map((item) => <option key={item}>{item}</option>)}
           </select>
@@ -371,7 +414,7 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
                 {filtered.map((record) => {
                   const styles = toneStyles[statusTone(record.status)];
                   return (
-                    <tr key={record.employeeId} className="hover:bg-slate-50">
+                    <tr key={record.recordKey} className="hover:bg-slate-50">
                       <td className="px-4 py-3"><div className="font-black text-slate-950">{record.fullName}</div><div className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</div></td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{record.payrollGroup}</td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>

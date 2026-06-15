@@ -3,6 +3,7 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { calculatePayrollEarnings, sageOpeningPayslipReconciliation } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
@@ -66,6 +67,23 @@ const monthPeriod = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
+const knownPayrollPeriods = (runs: PayrollRunHistory[], currentPeriod: string) => {
+  const seeded = ['2026-04', '2026-05', '2026-06', currentPeriod];
+  return Array.from(new Set([...seeded, ...runs.map((run) => run.period)]))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a))
+    .map((period) => {
+      const run = runs.find((item) => item.period === period);
+      return {
+        period,
+        periodLabel: periodLabel(period),
+        status: run?.status || 'Draft',
+        employeeCount: run?.employeeCount || 0,
+        netPay: run?.netPay || 0,
+      };
+    });
+};
+
 const periodLabel = (period: string) => {
   const [year, month] = period.split('-').map(Number);
   return new Date(year || new Date().getFullYear(), (month || 1) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
@@ -83,14 +101,6 @@ const readRuns = async (): Promise<PayrollRunHistory[]> => {
 const writeRuns = async (runs: PayrollRunHistory[]) => {
   await mkdir(path.dirname(RUNS_PATH), { recursive: true });
   await writeFile(RUNS_PATH, JSON.stringify(runs, null, 2), 'utf8');
-};
-
-const payrollAmounts = (employee: DleEmployeeDirectoryRow) => {
-  const basePay = Number(employee.periodSalary || (employee.annualSalary ? Number(employee.annualSalary) / 12 : 0) || 0);
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  const allowances = basePay * allowanceRate;
-  return { basePay: roundMoney(basePay), allowances: roundMoney(allowances), grossPay: roundMoney(basePay + allowances) };
 };
 
 const statusFromIssues = (issues: string[]): RecordStatus => {
@@ -123,14 +133,16 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     map.set(input.employee.employeeId, current);
     return map;
   }, new Map<string, ReturnType<typeof loanInputsFromApplications>>());
-  const records = employeeSource.employees.map((employee) => {
-    const amounts = payrollAmounts(employee);
-    const tax = calculatePayrollTax(payrollInputFromEmployee(employee), taxVersion);
-    const pension = calculatePension(pensionInputFromEmployee(employee), pensionVersion);
-    const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length), fundsVersion);
+  const calculationOptions = { period: requestedPeriod, includePeriodAdjustments: true };
+  const records = employeeSource.employees.map((employee, index) => {
+    const amounts = calculatePayrollEarnings(employee, { period: requestedPeriod, includePeriodAdjustments: true });
+    const tax = calculatePayrollTax(payrollInputFromEmployee(employee, calculationOptions), taxVersion);
+    const pension = calculatePension(pensionInputFromEmployee(employee, calculationOptions), pensionVersion);
+    const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length, calculationOptions), fundsVersion);
     const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
-    const paye = tax.monthlyPaye;
-    const employeePension = pension.employeeContribution;
+    const sageReconciliation = sageOpeningPayslipReconciliation(employee, requestedPeriod);
+    const paye = sageReconciliation?.paye ?? tax.monthlyPaye;
+    const employeePension = sageReconciliation?.pensionEmployee ?? pension.employeeContribution;
     const statutoryEmployee = funds.employeeDeductions;
     const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
     const otherDeductions = 0;
@@ -153,6 +165,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       ...netPay <= 0 && amounts.grossPay > 0 ? ['Net pay is zero after deductions'] : [],
     ];
     return {
+      recordKey: `${requestedPeriod}-${employee.employeeDbId || 'row'}-${employee.employeeId || employee.employeeCode || 'employee'}-${index}`,
       employeeId: employee.employeeId,
       employeeCode: employee.employeeCode,
       fullName: employee.fullName,
@@ -168,6 +181,10 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       basePay: amounts.basePay,
       allowances: amounts.allowances,
       grossPay: amounts.grossPay,
+      taxablePay: amounts.taxablePay,
+      nonTaxablePay: amounts.nonTaxablePay,
+      earningProfile: amounts.profileName,
+      earningProfileId: amounts.profileId,
       paye: roundMoney(paye),
       pensionEmployee: roundMoney(employeePension),
       pensionEmployer: roundMoney(employerPension),
@@ -260,6 +277,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     permissions: perms,
     run: latestRun,
     runs: runs.slice(0, 12),
+    availablePeriods: knownPayrollPeriods(runs, requestedPeriod),
     configurations: {
       tax: { id: taxVersion.id, name: taxVersion.name, effectiveFrom: taxVersion.effectiveFrom },
       pension: { id: pensionVersion.id, name: pensionVersion.name, effectiveFrom: pensionVersion.effectiveFrom },

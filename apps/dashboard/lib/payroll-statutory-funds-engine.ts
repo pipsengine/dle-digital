@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { calculatePayrollEarnings, resolvePayrollEarningProfile, type PayrollEarningsOptions } from '@/lib/payroll-earnings-engine';
 
 export type FundStatus = 'Draft' | 'Active' | 'Retired';
 export type FundPayer = 'Employee' | 'Employer';
@@ -84,11 +85,9 @@ export const activeStatutoryFundsVersion = (config: StatutoryFundsConfig, asOf =
   );
 };
 
-export const statutoryFundInputFromEmployee = (employee: DleEmployeeDirectoryRow, organizationEmployeeCount: number): StatutoryFundInput => {
-  const monthlyBasePay = Number(employee.periodSalary || (employee.annualSalary ? Number(employee.annualSalary) / 12 : 0) || 0);
-  const type = compact(employee.employmentType).toLowerCase();
-  const allowanceRate = type.includes('daily') ? 0.08 : type.includes('lumpsum') ? 0.12 : type.includes('it') || type.includes('nysc') ? 0.04 : 0.22;
-  return { employee, monthlyBasePay, monthlyAllowances: monthlyBasePay * allowanceRate, organizationEmployeeCount };
+export const statutoryFundInputFromEmployee = (employee: DleEmployeeDirectoryRow, organizationEmployeeCount: number, options?: PayrollEarningsOptions): StatutoryFundInput => {
+  const earnings = calculatePayrollEarnings(employee, options);
+  return { employee, monthlyBasePay: earnings.basicPay, monthlyAllowances: earnings.allowances, organizationEmployeeCount };
 };
 
 const cap = (amount: number, rule: StatutoryFundRule) => {
@@ -100,6 +99,8 @@ const cap = (amount: number, rule: StatutoryFundRule) => {
 
 const eligible = (rule: StatutoryFundRule, input: StatutoryFundInput) => {
   if (!rule.enabled) return false;
+  const profileId = resolvePayrollEarningProfile(input.employee);
+  if (rule.id === 'nhf' && String(profileId).startsWith('contract-')) return false;
   const type = compact(input.employee.employmentType || input.employee.staffCategory || input.employee.employeeCategory).toLowerCase();
   if (rule.eligibleEmploymentTypes.length && !rule.eligibleEmploymentTypes.some((item) => type.includes(item.toLowerCase()))) return false;
   if (Number(rule.minimumMonthlyIncome || 0) > 0 && input.monthlyBasePay < Number(rule.minimumMonthlyIncome)) return false;

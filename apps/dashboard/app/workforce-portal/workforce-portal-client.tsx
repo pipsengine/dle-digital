@@ -4,7 +4,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { NotificationCenter } from '@/components/layout/notification-center';
 import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
 import {
@@ -32,6 +32,7 @@ import {
   LockKeyhole,
   Megaphone,
   Plane,
+  Printer,
   RefreshCcw,
   Send,
   ShieldCheck,
@@ -55,6 +56,29 @@ type EssRequest = {
 };
 type LoanProduct = { id: string; label: string; type: string; interestRate: number; maxPrincipalMultiple: number; maxTenorMonths: number };
 type SimpleRecord = Record<string, string | number | boolean | null>;
+type PayrollLine = { code?: string; label: string; units?: number; amount: number; taxable?: boolean };
+type PayrollHistoryRow = {
+  period: string;
+  periodLabel?: string;
+  payPeriodStart?: string;
+  payPeriodEnd?: string;
+  payDate?: string;
+  payrollNumber?: string;
+  payeReference?: string;
+  grossPay: number;
+  deductions: number;
+  netPay: number;
+  status: string;
+  earnings?: PayrollLine[];
+  deductionLines?: Array<{ code?: string; label: string; units?: number; amount: number }>;
+  employerContributionLines?: Array<{ code?: string; label: string; units?: number; amount: number }>;
+  totalEmployerContributions?: number;
+  employeeInfo?: Record<string, string | number>;
+  statutoryInfo?: Record<string, string | number>;
+  leaveInfo?: { annualLeaveEntitlement: number; leaveTaken: number; leaveBalance: number; carryForwardLeave: number };
+  ytd?: { grossEarnings: number; taxPaid: number; pensionContribution: number; deductions: number; netEarnings: number };
+  verification?: { qrCode: string; generatedAt: string; approvalStatus: string };
+};
 type Payload = {
   generatedAt: string;
   locale: string;
@@ -86,7 +110,7 @@ type Payload = {
     security: SimpleRecord[];
   };
   attendance: { records: SimpleRecord[]; shifts: SimpleRecord[]; timesheets: SimpleRecord[] };
-  payrollHistory: SimpleRecord[];
+  payrollHistory: PayrollHistoryRow[];
   performance: { goals: SimpleRecord[]; kpis: SimpleRecord[]; reviews: SimpleRecord[]; developmentPlans: SimpleRecord[] };
   learning: { courses: SimpleRecord[]; materials: SimpleRecord[]; certifications: SimpleRecord[] };
   claims: SimpleRecord[];
@@ -107,8 +131,44 @@ type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 type Tab = 'dashboard' | 'profile' | 'leave' | 'time' | 'payroll' | 'documents' | 'performance' | 'learning' | 'claims' | 'loans' | 'services' | 'travel' | 'assets' | 'communication' | 'workflow' | 'exit' | 'security';
 
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
+const money2Fmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const numFmt = new Intl.NumberFormat('en-GB');
 const money = (value: number) => moneyFmt.format(value || 0);
+const money2 = (value: number) => money2Fmt.format(value || 0);
+const fmtDate = (value?: string) => {
+  if (!value) return '-';
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-GB', { timeZone: 'UTC' });
+};
+const wordsUnderThousand = (value: number): string => {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  if (value < 20) return ones[value];
+  if (value < 100) return `${tens[Math.floor(value / 10)]}${value % 10 ? ` ${ones[value % 10]}` : ''}`;
+  return `${ones[Math.floor(value / 100)]} Hundred${value % 100 ? ` and ${wordsUnderThousand(value % 100)}` : ''}`;
+};
+const numberToWords = (value: number): string => {
+  const whole = Math.floor(Math.abs(value));
+  if (!whole) return 'Zero';
+  const scales: Array<[number, string]> = [[1_000_000_000, 'Billion'], [1_000_000, 'Million'], [1_000, 'Thousand']];
+  let remainder = whole;
+  const parts: string[] = [];
+  for (const [scale, label] of scales) {
+    const count = Math.floor(remainder / scale);
+    if (count) {
+      parts.push(`${wordsUnderThousand(count)} ${label}`);
+      remainder %= scale;
+    }
+  }
+  if (remainder) parts.push(wordsUnderThousand(remainder));
+  return parts.join(', ');
+};
+const amountInWords = (value: number) => {
+  const naira = Math.floor(Math.abs(value || 0));
+  const kobo = Math.round((Math.abs(value || 0) - naira) * 100);
+  return `${numberToWords(naira)} Naira${kobo ? `, ${numberToWords(kobo)} Kobo` : ''} Only`;
+};
 const stableDateTime = (value: string) => {
   const iso = new Date(value).toISOString();
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
@@ -221,6 +281,334 @@ function DataList({ rows, titleKey = 'title', subtitleKeys = [], statusKey = 'st
       })}
       {!rows.length && <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-500">No records found.</div>}
     </div>
+  );
+}
+
+function PayrollHistoryPanel({ rows }: { rows: PayrollHistoryRow[] }) {
+  if (!rows.length) {
+    return <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-500">No payroll records found.</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {rows.map((row) => (
+        <article key={row.period} className="rounded-lg border border-violet-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-violet-100 bg-violet-50/70 px-4 py-3">
+            <div>
+              <p className="text-sm font-black text-slate-950">{row.period}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Employee payroll statement</p>
+            </div>
+            <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${statusTone(row.status)}`}>{row.status}</span>
+          </div>
+
+          <div className="grid grid-cols-3 border-b border-slate-100 text-center text-xs font-black">
+            <div className="p-3">
+              <p className="text-slate-500">Gross</p>
+              <p className="mt-1 text-slate-950">{money(row.grossPay)}</p>
+            </div>
+            <div className="border-x border-slate-100 p-3">
+              <p className="text-slate-500">Deductions</p>
+              <p className="mt-1 text-red-700">{money(row.deductions)}</p>
+            </div>
+            <div className="p-3">
+              <p className="text-slate-500">Net Pay</p>
+              <p className="mt-1 text-emerald-700">{money(row.netPay)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-[1.25fr_0.75fr]">
+            <div>
+              <p className="mb-2 text-xs font-black uppercase tracking-normal text-slate-500">Earnings</p>
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-slate-50">
+                {(row.earnings || []).map((line) => (
+                  <div key={`${row.period}-${line.code || line.label}`} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2.5 text-xs">
+                    <div className="min-w-0">
+                      <p className="font-black text-slate-950">{line.label}</p>
+                      <p className="mt-0.5 font-semibold text-slate-500">{line.code || 'Payroll earning'} - {line.taxable ? 'Taxable' : 'Non-taxable'}</p>
+                    </div>
+                    <p className="font-black text-slate-950">{money(line.amount)}</p>
+                  </div>
+                ))}
+                {!(row.earnings || []).length ? <p className="p-3 text-xs font-bold text-slate-500">No earnings recorded.</p> : null}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-black uppercase tracking-normal text-slate-500">Deductions</p>
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-slate-50">
+                {(row.deductionLines || []).map((line) => (
+                  <div key={`${row.period}-${line.label}`} className="flex items-center justify-between gap-3 px-3 py-2.5 text-xs">
+                    <p className="font-black text-slate-950">{line.label}</p>
+                    <p className="font-black text-red-700">{money(line.amount)}</p>
+                  </div>
+                ))}
+                {!(row.deductionLines || []).length ? <p className="p-3 text-xs font-bold text-slate-500">No deductions recorded.</p> : null}
+              </div>
+            </div>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+const lineAmount = (lines: PayrollLine[] | undefined, matchers: string[]) => {
+  const hit = (lines || []).find((line) => {
+    const text = `${line.code || ''} ${line.label || ''}`.toUpperCase();
+    return matchers.some((matcher) => text.includes(matcher));
+  });
+  return hit ? { ...hit, label: hit.label } : null;
+};
+
+const standardLines = (lines: PayrollLine[] | undefined, defs: Array<[string, string[]]>) =>
+  defs.map(([label, matchers]) => lineAmount(lines, matchers) || { label, units: 0, amount: 0 });
+
+function PayslipWorkspace({ payload, employee }: { payload: Payload | null; employee?: Payload['employee'] }) {
+  const periods = payload?.payrollHistory || [];
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+  const selected = periods.find((item) => item.period === selectedPeriod) || periods[0];
+
+  useEffect(() => {
+    if (!selectedPeriod && periods[0]?.period) setSelectedPeriod(periods[0].period);
+  }, [periods, selectedPeriod]);
+
+  if (!selected) {
+    return <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-500">No payslip is available.</div>;
+  }
+
+  const info = selected.employeeInfo || {};
+  const statutory = selected.statutoryInfo || {};
+  const leave = selected.leaveInfo || { annualLeaveEntitlement: 0, leaveTaken: 0, leaveBalance: 0, carryForwardLeave: 0 };
+  const ytd = selected.ytd || { grossEarnings: 0, taxPaid: 0, pensionContribution: 0, deductions: 0, netEarnings: 0 };
+  const verification = selected.verification || { qrCode: `DLE|${employee?.employeeId || ''}|${selected.period}`, generatedAt: payload?.generatedAt || new Date().toISOString(), approvalStatus: 'Payroll Approved' };
+  const earnings = standardLines(selected.earnings, [
+    ['Basic Salary', ['BASIC']],
+    ['Housing Allowance', ['HOUSING', 'HOUSE']],
+    ['Transport Allowance', ['TRANSPORT', 'TRANS']],
+    ['Other Allowance', ['OTHERALL', 'OTHER ALLOWANCE']],
+    ['Utility Allowance', ['UTILITY', 'UTILITIES']],
+    ['Furniture Allowance', ['FURNITURE', 'FURN']],
+    ['Leave Allowance', ['LEAVE ALLOWANCE', 'LEAVE_ALLOW']],
+    ['Medical Allowance', ['MEDICAL']],
+    ['Meal Allowance', ['MEAL']],
+    ['Shift Allowance', ['SHIFT']],
+    ['Overtime', ['OVERTIME', 'OVT']],
+    ['Bonus', ['BONUS']],
+    ['Other Earnings', ['REFUND', 'OTHER PAY', 'OTHER EARNINGS']],
+  ]);
+  const deductions = standardLines(selected.deductionLines, [
+    ['PAYE Tax', ['PAYE']],
+    ['Pension Employee Contribution', ['PENSION']],
+    ['NHF', ['NHF']],
+    ['NHIA', ['NHIA']],
+    ['Cooperative Deduction', ['COOPERATIVE']],
+    ['Loan Repayment', ['LOAN']],
+    ['Union Dues', ['UNION']],
+    ['Absence/Late Penalty', ['ABSENCE', 'LATE']],
+    ['Other Deductions', ['OTHER']],
+  ]);
+  const employerLines = standardLines(selected.employerContributionLines as PayrollLine[] | undefined, [
+    ['Pension Employer Contribution', ['PENSION_EMPLOYER', 'PENSION EMPLOYER']],
+    ['NSITF', ['NSITF']],
+    ['ITF Levy', ['ITF']],
+    ['Industrial Training Fund', ['INDUSTRIAL TRAINING']],
+    ['Group Life Insurance', ['GROUP LIFE']],
+    ['Other Employer Contributions', ['OTHER EMPLOYER']],
+  ]);
+  const totalEmployer = selected.totalEmployerContributions ?? employerLines.reduce((sum, line) => sum + line.amount, 0);
+  const employeeRows = [
+    ['Employee Code', info.employeeCode || employee?.employeeCode],
+    ['Employee Name', info.employeeName || employee?.fullName],
+    ['Employee Category', info.employeeCategory || employee?.payrollGroup],
+    ['Department', info.department || employee?.department],
+    ['Unit', info.unit || employee?.businessUnit],
+    ['Designation / Job Title', info.designation || employee?.jobTitle],
+    ['Grade Level', info.gradeLevel || employee?.salaryGrade],
+    ['Employment Type', info.employmentType || 'Permanent'],
+    ['Date of Employment', fmtDate(String(info.dateOfEmployment || ''))],
+    ['Employee Status', info.employeeStatus || 'Active'],
+  ];
+  const bankRows = [
+    ['Bank Name', statutory.bankName || 'Stanbic IBTC'],
+    ['Account Number', statutory.accountNumber || 'Not configured'],
+    ['Pension Fund Administrator', statutory.pensionFundAdministrator || 'Not configured'],
+    ['Pension Number', statutory.pensionNumber || 'Not configured'],
+    ['NHF Number', statutory.nhfNumber || 'Not applicable'],
+    ['Tax Number', statutory.taxNumber || selected.payeReference || 'Not configured'],
+    ['NHIA Number', statutory.nhiaNumber || 'Not applicable'],
+    ['Employee Address', info.address || '03 Osoba Street, Igbogila Ipaja, Lagos State'],
+  ];
+
+  const printPayslip = () => window.print();
+  const emailPayslip = () => {
+    const subject = encodeURIComponent(`Payslip ${selected.periodLabel || selected.period}`);
+    const body = encodeURIComponent(`Please find my payslip for ${selected.periodLabel || selected.period}. Net pay: ${money2(selected.netPay)}.`);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
+  return (
+    <section className="space-y-4">
+      <style jsx global>{`
+        #ess-payslip-print {
+          width: 210mm;
+          min-height: 297mm;
+          max-height: 297mm;
+          overflow: hidden;
+        }
+        @media print {
+          body * { visibility: hidden !important; }
+          #ess-payslip-print, #ess-payslip-print * { visibility: visible !important; }
+          #ess-payslip-print { position: absolute !important; inset: 0 auto auto 0 !important; width: 210mm !important; height: 297mm !important; min-height: 297mm !important; max-height: 297mm !important; box-shadow: none !important; overflow: hidden !important; }
+          .ess-no-print { display: none !important; }
+          @page { size: A4 portrait; margin: 0; }
+        }
+      `}</style>
+
+      <div className="ess-no-print flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={selected.period} onChange={(event) => setSelectedPeriod(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-800">
+            {periods.map((period) => <option key={period.period} value={period.period}>{period.periodLabel || period.period}</option>)}
+          </select>
+          <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">{selected.status}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={printPayslip} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#008FD5] px-3 text-xs font-black text-white hover:bg-[#087bb5]"><Printer className="h-4 w-4" /> Print Payslip</button>
+          <button type="button" onClick={printPayslip} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-800 hover:bg-slate-50"><Download className="h-4 w-4" /> Download PDF</button>
+          <button type="button" onClick={emailPayslip} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-800 hover:bg-slate-50"><Send className="h-4 w-4" /> Email</button>
+        </div>
+      </div>
+
+      <article id="ess-payslip-print" className="mx-auto rounded-lg border border-[#2f67b1] bg-white p-3 text-[11px] leading-tight text-slate-950 shadow-sm">
+        <header className="grid grid-cols-1 gap-3 border-b border-[#2f67b1] pb-3 md:grid-cols-[1fr_auto]">
+          <div className="flex items-start gap-4">
+            <div className="relative h-16 w-48 shrink-0">
+              <Image src="/brand/dorman-long-logo.jpg" alt="Dorman Long Engineering Limited" fill sizes="208px" className="object-contain" priority />
+            </div>
+          </div>
+          <div className="text-left md:text-right">
+            <h2 className="text-3xl font-black tracking-normal text-[#123f82]">PAYSLIP</h2>
+            <p className="mt-0.5 text-xs font-black uppercase text-slate-700">For the month of</p>
+            <p className="text-lg font-black text-[#123f82]">{selected.periodLabel || selected.period}</p>
+          </div>
+        </header>
+
+        <section className="grid grid-cols-1 gap-3 border-b border-[#9bb9df] py-3 md:grid-cols-2">
+          <div className="grid grid-cols-[130px_10px_1fr] gap-y-1">
+            <p className="font-black">Company Name</p><p>:</p><p>DORMANLONG ENGINEERING LIMITED</p>
+            <p className="font-black">Company Address</p><p>:</p><p>12/14 AGEGE MOTOR ROAD, IDI-ORO MUSHIN, LAGOS</p>
+            <p className="font-black">RC Number</p><p>:</p><p>744</p>
+            <p className="font-black">TIN</p><p>:</p><p>01234567-0001</p>
+          </div>
+          <div className="grid grid-cols-[120px_10px_1fr] gap-y-1 md:border-l md:border-[#9bb9df] md:pl-6">
+            <p className="font-black">Pay Period</p><p>:</p><p>{fmtDate(selected.payPeriodStart)} - {fmtDate(selected.payPeriodEnd)}</p>
+            <p className="font-black">Pay Date</p><p>:</p><p>{fmtDate(selected.payDate)}</p>
+            <p className="font-black">Payroll No.</p><p>:</p><p>{selected.payrollNumber || '-'}</p>
+            <p className="font-black">PAYE Ref. No.</p><p>:</p><p>{selected.payeReference || '-'}</p>
+          </div>
+        </section>
+
+        <section className="mt-3 rounded-lg border border-[#2f67b1]">
+          <h3 className="border-b border-[#2f67b1] px-3 py-1.5 text-xs font-black uppercase text-[#123f82]">Employee Information</h3>
+          <div className="grid grid-cols-1 gap-0 md:grid-cols-2">
+            {[employeeRows, bankRows].map((rows, idx) => (
+              <div key={idx ? 'bank' : 'employee'} className={`grid grid-cols-[128px_10px_1fr] gap-y-1 p-3 ${idx ? 'md:border-l md:border-[#9bb9df]' : ''}`}>
+                {rows.map(([label, value]) => <Fragment key={label}><p className="font-black">{label}</p><p>:</p><p>{String(value || '-')}</p></Fragment>)}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <PayslipTable title="Earnings" lines={earnings} totalLabel="Total Earnings" total={selected.grossPay} />
+          <PayslipTable title="Deductions" lines={deductions} totalLabel="Total Deductions" total={selected.deductions} />
+        </section>
+
+        <section className="mt-3 rounded-lg border border-[#2f67b1] bg-blue-50/40 p-2.5 text-center">
+          <div className="grid grid-cols-1 gap-2 text-xs font-black md:grid-cols-3">
+            <p>Gross Pay: <span className="text-[#123f82]">{money2(selected.grossPay)}</span></p>
+            <p>Total Deductions: <span className="text-red-700">{money2(selected.deductions)}</span></p>
+            <p>Net Pay: <span className="text-xl text-[#123f82]">{money2(selected.netPay)}</span></p>
+          </div>
+          <p className="mt-1.5 text-xs font-black">Amount in Words: {amountInWords(selected.netPay)}</p>
+        </section>
+
+        <section className="mt-3 rounded-lg border border-[#2f67b1]">
+          <PayslipTable title="Company Contributions" lines={employerLines} totalLabel="Total Company Contributions" total={totalEmployer} wide />
+        </section>
+
+        <section className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <SummaryBlock title="Leave Information" rows={[
+            ['Annual Leave Entitlement', `${leave.annualLeaveEntitlement} days`],
+            ['Leave Taken', `${leave.leaveTaken} days`],
+            ['Leave Balance', `${leave.leaveBalance} days`],
+            ['Carry Forward Leave', `${leave.carryForwardLeave} days`],
+          ]} />
+          <SummaryBlock title="Year-To-Date Summary" rows={[
+            ['YTD Gross Earnings', money2(ytd.grossEarnings)],
+            ['YTD Tax Paid', money2(ytd.taxPaid)],
+            ['YTD Pension Contribution', money2(ytd.pensionContribution)],
+            ['YTD Deductions', money2(ytd.deductions)],
+            ['YTD Net Earnings', money2(ytd.netEarnings)],
+          ]} />
+        </section>
+
+        <footer className="mt-3 rounded-lg border border-[#9bb9df] p-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_110px]">
+            <div className="leading-5">
+              <p className="font-black text-[#123f82]">NOTES</p>
+              <p>1. This is a system generated payslip and does not require any signature.</p>
+              <p>2. Payroll Processing Date: {stableDateTime(verification.generatedAt)}</p>
+              <p>3. HR Approval Status: {verification.approvalStatus}</p>
+              <p>4. All amounts are in Nigerian Naira (NGN).</p>
+            </div>
+            <div className="flex flex-col items-center justify-center gap-2">
+              <div className="grid h-20 w-20 grid-cols-5 grid-rows-5 gap-0.5 rounded-lg border border-[#123f82] bg-white p-1.5">
+                {Array.from({ length: 25 }).map((_, index) => <span key={index} className={(verification.qrCode.charCodeAt(index % verification.qrCode.length) + index) % 2 ? 'bg-[#123f82]' : 'bg-slate-100'} />)}
+              </div>
+              <p className="text-center text-[10px] font-black text-slate-600">Verification QR</p>
+            </div>
+          </div>
+          <p className="mt-2 text-center text-xs font-black italic text-[#123f82]">THANK YOU FOR YOUR CONTINUED CONTRIBUTION TO DORMANLONG ENGINEERING LIMITED.</p>
+        </footer>
+      </article>
+    </section>
+  );
+}
+
+function PayslipTable({ title, lines, totalLabel, total, wide = false }: { title: string; lines: PayrollLine[]; totalLabel: string; total: number; wide?: boolean }) {
+  return (
+    <div className={`${wide ? '' : 'rounded-lg border border-[#2f67b1]'} overflow-hidden`}>
+      <h3 className="bg-[#123f82] px-2 py-1.5 text-center text-xs font-black uppercase text-white">{title}</h3>
+      <table className="w-full border-collapse text-[11px]">
+        <thead className="bg-blue-50 text-xs uppercase">
+          <tr><th className="border border-[#9bb9df] px-2 py-1.5 text-left">Description</th><th className="border border-[#9bb9df] px-2 py-1.5 text-center">Units</th><th className="border border-[#9bb9df] px-2 py-1.5 text-right">Amount (NGN)</th></tr>
+        </thead>
+        <tbody>
+          {lines.map((line) => (
+            <tr key={`${title}-${line.code || line.label}`}>
+              <td className="border border-[#d7e4f4] px-2 py-1 font-semibold">{line.label}</td>
+              <td className="border border-[#d7e4f4] px-2 py-1 text-center">{Number(line.units || 0).toFixed(2)}</td>
+              <td className="border border-[#d7e4f4] px-2 py-1 text-right font-semibold">{money2(line.amount).replace('NGN', '').trim()}</td>
+            </tr>
+          ))}
+          <tr className="bg-blue-50">
+            <td className="border border-[#2f67b1] px-2 py-1.5 font-black uppercase text-[#123f82]" colSpan={2}>{totalLabel}</td>
+            <td className="border border-[#2f67b1] px-2 py-1.5 text-right font-black">{money2(total).replace('NGN', '').trim()}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SummaryBlock({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+  return (
+    <section className="rounded-lg border border-[#2f67b1]">
+      <h3 className="border-b border-[#9bb9df] px-3 py-1.5 text-xs font-black uppercase text-[#123f82]">{title}</h3>
+      <div className="divide-y divide-[#d7e4f4]">
+        {rows.map(([label, value]) => <div key={label} className="flex items-center justify-between gap-4 px-3 py-1 text-[11px]"><span className="font-bold text-slate-600">{label}</span><span className="font-black text-slate-950">{value}</span></div>)}
+      </div>
+    </section>
   );
 }
 
@@ -707,7 +1095,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           )}
 
           {tab === 'payroll' && widgets && (
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+            <section className="space-y-4">
               <Section title="Payroll Self-Service">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <MetricCard label="Gross Pay" value={money(widgets.payroll.monthlyPay)} detail="Current month" icon={Banknote} tone="bg-violet-100 text-violet-700" />
@@ -716,19 +1104,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
                   <MetricCard label="Pension" value={money(widgets.payroll.pension)} detail="Employee contribution" icon={Landmark} tone="bg-cyan-100 text-cyan-700" />
                 </div>
               </Section>
-              <Section title="Payslips, Loans & Salary Actions">
-                <div className="space-y-3">
-                  {['View payslip history', 'Download current payslip', 'View tax deductions', 'View pension contributions', 'View loan deductions', 'Salary information request'].map((item) => (
-                    <button key={item} type="button" className={`flex w-full items-center justify-between rounded-lg border px-3 py-3 text-left text-sm font-black text-slate-800 hover:bg-white ${areaTone(item).item}`}>
-                      <span>{item}</span><ArrowRight className="h-4 w-4 text-slate-400" />
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-4">
-                  <p className="mb-2 text-xs font-black uppercase tracking-normal text-slate-500">Payroll History</p>
-                  <DataList rows={payload?.payrollHistory || []} titleKey="period" subtitleKeys={['grossPay', 'deductions', 'netPay']} />
-                </div>
-              </Section>
+              <PayslipWorkspace payload={payload} employee={employee} />
             </section>
           )}
 

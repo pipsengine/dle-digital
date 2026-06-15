@@ -128,8 +128,8 @@ export default function TimesheetPeriodClient() {
   const selectedPeriodId = `per-${month}`;
   const canOpenSelectedPeriod =
     Boolean(payload?.permissions.canManagePeriod) &&
-    selectedPeriodId === payload?.currentPeriodId &&
-    !payload?.periods.some((period) => period.id === selectedPeriodId && period.status === 'Open');
+    selectedPeriodId <= String(payload?.currentPeriodId || '') &&
+    !payload?.periods.some((period) => period.id === selectedPeriodId && (period.status === 'Open' || period.status === 'Locked'));
 
   if (loading && !payload) {
     return (
@@ -228,7 +228,7 @@ export default function TimesheetPeriodClient() {
                   const isCurrentPeriod = period.id === payload?.currentPeriodId;
                   const canManagePeriod = Boolean(payload?.permissions.canManagePeriod);
                   const canClosePeriod = canManagePeriod && isCurrentPeriod && period.status === 'Open';
-                  const canOpenPeriod = canManagePeriod && isCurrentPeriod && period.status === 'Closed';
+                  const canOpenPeriod = canManagePeriod && period.id <= String(payload?.currentPeriodId || '') && period.status === 'Closed';
                   const isHistoricalClosed = !isCurrentPeriod && period.status === 'Closed';
 
                   return (
