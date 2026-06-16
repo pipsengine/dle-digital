@@ -96,7 +96,7 @@ export async function GET() {
       readActiveSagePayrollEmployees(),
       readEmployeeDirectoryFromDb(),
     ]);
-    const hrisByCode = new Map(hrisEmployees.map((employee) => [normalizedCode(employee.employeeCode), employee]));
+    const hrisByCode = new Map((hrisEmployees ?? []).map((employee) => [normalizedCode(employee.employeeCode), employee]));
     const targetSageEmployees = sageEmployees.filter(isPermanentOrLumpsumSageEmployee);
 
     const records = targetSageEmployees.map((source) => {
@@ -207,7 +207,7 @@ export async function POST(request: Request) {
       readEmployeeDirectoryFromDb(),
     ]);
     const hrisByCode = new Map<string, DleEmployeeDirectoryRow>();
-    for (const employee of hrisEmployees) {
+    for (const employee of hrisEmployees ?? []) {
       const keys = [
         normalizePayrollMatchKey(employee.employeeCode),
         normalizePayrollMatchKey(employee.employeeId),

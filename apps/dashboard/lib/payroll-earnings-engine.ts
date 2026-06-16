@@ -364,7 +364,7 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
     const grossPay = roundMoney(basePay + allowances);
     return {
       profileId,
-      profileName: profileId === 'contract-day-rate' ? 'Contract Staff on Day Rate' : 'Payroll Setup Fallback',
+      profileName: 'Payroll Setup Fallback',
       grossPay,
       basePay: roundMoney(basePay),
       basicPay: roundMoney(basePay),

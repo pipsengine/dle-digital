@@ -385,14 +385,14 @@ export default function TimesheetEntryClient() {
       
       const data = json.data as Payload;
       const dbWorkCenters = data.workCenters || [];
-      const dbLocationNames = (data.locations || []).map((item) => item.name);
+      const dbLocationNames = data.filterOptions.locations || [];
       setPayload(data);
       setLocalLines(data.lines);
       setWorkCenters(dbWorkCenters);
       if (data.matrixColumns && matrixColumns.length === 0) {
         setMatrixColumns(data.matrixColumns);
       }
-      if (!selectedSupervisor) setSelectedSupervisor(data.permissions.actor);
+      if (!selectedSupervisor) setSelectedSupervisor(data.filterOptions.supervisors[0] || data.permissions.actor);
       setSelectedLocation((current) => {
         if (current && dbLocationNames.includes(current)) return current;
         return dbLocationNames[0] || '';
@@ -463,7 +463,9 @@ export default function TimesheetEntryClient() {
   useEffect(() => {
     if (!selectedLocation || workCenters.length === 0) return;
     const availableWorkCenters = workCenterNamesForLocation(workCenters, selectedLocation);
-    if (availableWorkCenters.length > 0 && !availableWorkCenters.includes(selectedWorkCenter)) {
+    if (availableWorkCenters.length === 0 && selectedWorkCenter) {
+      setSelectedWorkCenter('');
+    } else if (availableWorkCenters.length > 0 && !availableWorkCenters.includes(selectedWorkCenter)) {
       setSelectedWorkCenter(availableWorkCenters[0]);
     }
   }, [selectedLocation, selectedWorkCenter, workCenters]);
@@ -814,7 +816,7 @@ export default function TimesheetEntryClient() {
   }
 
   const workCenterOptions = workCenterNamesForLocation(workCenters, selectedLocation);
-  const locationOptions = Array.from(new Set((payload?.locations.map((location) => location.name) ?? []).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const locationOptions = Array.from(new Set((payload?.filterOptions.locations ?? []).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const siteLocationOptions = Array.from(
     new Set((payload?.locations.map((location) => location.name) ?? []).filter((location) => location && location !== 'Unassigned Location')),
   ).sort((a, b) => a.localeCompare(b));

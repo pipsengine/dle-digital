@@ -407,7 +407,7 @@ const employeeSummary = (employee: {
   fullName: employee.fullName,
   jobTitle: employee.jobTitle,
   department: employee.department,
-  location: employee.location || employee.workLocation || employee.officeLocation,
+  location: employee.location || employee.workLocation || employee.officeLocation || '',
   status: employee.status,
 });
 const resolveProjectManagerForSubmission = (lines: TimesheetLine[], projects: Project[]) => {
@@ -470,7 +470,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   const targetDate = date || todayDateInputValue();
-  const targetSupervisor = supervisorId || access.actor;
+  const requestedSupervisor = clean(supervisorId);
   const targetWorkCenter = workCenterName?.trim();
   const targetLocation = locationName?.trim();
   const period = await readTimesheetPeriod(new Date(targetDate));
@@ -496,10 +496,10 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     })
     .filter((item) => item.employeeCount > 0)
     .sort((a, b) => a.label.localeCompare(b.label));
+  const targetSupervisor = requestedSupervisor || supervisorDirectory[0]?.value || access.actor;
   const selectedSupervisorProfile = activeEmployees.find((employee) => supervisorMatchesSelection(employee, targetSupervisor));
-  const selectedSupervisorDirectReports = activeEmployees
-    .filter((employee) => managerMatches(employee, targetSupervisor))
-    .filter((employee) => employeeMatchesLocation(employee, targetLocation));
+  const selectedSupervisorAllDirectReports = activeEmployees.filter((employee) => managerMatches(employee, targetSupervisor));
+  const selectedSupervisorDirectReports = selectedSupervisorAllDirectReports.filter((employee) => employeeMatchesLocation(employee, targetLocation));
   const selectedSupervisorWorkCenterReports = targetWorkCenter
     ? selectedSupervisorDirectReports.filter((employee) => employeeMatchesWorkCenter(employee, targetWorkCenter))
     : [];
@@ -528,9 +528,10 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
       : headers.find((h) => h.timesheetDate === targetDate && h.supervisorId === targetSupervisor)) ||
     null;
   const selectedEmployeeKeys = new Set(selectedSupervisorEmployees.flatMap((employee) => matchKeys(employee.employeeCode, employee.fullName)).filter(Boolean));
-  let lines = header
+  const headerId = header?.id;
+  let lines = headerId
     ? allLines
-        .filter((l) => l.headerId === header.id)
+        .filter((l) => l.headerId === headerId)
         .map(normalizeLineForGrossDay)
         .filter((line) => selectedEmployeeKeys.size === 0 || matchKeys(line.employeeNo, line.employeeId, line.employeeName).some((key) => selectedEmployeeKeys.has(key)))
     : [];
@@ -548,6 +549,13 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   }
 
   const activeProjects = projects.filter(p => ['Active', 'Approved', 'Open'].includes(p.status));
+  const scopedLocationNames = Array.from(
+    new Set(
+      (selectedSupervisorAllDirectReports.length ? selectedSupervisorAllDirectReports : activeEmployees)
+        .map(employeeLocation)
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
 
   const summary = {
     totalEmployees: lines.length,
@@ -597,8 +605,8 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     filterOptions: {
       departments: departments.map((department) => department.name),
       projects: activeProjects.map(p => p.code),
-      locations: locations.map((location) => location.name),
-      supervisors: Array.from(new Set([targetSupervisor, uiPermissions.actor, ...supervisorDirectory.map((item) => item.value)].map(clean).filter(Boolean))).sort((a, b) => {
+      locations: scopedLocationNames.length ? scopedLocationNames : locations.map((location) => location.name),
+      supervisors: Array.from(new Set([targetSupervisor, ...supervisorDirectory.map((item) => item.value)].map(clean).filter(Boolean))).sort((a, b) => {
         const aLabel = supervisorDirectory.find((item) => item.value === a)?.label || a;
         const bLabel = supervisorDirectory.find((item) => item.value === b)?.label || b;
         return aLabel.localeCompare(bLabel);

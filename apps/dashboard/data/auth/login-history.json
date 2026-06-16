@@ -1,5 +1,14 @@
 [
   {
+    "id": "login-1781594387159-5f268dba",
+    "at": "2026-06-16T07:19:47.159Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "172.19.0.1",
+    "device": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "status": "Success"
+  },
+  {
     "id": "login-1781539138525-583d840e",
     "at": "2026-06-15T15:58:58.525Z",
     "userId": "global-admin",

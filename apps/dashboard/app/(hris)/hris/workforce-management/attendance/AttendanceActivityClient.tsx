@@ -149,8 +149,9 @@ export default function AttendanceActivityClient({ initialNow }: { initialNow: s
       });
       const json = (await res.json()) as ApiResponse<Payload>;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Attendance request failed (${res.status})`);
-      setPayload(json.data);
-      setSelectedId((current) => current && json.data.records.some((item) => item.id === current) ? current : json.data.records[0]?.id || '');
+      const data = json.data;
+      setPayload(data);
+      setSelectedId((current) => current && data.records.some((item) => item.id === current) ? current : data.records[0]?.id || '');
     } catch (event) {
       setError(event instanceof Error ? event.message : 'Unable to load attendance activities.');
     } finally {

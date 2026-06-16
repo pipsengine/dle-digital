@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
-import { calculatePermanentUnionDues, resolvePayrollEarningProfile, taxablePayrollInputFromEmployee } from '@/lib/payroll-earnings-engine';
+import { calculatePermanentUnionDues, resolvePayrollEarningProfile, taxablePayrollInputFromEmployee, type PayrollEarningsOptions } from '@/lib/payroll-earnings-engine';
 
 export type TaxBand = { id: string; sequence: number; label: string; bandAmount: number | null; rate: number };
 export type ConfigStatus = 'Draft' | 'Active' | 'Retired';
@@ -175,9 +175,9 @@ export const calculatePayrollTax = (input: PayrollTaxInput, version: PayrollTaxV
   };
 };
 
-export const payrollInputFromEmployee = (employee: DleEmployeeDirectoryRow): PayrollTaxInput => {
+export const payrollInputFromEmployee = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions): PayrollTaxInput => {
   return {
-    ...taxablePayrollInputFromEmployee(employee),
+    ...taxablePayrollInputFromEmployee(employee, options),
     annualRent: 0,
     courtGarnisheeMonthly: 0,
   };
