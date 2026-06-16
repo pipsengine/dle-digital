@@ -6,10 +6,12 @@ import { readLiveClockingActivity } from '@/lib/biometric-live-attendance-store'
 import { getDleEnterpriseDbPool } from '@/lib/dle-enterprise-db';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeeKeys, type SagePayrollEmployee } from '@/lib/sage-people-payroll-store';
+import { approvedPaidLeaveForDate } from '@/lib/leave-management-store';
 
 export type TimesheetStatus =
   | 'Draft'
   | 'Submitted'
+  | 'Supervisor_Reviewed'
   | 'Project_Manager_Reviewed'
   | 'Cost_Control_Reviewed'
   | 'HR_Acknowledged'
@@ -28,10 +30,10 @@ export type WorkflowStage = {
 
 export const workflowStages: WorkflowStage[] = [
   { id: 'Draft', label: 'Draft', order: 1 },
-  { id: 'Submitted', label: 'Supervisor', order: 2 },
-  { id: 'Project_Manager_Reviewed', label: 'Project Manager Review', order: 3 },
-  { id: 'Cost_Control_Reviewed', label: 'Cost Control Review', order: 4 },
-  { id: 'HR_Acknowledged', label: 'HR Payroll Acknowledgement', order: 5 },
+  { id: 'Submitted', label: 'Supervisor Review', order: 2 },
+  { id: 'Supervisor_Reviewed', label: 'Project Manager Review', order: 3 },
+  { id: 'Project_Manager_Reviewed', label: 'Cost Control Review', order: 4 },
+  { id: 'Cost_Control_Reviewed', label: 'HR Payroll Acknowledgement', order: 5 },
   { id: 'Locked', label: 'Payroll Lock', order: 6 },
 ];
 export type TimesheetApprovalDecision = 'Pending' | 'Approved' | 'Rejected' | 'Returned' | 'Locked';
@@ -1663,7 +1665,7 @@ const createPayrollUpdateForPeriod = async (periodId: string, actor: string): Pr
       bookedHours: 0,
       idleHours: 0,
     };
-    current.daysWorked += line.clockIn ? 1 : 0;
+    current.daysWorked += line.clockIn || isPaidLeaveLine(line) ? 1 : 0;
     current.attendanceHours = Math.round((current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration)) * 10) / 10;
     current.bookedHours = Math.round((current.bookedHours + normalizePaidWorkHours(line.totalHours)) * 10) / 10;
     current.idleHours = Math.round((current.idleHours + line.idleHours) * 10) / 10;
@@ -1699,20 +1701,25 @@ export async function advanceTimesheetWorkflow(
   let event: TimesheetWorkflowEvent;
 
   if (action === 'REJECT') {
-    if (!['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
+    if (!['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
       throw new Error('Only in-progress timesheets can be rejected.');
     }
-    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Project Manager' : status === 'Project_Manager_Reviewed' ? 'Cost Control' : 'HR';
+    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Supervisor' : status === 'Supervisor_Reviewed' ? 'Project Manager' : status === 'Project_Manager_Reviewed' ? 'Cost Control' : 'HR';
     header.status = 'Rejected';
     event = workflowEvent(stage, 'Rejected', actor, comment);
   } else if (action === 'RETURN') {
-    if (!['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
+    if (!['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
       throw new Error('Only in-progress timesheets can be returned.');
     }
-    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Project Manager' : status === 'Project_Manager_Reviewed' ? 'Cost Control' : 'HR';
+    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Supervisor' : status === 'Supervisor_Reviewed' ? 'Project Manager' : status === 'Project_Manager_Reviewed' ? 'Cost Control' : 'HR';
     header.status = 'Returned';
     event = workflowEvent(stage, 'Returned', actor, comment);
   } else if (status === 'Submitted') {
+    header.status = 'Supervisor_Reviewed';
+    header.currentApprovalStage = 'Project Manager';
+    header.currentApprover = header.projectManager || 'Project Manager';
+    event = workflowEvent('Supervisor', 'Approved', actor, comment || 'Supervisor reviewed and released timesheet for project manager review.');
+  } else if (status === 'Supervisor_Reviewed') {
     header.status = 'Project_Manager_Reviewed';
     header.currentApprovalStage = 'Cost Control';
     header.currentApprover = 'Cost Control';
@@ -1825,8 +1832,14 @@ export async function advanceProjectTimesheetApproval(
   const header = headers.find((item) => item.id === headerId);
   if (!header) throw new Error('Timesheet header not found.');
   const status = normalizeTimesheetStatus(header.status);
-  if (!['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
-    throw new Error('Only submitted or in-review timesheets can be approved by project.');
+  if (!['Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
+    throw new Error('Supervisor review must be completed before project approvals.');
+  }
+  if (options.stage === 'Project Manager' && !['Supervisor_Reviewed', 'Project_Manager_Reviewed'].includes(status)) {
+    throw new Error('Project Manager approval is only available after supervisor review.');
+  }
+  if (options.stage === 'Cost Control' && status !== 'Project_Manager_Reviewed') {
+    throw new Error('Cost Control approval is only available after Project Manager review.');
   }
   const headerLines = lines.filter((line) => line.headerId === header.id);
   const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
@@ -1895,13 +1908,55 @@ const withSyncTimeout = async <T,>(promise: Promise<T>, ms: number, message: str
 const cleanSupervisorLabel = (value: string) =>
   value.replace(/\s+\(\d+\)\s*$/, '').trim();
 
+const isPaidLeaveLine = (line: Pick<TimesheetLine, 'projectAllocations' | 'idleAllocations' | 'remarks'>) => {
+  const projectLeave = (line.projectAllocations || []).some((item) => item.projectCode?.toUpperCase() === 'LEAVE' && Number(item.hours || 0) > 0);
+  const idleLeave = (line.idleAllocations || []).some((item) => item.reasonName?.toLowerCase().includes('leave') && Number(item.hours || 0) > 0);
+  return projectLeave || idleLeave || String(line.remarks || '').toLowerCase().includes('approved paid leave');
+};
+
+export const isTimesheetPaidLeaveLine = isPaidLeaveLine;
+
+const supervisorScopeKeys = (value: string | null | undefined) => {
+  const raw = String(value || '').trim().toUpperCase();
+  const keys = new Set<string>();
+  const add = (input: string) => {
+    const compact = input.replace(/[^A-Z0-9]/g, '');
+    if (!compact) return;
+    keys.add(compact);
+    const withoutPrefix = compact.replace(/^[PCLNI]+(?=\d)/, '').replace(/^0+/, '');
+    if (withoutPrefix) keys.add(withoutPrefix);
+    const numeric = compact.replace(/^[A-Z]+/, '').replace(/^0+/, '');
+    if (numeric) keys.add(numeric);
+  };
+  add(raw);
+  if (raw.includes(' - ')) add(raw.split(' - ')[0] || '');
+  return keys;
+};
+
+const supervisorNameTokens = (value: string | null | undefined) =>
+  String(value || '')
+    .replace(/\s+\(\d+\)\s*$/, '')
+    .replace(/^[^-]+-\s*/, '')
+    .replace(/\b(mr|mrs|miss|ms|dr|prof)\b\.?/gi, ' ')
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length > 1);
+
 const supervisorMatchesEmployee = (managerName: string | null | undefined, supervisorId: string) => {
   const manager = normalizeAttendanceScope(managerName);
   const selected = normalizeAttendanceScope(cleanSupervisorLabel(supervisorId));
   if (!manager || !selected) return false;
   const selectedCode = selected.split(' - ')[0]?.trim();
   const selectedName = selected.includes(' - ') ? selected.split(' - ').slice(1).join(' - ').trim() : selected;
-  return manager === selected || manager === selectedName || manager.includes(selected) || (selectedCode ? manager.includes(selectedCode) : false);
+  const managerKeys = supervisorScopeKeys(managerName);
+  const selectedKeys = supervisorScopeKeys(selectedCode || selected);
+  const hasSharedCode = [...selectedKeys].some((key) => managerKeys.has(key));
+  const managerTokens = supervisorNameTokens(managerName);
+  const selectedTokens = supervisorNameTokens(supervisorId);
+  const hasNameAlias = managerTokens.length > 0 && managerTokens.every((token) => selectedTokens.includes(token));
+  return manager === selected || manager === selectedName || manager.includes(selected) || hasSharedCode || hasNameAlias;
 };
 
 const attendanceMatchKeys = (...values: Array<string | number | null | undefined>) => {
@@ -1951,6 +2006,7 @@ export async function syncAttendanceForTimesheet(
 ) {
   const persist = options.persist !== false;
   const liveAttendancePromise = readLiveClockingActivity(date);
+  const approvedLeavePromise = approvedPaidLeaveForDate(date);
   const scopePromise = withSyncTimeout(
     supervisorEmployeeScope(supervisorId),
     TIMESHEET_SUPERVISOR_SCOPE_TIMEOUT_MS,
@@ -1968,7 +2024,7 @@ export async function syncAttendanceForTimesheet(
   let allowedSupervisorKeys = new Set<string>();
   let assignedSupervisorEmployees: Array<{ employeeCode: string; fullName: string }> = [];
 
-  const [scopeResult, activePayrollResult] = await Promise.allSettled([scopePromise, activePayrollPromise]);
+  const [scopeResult, activePayrollResult, approvedLeaveResult] = await Promise.allSettled([scopePromise, activePayrollPromise, approvedLeavePromise]);
   if (scopeResult.status === 'fulfilled') {
     allowedSupervisorKeys = scopeResult.value.keys;
     assignedSupervisorEmployees = scopeResult.value.employees;
@@ -1991,6 +2047,16 @@ export async function syncAttendanceForTimesheet(
     }
   } else {
     console.warn('Timesheet attendance sync proceeding without Sage payroll enrichment:', activePayrollResult.reason);
+  }
+  const approvedLeaveByKey = new Map<string, Awaited<ReturnType<typeof approvedPaidLeaveForDate>>[number]>();
+  if (approvedLeaveResult.status === 'fulfilled') {
+    for (const leave of approvedLeaveResult.value) {
+      attendanceMatchKeys(leave.employeeId, leave.employeeCode, leave.fullName).forEach((key) => {
+        if (key && !approvedLeaveByKey.has(key)) approvedLeaveByKey.set(key, leave);
+      });
+    }
+  } else {
+    console.warn('Timesheet attendance sync could not resolve approved leave:', approvedLeaveResult.reason);
   }
   
   // Business Rule: A timesheet is created for a Work Center / Site.
@@ -2101,12 +2167,23 @@ export async function syncAttendanceForTimesheet(
     const employeeCode = payrollEmployee ? sageTimesheetEmployeeCode(payrollEmployee, att.employeeId) : att.employeeId.trim().toUpperCase();
     const employeeName = payrollEmployee ? formatSageEmployeeFullName(payrollEmployee, att.employeeName) : att.employeeName;
     const existingLine = lines.find((l) => l.headerId === header!.id && l.employeeId === employeeCode);
+    const approvedLeave = attendanceMatchKeys(employeeCode, employeeName, att.employeeId, att.employeeName)
+      .map((key) => approvedLeaveByKey.get(key))
+      .find(Boolean);
     
     // Attendance duration in hours
     const rawDuration = att.checkInTime && att.checkOutTime 
       ? (new Date(`2026-01-01T${att.checkOutTime}`).getTime() - new Date(`2026-01-01T${att.checkInTime}`).getTime()) / (1000 * 60 * 60)
       : att.checkInTime ? STANDARD_TIMESHEET_HOURS : 0;
     const duration = normalizePaidWorkHours(rawDuration);
+    const shouldAutoBookPaidLeave = Boolean(approvedLeave && !att.checkInTime && !existingLine?.totalHours);
+    const leaveAllocation = shouldAutoBookPaidLeave ? [{
+      projectId: 'LEAVE',
+      projectCode: 'LEAVE',
+      projectName: 'Leave and Authorized Absence',
+      hours: STANDARD_TIMESHEET_HOURS,
+      remarks: `Approved paid leave ${approvedLeave!.requestId}`,
+    }] : null;
 
     return {
       id: existingLine?.id || `line-${header!.id}-${employeeCode}`,
@@ -2119,15 +2196,15 @@ export async function syncAttendanceForTimesheet(
       clockIn: att.checkInTime,
       clockOut: att.checkOutTime,
       attendanceDuration: duration,
-      projectAllocations: existingLine?.projectAllocations || [],
+      projectAllocations: leaveAllocation || existingLine?.projectAllocations || [],
       idleAllocations: (existingLine?.idleAllocations || []).map(withDefaultIdleReason),
-      usedHours: existingLine?.usedHours || 0,
+      usedHours: shouldAutoBookPaidLeave ? STANDARD_TIMESHEET_HOURS : existingLine?.usedHours || 0,
       idleHours: existingLine?.idleHours || 0,
-      totalHours: existingLine?.totalHours || 0,
-      variance: Math.round(((existingLine?.totalHours || 0) - duration) * 10) / 10,
-      remarks: existingLine?.remarks || null,
-      validationStatus: 'Incomplete',
-      validationMessage: 'Awaiting time allocation.',
+      totalHours: shouldAutoBookPaidLeave ? STANDARD_TIMESHEET_HOURS : existingLine?.totalHours || 0,
+      variance: Math.round(((shouldAutoBookPaidLeave ? STANDARD_TIMESHEET_HOURS : existingLine?.totalHours || 0) - duration) * 10) / 10,
+      remarks: shouldAutoBookPaidLeave ? `Approved paid leave: ${approvedLeave!.startDate} to ${approvedLeave!.endDate}` : existingLine?.remarks || null,
+      validationStatus: shouldAutoBookPaidLeave ? 'Valid' : 'Incomplete',
+      validationMessage: shouldAutoBookPaidLeave ? 'Approved paid leave. Biometric attendance is not required for this payable leave day.' : 'Awaiting time allocation.',
     };
   });
 

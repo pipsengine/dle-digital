@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
-import { normalizePayrollMatchKey, readActiveSagePayrollEmployees } from '@/lib/sage-people-payroll-store';
+import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines } from '@/lib/sage-people-payroll-store';
 
 export type PayrollEmployeeSource = {
   employees: DleEmployeeDirectoryRow[];
@@ -33,6 +33,10 @@ const resolveDashboardRoot = () => {
 const DATA_ROOT = path.join(resolveDashboardRoot(), 'data', 'hris');
 const str = (value: unknown) => String(value || '').trim();
 const moneyFromRate = (rate: number) => (Number.isFinite(rate) && rate > 0 ? rate * 22 : 0);
+const moneyOrNull = (value: unknown) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
 const EMPLOYEE_SOURCE_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_CACHE_MS || 60000);
 const EMPLOYEE_SOURCE_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_STALE_MS || 900000);
 const EMPLOYEE_SOURCE_FALLBACK_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_CACHE_MS || 10000);
@@ -72,9 +76,27 @@ const jsonValue = (raw: string | null | undefined, keys: string[]) => {
   }
 };
 
+const sageLineItems = (raw: string | null | undefined) => {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
+    return parsed
+      .map((line) => ({
+        code: str(line.code),
+        name: str(line.name) || str(line.code),
+        amount: Number(line.amount || 0),
+        taxableAmount: moneyOrNull(line.taxableAmount),
+        ytdTotal: moneyOrNull(line.ytdTotal),
+      }))
+      .filter((line) => line.code && Number.isFinite(line.amount) && line.amount !== 0);
+  } catch {
+    return [];
+  }
+};
+
 const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
   try {
-    const sageEmployees = await withTimeout(readActiveSagePayrollEmployees(), Number(process.env.SAGE_PAYROLL_ENRICH_TIMEOUT_MS || 5000), 'Sage payroll enrichment timed out.');
+    const sageEmployees = await withTimeout(readActiveSagePayrollEmployeesWithLatestPayslipLines(), Number(process.env.SAGE_PAYROLL_ENRICH_TIMEOUT_MS || 20000), 'Sage payroll enrichment timed out.');
     const sageByKey = new Map(sageEmployees.flatMap((employee) => {
       const keys = [employee.directoryEmployeeCode, employee.employeeCode, employee.employeeCodeDisplay].map(normalizePayrollMatchKey).filter(Boolean);
       return keys.map((key) => [key, employee] as const);
@@ -84,6 +106,9 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
       if (!sage) return employee;
       const pensionProvider = jsonValue(sage.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName']);
       const pensionPin = jsonValue(sage.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'RSAPIN', 'RsaPin']);
+      const earningLines = sageLineItems(sage.latestEarningLinesJson);
+      const deductionLines = sageLineItems(sage.latestDeductionLinesJson);
+      const contributionLines = sageLineItems(sage.latestContributionLinesJson);
       return {
         ...employee,
         bankName: employee.bankName || sage.bankName || '',
@@ -95,6 +120,23 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
         payCurrency: employee.payCurrency || sage.companyCurrency || 'NGN',
         paymentRun: employee.paymentRun || sage.paymentRunLong || sage.paymentRunShort || '',
         paymentType: employee.paymentType || sage.paymentType || '',
+        sagePayrollEarnings: earningLines,
+        sagePayrollDeductions: {
+          paye: moneyOrNull(sage.latestPaye),
+          pensionEmployee: moneyOrNull(sage.latestPensionEmployee),
+          nhf: moneyOrNull(sage.latestNhf),
+          other: moneyOrNull(sage.latestOtherDeductions),
+          totalDeductions: moneyOrNull(sage.latestTotalDeductions),
+          netPay: moneyOrNull(sage.latestNetPay),
+          lines: deductionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line),
+        },
+        sagePayrollContributions: {
+          pensionEmployer: moneyOrNull(sage.latestPensionEmployer),
+          nsitf: moneyOrNull(sage.latestNsitf),
+          itf: moneyOrNull(sage.latestItf),
+          totalEmployerContributions: moneyOrNull(sage.latestTotalEmployerContributions),
+          lines: contributionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line),
+        },
       };
     });
   } catch {

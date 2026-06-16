@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import type { StructureInsight } from '@/lib/organization-data';
 
-type TimesheetStatus = 'Draft' | 'Submitted' | 'Project_Manager_Reviewed' | 'Cost_Control_Reviewed' | 'HR_Acknowledged' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected' | 'Returned';
+type TimesheetStatus = 'Draft' | 'Submitted' | 'Supervisor_Reviewed' | 'Project_Manager_Reviewed' | 'Cost_Control_Reviewed' | 'HR_Acknowledged' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected' | 'Returned';
 type TimesheetWorkflowStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR';
 const STANDARD_TIMESHEET_HOURS = 8;
 const DAILY_BREAK_HOURS = 1;
@@ -235,7 +235,7 @@ type Payload = {
     businessUnits: string[];
     modes: TimesheetEntryMode[];
     statuses: TimesheetStatus[];
-    supervisorDirectory: Array<{ value: string; label: string; employeeCode: string; fullName: string; employeeCount: number }>;
+    supervisorDirectory: Array<{ value: string; label: string; employeeCode: string; fullName: string; jobTitle?: string; department?: string; employeeCount: number }>;
   };
   matrixColumns: DisplayColumn[];
   projectCatalog: any[];
@@ -355,6 +355,7 @@ export default function TimesheetEntryClient() {
 
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showSubmitReview, setShowSubmitReview] = useState(false);
   const [bulkProject, setBulkProject] = useState('');
   const [bulkHours, setBulkHours] = useState(8);
 
@@ -638,7 +639,10 @@ export default function TimesheetEntryClient() {
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Save failed');
       setPayload(json.data);
       setLocalLines(json.data.lines);
-      if (isSubmit) alert('Timesheet submitted successfully.');
+      if (isSubmit) {
+        setShowSubmitReview(false);
+        alert('Timesheet submitted successfully.');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
@@ -859,9 +863,22 @@ export default function TimesheetEntryClient() {
   const matchedPunches = payload?.summary.presentEmployees ?? 0;
   const exceptionPunches = payload?.summary.absentEmployees ?? 0;
   const supervisorDirectory = payload?.filterOptions.supervisorDirectory ?? [];
-  const supervisorLabel = supervisorDirectory.find((item) => item.value === selectedSupervisor)?.label || selectedSupervisor || payload?.permissions.actor || 'Select supervisor';
+  const supervisorDirectoryItem = supervisorDirectory.find((item) => item.value === selectedSupervisor);
+  const supervisorLabel = supervisorDirectoryItem?.label || selectedSupervisor || payload?.permissions.actor || 'Select supervisor';
   const supervisorProfile = payload?.supervisorProfile ?? null;
+  const supervisorJobTitle = supervisorProfile?.jobTitle || supervisorDirectoryItem?.jobTitle || '';
+  const supervisorDepartment = supervisorProfile?.department || supervisorDirectoryItem?.department || '';
   const supervisorEmployees = payload?.supervisorEmployees ?? [];
+  const reviewLineCount = localLines.length;
+  const reviewValidCount = localLines.filter((line) => line.validationStatus === 'Valid').length;
+  const reviewWarningCount = localLines.filter((line) => line.validationStatus === 'Warning' || line.validationStatus === 'Incomplete').length;
+  const reviewErrorCount = localLines.filter((line) => line.validationStatus === 'Error').length;
+  const reviewAbsentCount = localLines.filter((line) => !line.clockIn).length;
+  const reviewProjectHours = round1(localLines.reduce((sum, line) => sum + line.usedHours, 0));
+  const reviewIdleHours = round1(localLines.reduce((sum, line) => sum + line.idleHours, 0));
+  const reviewTotalHours = round1(localLines.reduce((sum, line) => sum + line.totalHours, 0));
+  const reviewProjectCodes = Array.from(new Set(localLines.flatMap((line) => line.projectAllocations.map((item) => item.projectCode).filter(Boolean)))).sort();
+  const canOpenSubmitReview = canEditTimesheet && reviewLineCount > 0 && reviewErrorCount === 0;
   const biometricTone = onlineSiteDevices.length > 0
     ? 'text-emerald-400'
     : activeSiteDevices.length > 0
@@ -1041,6 +1058,9 @@ export default function TimesheetEntryClient() {
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-sky-700/70">Selected Supervisor</p>
               <h3 className="mt-1 text-lg font-black text-slate-950">{supervisorLabel}</h3>
+              {supervisorJobTitle && (
+                <p className="mt-1 text-sm font-black text-sky-800">{supervisorJobTitle}</p>
+              )}
               <p className="mt-1 text-xs font-semibold text-slate-600">
                 {supervisorEmployees.length ? `${supervisorEmployees.length} employee${supervisorEmployees.length === 1 ? '' : 's'} assigned for ${selectedLocation || 'all locations'}${selectedWorkCenter ? ` / ${selectedWorkCenter}` : ''}.` : 'No employees match this supervisor, location, and work center selection.'}
               </p>
@@ -1062,7 +1082,8 @@ export default function TimesheetEntryClient() {
               <div className="rounded-xl border border-amber-200 bg-white p-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Supervisor Detail</p>
                 <div className="mt-2 text-xs font-black text-slate-950">{supervisorLabel}</div>
-                <div className="mt-1 text-[11px] font-semibold text-slate-500">Supervisor profile is not linked to an employee record yet.</div>
+                <div className="mt-1 text-[11px] font-semibold text-slate-600">{supervisorJobTitle || 'Unassigned role'}{supervisorDepartment ? ` / ${supervisorDepartment}` : ''}</div>
+                {!supervisorJobTitle && <div className="mt-1 text-[11px] font-semibold text-slate-500">Supervisor profile is not linked to an employee record yet.</div>}
               </div>
             )}
             <div className="xl:col-span-2">
@@ -1169,9 +1190,11 @@ export default function TimesheetEntryClient() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Link href="/hris/time-and-logs/timesheet-approval" className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50">SUBMITTED STATUS</Link>
+            <Link href="/hris/time-and-logs/timesheet-reports" className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50">REPORTS</Link>
             <button onClick={handleCopyPrevious} disabled={submitting || !canEditTimesheet} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Copy className="h-3.5 w-3.5" />COPY PREVIOUS</button>
             <button onClick={() => handleSave(false)} disabled={submitting || !canEditTimesheet} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50">SAVE DRAFT</button>
-            <button onClick={() => handleSave(true)} disabled={submitting || !canEditTimesheet} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50">SUBMIT</button>
+            <button onClick={() => setShowSubmitReview(true)} disabled={submitting || !canOpenSubmitReview} className="flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50"><ShieldCheck className="h-3.5 w-3.5" />REVIEW & SUBMIT</button>
           </div>
         </div>
 
@@ -1450,6 +1473,100 @@ export default function TimesheetEntryClient() {
           ))}
         </div>
       </div>
+
+      {showSubmitReview && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
+          <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 p-6">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Supervisor Review</p>
+                <h3 className="mt-1 text-xl font-black text-slate-950">{selectedDate} / {selectedWorkCenter || 'No work center'}</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500">{supervisorLabel}</p>
+              </div>
+              <button onClick={() => setShowSubmitReview(false)} className="rounded-full p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-700">
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            <div className="max-h-[72vh] overflow-y-auto p-6">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+                {[
+                  ['Crew', reviewLineCount],
+                  ['Complete', reviewValidCount],
+                  ['Warnings', reviewWarningCount],
+                  ['Errors', reviewErrorCount],
+                  ['Absent', reviewAbsentCount],
+                  ['Projects', reviewProjectCodes.length],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-2xl font-black text-slate-950">{value}</div>
+                    <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-600">Project Hours</p>
+                  <p className="mt-1 text-xl font-black text-blue-900">{reviewProjectHours}h</p>
+                </div>
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-600">Idle Hours</p>
+                  <p className="mt-1 text-xl font-black text-amber-900">{reviewIdleHours}h</p>
+                </div>
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Total Hours</p>
+                  <p className="mt-1 text-xl font-black text-emerald-900">{reviewTotalHours}h</p>
+                </div>
+              </div>
+              <div className="mt-5 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-500">Line Review</p>
+                  <p className="text-xs font-bold text-slate-400">{reviewProjectCodes.length ? reviewProjectCodes.join(', ') : 'No project allocation'}</p>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                      <tr>
+                        <th className="px-4 py-3">Employee</th>
+                        <th className="px-4 py-3">Log</th>
+                        <th className="px-4 py-3 text-right">Used</th>
+                        <th className="px-4 py-3 text-right">Idle</th>
+                        <th className="px-4 py-3 text-right">Total</th>
+                        <th className="px-4 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {localLines.map((line) => (
+                        <tr key={line.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3">
+                            <div className="font-black text-slate-900">{line.employeeName}</div>
+                            <div className="text-xs font-bold text-slate-500">{line.employeeNo}</div>
+                          </td>
+                          <td className="px-4 py-3 text-xs font-bold text-slate-600">{line.clockIn ? `${line.clockIn} - ${line.clockOut || '--:--'}` : 'Absent'}</td>
+                          <td className="px-4 py-3 text-right font-black text-blue-700">{line.usedHours}</td>
+                          <td className="px-4 py-3 text-right font-black text-amber-700">{line.idleHours}</td>
+                          <td className="px-4 py-3 text-right font-black text-slate-900">{line.totalHours}</td>
+                          <td className="px-4 py-3">
+                            <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${line.validationStatus === 'Valid' ? 'bg-emerald-100 text-emerald-700' : line.validationStatus === 'Error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{line.validationStatus}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 p-5">
+              <p className="text-xs font-semibold text-slate-500">Submitting locks this draft for approval review. Returned or rejected timesheets can be edited again.</p>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setShowSubmitReview(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50">Back to Edit</button>
+                <button onClick={() => handleSave(true)} disabled={submitting || reviewErrorCount > 0 || reviewLineCount === 0} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-700 disabled:opacity-50">
+                  {submitting ? 'Submitting...' : 'Submit Timesheet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Project Modal */}
       {showProjectModal && (

@@ -8,6 +8,7 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
 import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayslipStatus = 'Ready' | 'Review' | 'Blocked';
@@ -101,6 +102,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   const fundsVersion = activeStatutoryFundsVersion(fundsConfig);
   const loansVersion = activeLoansVersion(loansConfig);
   if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) throw new Error('One or more payroll configuration versions are missing.');
+  await syncSageLeaveAllowanceEvents();
 
   const currentBatch = batches.find((batch) => batch.period === requestedPeriod) || null;
   const loanInputs = loanInputsFromApplications(employeeSource.employees, loanApplications).reduce((map, input) => {
@@ -124,7 +126,9 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     const pensionEmployee = roundMoney(sageReconciliation?.pensionEmployee ?? pension.employeeContribution);
     const statutoryEmployee = roundMoney(funds.employeeDeductions);
     const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
-    const totalDeductions = roundMoney(paye + pensionEmployee + statutoryEmployee + loanRecovery);
+    const taxComponentMonthly = (id: string) => (tax.statutoryItems.find((item) => item.id === id)?.amount || 0) / 12;
+    const otherDeductions = sageReconciliation ? 0 : roundMoney(taxComponentMonthly('union-dues') + taxComponentMonthly('other-statutory'));
+    const totalDeductions = roundMoney(paye + pensionEmployee + statutoryEmployee + loanRecovery + otherDeductions);
     const netPay = roundMoney(Math.max(0, amounts.grossPay - totalDeductions));
     const issues = [
       ...amounts.grossPay <= 0 ? ['Gross pay is missing'] : [],
@@ -171,6 +175,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
         { label: 'PAYE', amount: paye },
         { label: 'Pension', amount: pensionEmployee },
         { label: 'NHF / Statutory', amount: statutoryEmployee },
+        { label: 'Other Deductions', amount: otherDeductions },
         { label: 'Loan / Salary Advance', amount: loanRecovery },
       ].filter((item) => item.amount > 0),
       employerContributions: [

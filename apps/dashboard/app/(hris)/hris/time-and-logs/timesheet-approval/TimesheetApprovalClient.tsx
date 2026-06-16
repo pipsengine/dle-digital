@@ -10,6 +10,7 @@ import { PageTemplate } from '@/components/layout/page-template';
 type TimesheetStatus =
   | 'Draft'
   | 'Submitted'
+  | 'Supervisor_Reviewed'
   | 'Project_Manager_Reviewed'
   | 'Cost_Control_Reviewed'
   | 'HR_Acknowledged'
@@ -77,10 +78,12 @@ type ApprovalPayload = {
     role: string;
     canApprove: boolean;
     canAcknowledgePayroll: boolean;
+    canApproveAllLevels?: boolean;
   };
   pendingTimesheets: TimesheetSummary[];
   stats: {
     totalPending: number;
+    supervisorCount: number;
     projectManagerCount: number;
     costControlCount: number;
     hrAcknowledgementCount: number;
@@ -90,6 +93,7 @@ type ApprovalPayload = {
 
 const statusLabel = (status: TimesheetStatus) =>
   status
+    .replace('Supervisor_Reviewed', 'Supervisor Reviewed')
     .replace('Project_Manager_Reviewed', 'Project Manager Reviewed')
     .replace('Cost_Control_Reviewed', 'Cost Control Reviewed')
     .replace('HR_Acknowledged', 'HR Acknowledged')
@@ -100,6 +104,7 @@ const statusClass = (status: TimesheetStatus) => {
   if (status === 'Rejected') return 'border-red-200 bg-red-50 text-red-700';
   if (status === 'Returned') return 'border-amber-200 bg-amber-50 text-amber-700';
   if (status === 'Submitted') return 'border-indigo-200 bg-indigo-50 text-indigo-700';
+  if (status === 'Supervisor_Reviewed') return 'border-cyan-200 bg-cyan-50 text-cyan-700';
   return 'border-blue-200 bg-blue-50 text-blue-700';
 };
 
@@ -174,16 +179,17 @@ export default function TimesheetApprovalClient() {
   return (
     <PageTemplate
       title="Timesheet Approvals"
-      description="Supervisor submission to Project Manager, Cost Control, and HR payroll acknowledgement."
+      description="Supervisor review, Project Manager, Cost Control, and HR payroll acknowledgement."
       breadcrumbs={[{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Approvals' }]}
       primaryAction={{ label: 'Refresh', onClick: load, icon: RefreshCcw }}
     >
       <div className="space-y-6">
         {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div>}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
           {[
             { label: 'Pending', value: payload?.stats.totalPending || 0, icon: Clock, tone: 'indigo' },
+            { label: 'Supervisor', value: payload?.stats.supervisorCount || 0, icon: ShieldCheck, tone: 'cyan' },
             { label: 'Project Manager', value: payload?.stats.projectManagerCount || 0, icon: Users, tone: 'blue' },
             { label: 'Cost Control', value: payload?.stats.costControlCount || 0, icon: ShieldCheck, tone: 'amber' },
             { label: 'HR Ack.', value: payload?.stats.hrAcknowledgementCount || 0, icon: FileText, tone: 'purple' },
@@ -210,7 +216,7 @@ export default function TimesheetApprovalClient() {
             />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {(['All', 'Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed', 'HR_Acknowledged', 'Returned', 'Rejected'] as const).map((status) => (
+            {(['All', 'Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed', 'HR_Acknowledged', 'Returned', 'Rejected'] as const).map((status) => (
               <button
                 key={status}
                 type="button"
@@ -237,9 +243,9 @@ export default function TimesheetApprovalClient() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filteredTimesheets.map((item) => {
-                  const awaitingAction = ['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status);
-                  const canHeaderApprove = item.status === 'Cost_Control_Reviewed';
-                  const approveLabel = item.status === 'Cost_Control_Reviewed' ? 'Acknowledge' : 'Approve';
+                  const awaitingAction = ['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status);
+                  const canHeaderApprove = item.status === 'Submitted' || item.status === 'Cost_Control_Reviewed' || Boolean(payload?.permissions.canApproveAllLevels);
+                  const approveLabel = item.status === 'Submitted' ? 'Supervisor Review' : item.status === 'Cost_Control_Reviewed' ? 'Acknowledge' : 'Approve';
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-4">
@@ -260,8 +266,8 @@ export default function TimesheetApprovalClient() {
                           {item.projectApprovals.map((project) => {
                             const pmKey = `${item.id}-${project.projectCode}-Project Manager`;
                             const ccKey = `${item.id}-${project.projectCode}-Cost Control`;
-                            const pmPending = project.projectManagerStatus === 'Pending' && ['Submitted', 'Project_Manager_Reviewed'].includes(item.status);
-                            const ccPending = project.costControlStatus === 'Pending' && ['Submitted', 'Project_Manager_Reviewed'].includes(item.status);
+                            const pmPending = project.projectManagerStatus === 'Pending' && ['Supervisor_Reviewed', 'Project_Manager_Reviewed'].includes(item.status);
+                            const ccPending = project.costControlStatus === 'Pending' && ['Project_Manager_Reviewed'].includes(item.status);
                             return (
                               <div key={project.projectCode} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                 <div className="flex flex-wrap items-start justify-between gap-3">

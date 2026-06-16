@@ -18,18 +18,21 @@ import {
 const ok = <T,>(data: T, status = 200) => NextResponse.json({ status: 'success', data }, { status });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 const round1 = (value: number) => Math.round(value * 10) / 10;
+const isSuperAdministrator = (role: string) => role === 'Super Administrator';
 
 type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN';
 type ProjectApprovalStage = 'Project Manager' | 'Cost Control' | 'HR';
 
 const stageByStatus: Partial<Record<TimesheetStatus, TimesheetWorkflowStage>> = {
-  Submitted: 'Project Manager',
+  Submitted: 'Supervisor',
+  Supervisor_Reviewed: 'Project Manager',
   Project_Manager_Reviewed: 'Cost Control',
   Cost_Control_Reviewed: 'HR',
 };
 
 const nextActionLabel = (status: TimesheetStatus) => {
-  if (status === 'Submitted') return 'Project Manager Approve';
+  if (status === 'Submitted') return 'Supervisor Review';
+  if (status === 'Supervisor_Reviewed') return 'Project Manager Approve';
   if (status === 'Project_Manager_Reviewed') return 'Cost Control Approve';
   if (status === 'Cost_Control_Reviewed') return 'HR Acknowledge';
   return null;
@@ -99,8 +102,9 @@ const buildPayload = async (request: Request) => {
   pendingTimesheets.sort((a, b) => new Date(b.timesheetDate).getTime() - new Date(a.timesheetDate).getTime());
 
   const stats = {
-    totalPending: pendingTimesheets.filter((item) => ['Submitted', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status)).length,
-    projectManagerCount: pendingTimesheets.filter((item) => item.status === 'Submitted').length,
+    totalPending: pendingTimesheets.filter((item) => ['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status)).length,
+    supervisorCount: pendingTimesheets.filter((item) => item.status === 'Submitted').length,
+    projectManagerCount: pendingTimesheets.filter((item) => item.status === 'Supervisor_Reviewed').length,
     costControlCount: pendingTimesheets.filter((item) => item.status === 'Project_Manager_Reviewed').length,
     hrAcknowledgementCount: pendingTimesheets.filter((item) => item.status === 'Cost_Control_Reviewed').length,
     payrollReadyCount: pendingTimesheets.filter((item) => item.status === 'HR_Acknowledged').length,
@@ -114,8 +118,9 @@ const buildPayload = async (request: Request) => {
     permissions: {
       actor: access.actor,
       role: access.role,
-      canApprove: permissions.canApproveTimesheet || access.role === 'OrganizationAdmin',
-      canAcknowledgePayroll: permissions.canApproveTimesheet || permissions.canEditAttendance || access.role === 'OrganizationAdmin',
+      canApprove: permissions.canApproveTimesheet,
+      canAcknowledgePayroll: permissions.canApproveTimesheet || permissions.canEditAttendance,
+      canApproveAllLevels: isSuperAdministrator(access.role),
     },
     pendingTimesheets,
     stats,
@@ -140,7 +145,7 @@ export async function PATCH(request: Request) {
   const access = resolveAccessContext(request);
   const permissions = getUiPermissions(access);
 
-  if (!permissions.canApproveTimesheet && access.role !== 'OrganizationAdmin') {
+  if (!permissions.canApproveTimesheet) {
     return err(403, 'You do not have permission to approve timesheets.');
   }
 

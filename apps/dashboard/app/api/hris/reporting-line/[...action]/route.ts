@@ -90,6 +90,8 @@ const uniqueSorted = (values: Array<string | undefined | null>) =>
 
 const readRows = async () => (await readPayrollEmployees()).employees;
 
+const assignmentActive = (row: DleEmployeeDirectoryRow) => !String(row.status || '').toLowerCase().match(/terminated|resigned|retired|inactive|deceased/);
+
 const toEmployeeOption = (row: DleEmployeeDirectoryRow): ReportingEmployeeOption => ({
   employeeId: row.employeeId,
   fullName: row.fullName,
@@ -106,7 +108,7 @@ const toEmployeeOption = (row: DleEmployeeDirectoryRow): ReportingEmployeeOption
 
 const listEmployees = async () => {
   const rows = await readRows();
-  return rows.map(toEmployeeOption);
+  return rows.filter(assignmentActive).map(toEmployeeOption).sort((a, b) => `${a.fullName} ${a.employeeId}`.localeCompare(`${b.fullName} ${b.employeeId}`));
 };
 
 const formOptions = (rows: DleEmployeeDirectoryRow[]) => ({
@@ -195,7 +197,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
   if (seg0 === 'form-options') {
     const includeEmployees = url.searchParams.get('includeEmployees') === '1';
     const rows = await readRows();
-    return jsonOk({ ...formOptions(rows), employees: includeEmployees ? rows.map(toEmployeeOption) : [] });
+    const assignableEmployees = rows.filter(assignmentActive).map(toEmployeeOption).sort((a, b) => `${a.fullName} ${a.employeeId}`.localeCompare(`${b.fullName} ${b.employeeId}`));
+    return jsonOk({ ...formOptions(rows), employees: includeEmployees ? assignableEmployees : [] });
   }
 
   if (seg0 === 'summary') {

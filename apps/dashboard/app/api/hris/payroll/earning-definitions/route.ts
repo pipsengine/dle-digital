@@ -6,6 +6,7 @@ import {
   JUNIOR_OVERTIME_RULES,
   PAYROLL_EARNING_PROFILES,
   PERMANENT_SUPPLEMENTAL_EARNINGS,
+  SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS,
 } from '@/lib/payroll-earnings-engine';
 
 const ok = <T,>(data: T) => NextResponse.json({ status: 'success', data });
@@ -29,6 +30,10 @@ export async function GET() {
       formula: `(Basic/${rule.divisor})*${rule.multiplier}*No of hrs`,
     })),
     supplementalEarnings: PERMANENT_SUPPLEMENTAL_EARNINGS,
+    seniorFixedMonthlyEarnings: SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS.map((definition) => ({
+      ...definition,
+      fixedMonthlyAmount: definition.code === 'PER_MEAL' ? 22000 : 15000,
+    })),
     contractLumpsumSupplementalEarnings: CONTRACT_LUMPSUM_SUPPLEMENTAL_EARNINGS,
     contractDayRateEarningDefinitions: CONTRACT_DAY_RATE_EARNING_DEFINITIONS,
     contractDayRateSupplementalEarnings: CONTRACT_DAY_RATE_SUPPLEMENTAL_EARNINGS,

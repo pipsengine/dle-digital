@@ -1,4 +1,5 @@
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { leaveAllowanceEventsForEmployeePeriod } from '@/lib/payroll-leave-allowance-store';
 
 export type PayrollEarningProfileId =
   | 'junior-permanent'
@@ -8,6 +9,7 @@ export type PayrollEarningProfileId =
   | 'senior-management-permanent'
   | 'contract-lumpsum'
   | 'contract-day-rate'
+  | 'stipend-non-taxable'
   | 'fallback';
 
 export type PayrollEarningDefinition = {
@@ -74,7 +76,7 @@ const num = (value: unknown) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-export const PAYROLL_EARNING_PROFILES: Record<Exclude<PayrollEarningProfileId, 'contract-day-rate' | 'fallback'>, { name: string; definitions: PayrollEarningDefinition[] }> = {
+export const PAYROLL_EARNING_PROFILES: Record<Exclude<PayrollEarningProfileId, 'contract-day-rate' | 'stipend-non-taxable' | 'fallback'>, { name: string; definitions: PayrollEarningDefinition[] }> = {
   'junior-permanent': {
     name: 'Permanent Junior Staff',
     definitions: [
@@ -95,7 +97,7 @@ export const PAYROLL_EARNING_PROFILES: Record<Exclude<PayrollEarningProfileId, '
       { code: 'SNR_LEAVE', name: 'LEAVE', taxable: true, percentOfGross: 0.0313, runFrequency: 'leave-period', includeInMonthlyPayroll: false },
       { code: 'SNR_MEDICAL', name: 'MEDICAL', taxable: true, percentOfGross: 0.0513 },
       { code: 'SNR_OTHERALL', name: 'OTHER ALLOWANCE', taxable: true, percentOfGross: 0.327 },
-      { code: 'SNR_TRANS', name: 'TRANSPORT ALLOWANCE', taxable: true, percentOfGross: 0.041 },
+      { code: 'SNR_TRANS', name: 'TRANSPORT ALLOWANCE', taxable: true, percentOfGross: 0.0411 },
       { code: 'SNR_UTILITY', name: 'UTILITIES', taxable: true, percentOfGross: 0.0205 },
     ],
   },
@@ -200,6 +202,19 @@ const JUNIOR_OVERTIME_EARNING_LINES: PayrollEarningLine[] = [
   { code: 'PER_SUNOVT', name: 'SUNDAY OVERTIME', taxable: true, percentOfGross: 0, calculation: '(Basic / 176) * 2.5 * number of hours', runFrequency: 'formula', includeInMonthlyPayroll: false, amount: 0 },
 ];
 
+export const SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS: PayrollEarningDefinition[] = [
+  { code: 'PER_MEAL', name: 'Meal Allowance', taxable: true, percentOfGross: 0, calculation: 'Fixed monthly Sage senior earning' },
+  { code: 'SNR_NJIC', name: 'SNR NJIC', taxable: true, percentOfGross: 0, calculation: 'Fixed monthly Sage senior earning' },
+];
+
+const seniorFixedMonthlyEarningLines = (profileId: PayrollEarningProfileId): PayrollEarningLine[] => {
+  if (profileId !== 'senior-permanent') return [];
+  return [
+    { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 22000 },
+    { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 15000 },
+  ];
+};
+
 const monthlyPayrollLines = (lines: PayrollEarningLine[]) => lines.filter((line) => line.includeInMonthlyPayroll !== false);
 
 const withCategoryFormulaLines = (profileId: PayrollEarningProfileId, lines: PayrollEarningLine[]) => {
@@ -221,6 +236,30 @@ const pensionablePayFromLines = (lines: PayrollEarningLine[]) => {
   };
 };
 
+const sagePayslipEarningLines = (employee: DleEmployeeDirectoryRow): PayrollEarningLine[] => {
+  return (employee.sagePayrollEarnings || [])
+    .map((line) => {
+      const amount = roundMoney(num(line.amount));
+      const taxableAmount = line.taxableAmount === null || line.taxableAmount === undefined ? amount : roundMoney(num(line.taxableAmount));
+      return {
+        code: compact(line.code),
+        name: compact(line.name || line.code),
+        taxable: taxableAmount > 0,
+        percentOfGross: 0,
+        calculation: 'Latest Sage payslip line',
+        runFrequency: 'monthly' as const,
+        includeInMonthlyPayroll: true,
+        amount,
+      };
+    })
+    .filter((line) => line.code && line.amount !== 0);
+};
+
+const isLeaveAllowanceLine = (line: Pick<PayrollEarningLine, 'code' | 'name'>) => {
+  const text = `${line.code || ''} ${line.name || ''}`.toUpperCase();
+  return text.includes('LEAVEALLOW') || text.includes('LEAVE ALLOWANCE') || /(^|_)LEAVE(TAX)?($|_)/.test(String(line.code || '').toUpperCase());
+};
+
 export const monthlyGrossFromEmployee = (employee: DleEmployeeDirectoryRow) =>
   roundMoney(num(employee.periodSalary) || (num(employee.annualSalary) > 0 ? num(employee.annualSalary) / 12 : 0));
 
@@ -234,7 +273,14 @@ export const resolvePayrollEarningProfile = (employee: DleEmployeeDirectoryRow):
     employee.jobTitle,
     employee.designation,
   ].map(compact).join(' ').toUpperCase();
+  const stipendGroupText = [
+    employee.payrollGroup,
+    employee.staffCategory,
+    employee.employeeCategory,
+    employee.employmentType,
+  ].map(compact).join(' ').toUpperCase();
   const employeeCode = compact(employee.employeeCode || employee.employeeId).toUpperCase();
+  if (/^(IT|I|NYSC|N)\d+/.test(employeeCode) || /\b(INDUSTRIAL TRAINING|INTERN|NYSC|NATIONAL YOUTH SERVICE)\b/.test(stipendGroupText)) return 'stipend-non-taxable';
   if (/^L\d+/.test(employeeCode) || /LUMPSUM|LUMP SUM/.test(groupText)) return 'contract-lumpsum';
   if (/^C\d+/.test(employeeCode) || /DAILY RATE|DAY RATE/.test(groupText)) return 'contract-day-rate';
   const isOtherContract = /CONTRACT|TEMPORARY|CASUAL/.test(groupText);
@@ -279,22 +325,6 @@ const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, profileId: Pay
   const employeeCode = normalizedEmployeeCode(employee);
   const adjustments: PayrollEarningLine[] = [];
 
-  if (period === '2026-05' && profileId === 'management-cola-permanent') {
-    const leaveMonthlyAccrual = lines.find((line) => line.code === 'MGTCOLA_LEAVE')?.amount || 0;
-    if (leaveMonthlyAccrual > 0) {
-      adjustments.push({
-        code: 'MGTCOLA_LEAVE_ALLOW',
-        name: 'Leave Allowance',
-        taxable: true,
-        percentOfGross: 0,
-        calculation: 'Annual leave allowance paid in leave period',
-        runFrequency: 'leave-period',
-        includeInMonthlyPayroll: true,
-        amount: roundMoney(leaveMonthlyAccrual * 12),
-      });
-    }
-  }
-
   if (period === '2026-05' && ['P0146', '0146'].includes(employeeCode)) {
     adjustments.push({
       code: 'REFUND',
@@ -311,6 +341,21 @@ const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, profileId: Pay
   return adjustments;
 };
 
+const leavePayrollEventLines = (employee: DleEmployeeDirectoryRow, periodGross: number, existingLines: PayrollEarningLine[], options?: PayrollEarningsOptions): PayrollEarningLine[] => {
+  if (!options?.includePeriodAdjustments) return [];
+  if (existingLines.some(isLeaveAllowanceLine)) return [];
+  return leaveAllowanceEventsForEmployeePeriod(employee, options.period).map((event) => ({
+    code: event.code || 'LEAVEALLOW',
+    name: event.description || 'Leave Allowance',
+    taxable: event.taxableAmount > 0,
+    percentOfGross: periodGross > 0 ? roundMoney(event.amount / periodGross) : 0,
+    calculation: `${event.source} - approved annual leave allowance for ${event.leaveYear}`,
+    runFrequency: 'leave-period' as const,
+    includeInMonthlyPayroll: true,
+    amount: roundMoney(event.amount),
+  })).filter((line) => line.amount !== 0);
+};
+
 const annualLeaveAllowanceLines = (lines: PayrollEarningLine[]) =>
   lines
     .filter((line) => line.runFrequency === 'leave-period' && line.code.includes('LEAVE') && !line.code.includes('LEAVE_ALLOW'))
@@ -321,6 +366,15 @@ const annualLeaveAllowanceLines = (lines: PayrollEarningLine[]) =>
       calculation: 'Paid once yearly as annual leave allowance',
       amount: roundMoney(line.amount * 12),
     }));
+
+export const calculateAnnualLeaveAllowanceAmount = (employee: DleEmployeeDirectoryRow) => {
+  const profileId = resolvePayrollEarningProfile(employee);
+  if (profileId === 'fallback' || profileId === 'contract-day-rate' || profileId === 'stipend-non-taxable') return 0;
+  const profile = PAYROLL_EARNING_PROFILES[profileId];
+  const gross = monthlyGrossFromEmployee(employee);
+  const leaveDefinition = profile.definitions.find((line) => line.runFrequency === 'leave-period' && line.code.includes('LEAVE'));
+  return leaveDefinition ? roundMoney(gross * leaveDefinition.percentOfGross * 12) : 0;
+};
 
 const visibleEarningLines = (lines: PayrollEarningLine[], periodAdjustments: PayrollEarningLine[]) => [
   ...lines.filter((line) => line.runFrequency !== 'leave-period'),
@@ -338,7 +392,58 @@ const fallbackAllowanceRate = (employee: DleEmployeeDirectoryRow) => {
 export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions): PayrollEarningsResult => {
   const profileId = resolvePayrollEarningProfile(employee);
   const gross = monthlyGrossFromEmployee(employee);
-  const profile = profileId === 'fallback' || profileId === 'contract-day-rate' ? null : PAYROLL_EARNING_PROFILES[profileId];
+  const profile = profileId === 'fallback' || profileId === 'contract-day-rate' || profileId === 'stipend-non-taxable' ? null : PAYROLL_EARNING_PROFILES[profileId];
+  const sageLines = sagePayslipEarningLines(employee);
+  if (sageLines.length > 0) {
+    const fallbackProfileName = profileId === 'contract-day-rate'
+      ? 'Contract Staff on Day Rate'
+      : profileId === 'stipend-non-taxable'
+        ? 'NYSC / IT Non-Taxable Stipend'
+        : profileId === 'fallback'
+          ? 'Payroll Setup Fallback'
+          : profile?.name || 'Payroll Profile';
+    const leaveEventLines = leavePayrollEventLines(employee, 0, sageLines, options);
+    const paidLines = [...sageLines, ...leaveEventLines];
+    const grossPay = roundMoney(paidLines.reduce((sum, line) => sum + line.amount, 0));
+    const sageTaxablePay = roundMoney((employee.sagePayrollEarnings || []).reduce((sum, line) => {
+      const amount = num(line.amount);
+      const taxableAmount = line.taxableAmount === null || line.taxableAmount === undefined ? amount : num(line.taxableAmount);
+      return sum + taxableAmount;
+    }, 0));
+    const taxablePay = roundMoney(sageTaxablePay + leaveEventLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
+    const basicPay = roundMoney(paidLines.filter(isBasicLine).reduce((sum, line) => sum + line.amount, 0));
+    return {
+      profileId,
+      profileName: `${fallbackProfileName} - Sage Payslip Exact`,
+      grossPay,
+      basePay: basicPay,
+      basicPay,
+      allowances: roundMoney(grossPay - basicPay),
+      taxablePay,
+      nonTaxablePay: roundMoney(grossPay - taxablePay),
+      earningLines: paidLines.map((line) => ({ ...line, percentOfGross: grossPay ? line.amount / grossPay : 0 })),
+      annualBenefitLines: [],
+      paidEarningLines: paidLines.map((line) => ({ ...line, percentOfGross: grossPay ? line.amount / grossPay : 0 })),
+    };
+  }
+  if (profileId === 'stipend-non-taxable') {
+    const lines = [
+      { code: 'STIPEND_NT', name: 'NYSC / IT STIPEND', taxable: false, percentOfGross: gross > 0 ? 1 : 0, amount: gross },
+    ].filter((line) => line.amount > 0);
+    return {
+      profileId,
+      profileName: 'NYSC / IT Non-Taxable Stipend',
+      grossPay: roundMoney(lines.reduce((sum, line) => sum + line.amount, 0)),
+      basePay: 0,
+      basicPay: 0,
+      allowances: roundMoney(lines.reduce((sum, line) => sum + line.amount, 0)),
+      taxablePay: 0,
+      nonTaxablePay: roundMoney(lines.reduce((sum, line) => sum + line.amount, 0)),
+      earningLines: lines,
+      annualBenefitLines: [],
+      paidEarningLines: lines,
+    };
+  }
   if (profileId === 'contract-day-rate') {
     const lines = [
       { code: 'JCWEEKDAY', name: 'WEEKDAY EARNING', taxable: true, percentOfGross: 0.45, amount: roundMoney(gross * 0.45) },
@@ -387,8 +492,12 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
     ...definition,
     amount: roundMoney(gross * definition.percentOfGross),
   }));
-  const lines = withCategoryFormulaLines(profileId, regularLines);
-  const periodAdjustments = periodAdjustmentLines(employee, profileId, lines, options);
+  const fixedMonthlyLines = seniorFixedMonthlyEarningLines(profileId);
+  const lines = withCategoryFormulaLines(profileId, [...regularLines, ...fixedMonthlyLines]);
+  const periodAdjustments = [
+    ...periodAdjustmentLines(employee, profileId, lines, options),
+    ...leavePayrollEventLines(employee, gross, lines, options),
+  ];
   const monthlyLines = [...monthlyPayrollLines(lines), ...periodAdjustments];
   const basicPay = lines.find((line) => line.code.endsWith('_BASIC'))?.amount || 0;
   const taxablePay = roundMoney(monthlyLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
@@ -476,11 +585,12 @@ export const calculatePermanentUnionDues = (employee: DleEmployeeDirectoryRow) =
     };
   }
   if (['senior-permanent', 'management-permanent', 'management-cola-permanent', 'senior-management-permanent'].includes(earnings.profileId)) {
+    const duesBasis = monthlyGrossFromEmployee(employee) || earnings.grossPay;
     return {
       code: 'SNR_UNION_DUES',
       name: 'SENIOR UNION DUES',
       basis: '(Monthly Salary * 26%) * 4%',
-      amount: roundMoney(earnings.grossPay * 0.26 * 0.04),
+      amount: roundMoney(duesBasis * 0.26 * 0.04),
     };
   }
   return {

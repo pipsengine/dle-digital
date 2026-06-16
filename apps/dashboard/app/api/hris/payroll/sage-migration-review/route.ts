@@ -60,13 +60,36 @@ const hasIdentityValue = (employee: SagePayrollEmployee) => Boolean(
   || pensionPinFromSage(employee)
 );
 
-const isPermanentOrLumpsumSageEmployee = (employee: SagePayrollEmployee) => {
+const sageNumber = (value: unknown) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const sageOrCurrent = (sageValue: unknown, currentValue: number | null | undefined) => {
+  const n = sageNumber(sageValue);
+  return n !== null ? n : currentValue;
+};
+
+const hasPayrollValue = (employee: SagePayrollEmployee) => (
+  sageNumber(employee.periodSalary) !== null
+  || sageNumber(employee.annualSalary) !== null
+  || sageNumber(employee.ratePerDay) !== null
+  || sageNumber(employee.ratePerHour) !== null
+);
+
+const isPayrollMigrationReviewEmployee = (employee: SagePayrollEmployee) => {
   const raw = normalizedCode(employee.employeeCode || employee.directoryEmployeeCode);
-  if (raw.startsWith('C') || raw.startsWith('IT') || raw.startsWith('I') || raw.startsWith('N') || raw.startsWith('NYSC')) return false;
+  if (raw.startsWith('C')) return false;
   return true;
 };
 
-const employeeType = (employee: SagePayrollEmployee) => normalizedCode(employee.directoryEmployeeCode || employee.employeeCode).startsWith('L') ? 'Lumpsum' : 'Permanent';
+const employeeType = (employee: SagePayrollEmployee) => {
+  const raw = normalizedCode(employee.directoryEmployeeCode || employee.employeeCode);
+  if (raw.startsWith('NYSC') || raw.startsWith('N')) return 'NYSC';
+  if (raw.startsWith('IT') || raw.startsWith('I')) return 'IT';
+  if (raw.startsWith('L')) return 'Lumpsum';
+  return 'Permanent';
+};
 
 const sageGross = (employee: SagePayrollEmployee) => {
   const periodSalary = Number(employee.periodSalary || 0);
@@ -97,7 +120,7 @@ export async function GET() {
       readEmployeeDirectoryFromDb(),
     ]);
     const hrisByCode = new Map((hrisEmployees ?? []).map((employee) => [normalizedCode(employee.employeeCode), employee]));
-    const targetSageEmployees = sageEmployees.filter(isPermanentOrLumpsumSageEmployee);
+    const targetSageEmployees = sageEmployees.filter(isPayrollMigrationReviewEmployee);
 
     const records = targetSageEmployees.map((source) => {
       const employeeCode = normalizedCode(source.directoryEmployeeCode || source.employeeCode);
@@ -237,7 +260,7 @@ export async function POST(request: Request) {
         summary.missingHris += 1;
         continue;
       }
-      if (!hasIdentityValue(source)) {
+      if (!hasIdentityValue(source) && !hasPayrollValue(source)) {
         summary.skippedNoIdentity += 1;
         continue;
       }
@@ -250,12 +273,12 @@ export async function POST(request: Request) {
           payCurrency: source.companyCurrency || hrisEmployee.payCurrency || 'NGN',
           paymentRun: source.paymentRunLong || source.paymentRunShort || hrisEmployee.paymentRun,
           paymentType: source.paymentType || hrisEmployee.paymentType,
-          periodSalary: Number(source.periodSalary || 0) || hrisEmployee.periodSalary,
-          annualSalary: Number(source.annualSalary || 0) || hrisEmployee.annualSalary,
-          ratePerDay: Number(source.ratePerDay || 0) || hrisEmployee.ratePerDay,
-          ratePerHour: Number(source.ratePerHour || 0) || hrisEmployee.ratePerHour,
-          hoursPerDay: Number(source.hoursPerDay || 0) || hrisEmployee.hoursPerDay,
-          hoursPerPeriod: Number(source.hoursPerPeriod || 0) || hrisEmployee.hoursPerPeriod,
+          periodSalary: sageOrCurrent(source.periodSalary, hrisEmployee.periodSalary),
+          annualSalary: sageOrCurrent(source.annualSalary, hrisEmployee.annualSalary),
+          ratePerDay: sageOrCurrent(source.ratePerDay, hrisEmployee.ratePerDay),
+          ratePerHour: sageOrCurrent(source.ratePerHour, hrisEmployee.ratePerHour),
+          hoursPerDay: sageOrCurrent(source.hoursPerDay, hrisEmployee.hoursPerDay),
+          hoursPerPeriod: sageOrCurrent(source.hoursPerPeriod, hrisEmployee.hoursPerPeriod),
           bankName: source.bankName,
           accountNo: source.accountNo,
           accountName: source.accountName,

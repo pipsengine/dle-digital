@@ -1,4 +1,5 @@
 export type HrisRole =
+  | 'Super Administrator'
   | 'OrganizationAdmin'
   | 'HRBusinessPartner'
   | 'Recruiter'
@@ -17,6 +18,7 @@ export type HrisPermission =
   | 'audit.view';
 
 const rolePermissions: Record<HrisRole, HrisPermission[]> = {
+  'Super Administrator': ['organization.view', 'attendance.manage', 'timesheet.approve', 'timesheet.period.manage', 'positions.manage', 'vacancy.manage', 'workforce.manage', 'audit.view'],
   OrganizationAdmin: ['organization.view', 'attendance.manage', 'timesheet.approve', 'timesheet.period.manage', 'positions.manage', 'vacancy.manage', 'workforce.manage', 'audit.view'],
   HRBusinessPartner: ['organization.view', 'attendance.manage', 'timesheet.approve', 'timesheet.period.manage', 'positions.manage', 'vacancy.manage', 'workforce.manage', 'audit.view'],
   Recruiter: ['organization.view', 'vacancy.manage', 'audit.view'],
@@ -25,7 +27,7 @@ const rolePermissions: Record<HrisRole, HrisPermission[]> = {
   Viewer: ['organization.view'],
 };
 
-const knownRoles: HrisRole[] = ['OrganizationAdmin', 'HRBusinessPartner', 'Recruiter', 'WorkforcePlanner', 'Auditor', 'Viewer'];
+const knownRoles: HrisRole[] = ['Super Administrator', 'OrganizationAdmin', 'HRBusinessPartner', 'Recruiter', 'WorkforcePlanner', 'Auditor', 'Viewer'];
 
 export type HrisAccessContext = {
   actor: string;

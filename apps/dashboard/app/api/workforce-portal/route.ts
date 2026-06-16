@@ -6,6 +6,8 @@ import { calculatePayrollEarnings, sageOpeningPayslipReconciliation } from '@/li
 import { activeLoansVersion, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
+import { hasLeaveAllowanceInYear, syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
+import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
 
 type EssRequest = {
   id: string;
@@ -18,6 +20,12 @@ type EssRequest = {
   updatedAt: string;
   approvers: string[];
   comments: Array<{ at: string; actor: string; comment: string }>;
+  leaveType?: string;
+  startDate?: string;
+  endDate?: string;
+  days?: number;
+  payrollPeriod?: string;
+  paidLeave?: boolean;
 };
 
 const ok = <T,>(data: T) => NextResponse.json({ status: 'success', data });
@@ -123,6 +131,7 @@ export async function GET(request: Request) {
     const [employeeSource, allRequests, loanApplications, loansConfig, taxConfig, pensionConfig] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig()]);
     const employee = resolveEssEmployee(employeeSource.employees);
     if (!employee) return err(404, 'No employee record is available for the ESS portal.');
+    await syncSageLeaveAllowanceEvents();
 
     const employeeRequests = allRequests.filter((item) => item.employeeId === employee.employeeId);
     const employeeLoans = loanApplications.filter((item) => item.employeeId === employee.employeeId);
@@ -143,7 +152,9 @@ export async function GET(request: Request) {
       const sageReconciliation = sageOpeningPayslipReconciliation(employee, period);
       const paye = roundMoney(sageReconciliation?.paye ?? tax?.monthlyPaye ?? 0);
       const pensionEmployee = roundMoney(sageReconciliation?.pensionEmployee ?? pension?.employeeContribution ?? 0);
-      const otherDeductions = sageReconciliation ? 0 : roundMoney((tax?.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12);
+      const nhf = sageReconciliation ? 0 : roundMoney((tax?.statutoryItems.find((item) => item.id === 'nhf')?.amount || 0) / 12);
+      const unionDues = sageReconciliation ? 0 : roundMoney((tax?.statutoryItems.find((item) => item.id === 'union-dues')?.amount || 0) / 12);
+      const otherDeductions = sageReconciliation ? 0 : roundMoney(((tax?.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12) + nhf + unionDues);
       const deductions = roundMoney(paye + pensionEmployee + otherDeductions);
       const employerPension = roundMoney(pension?.employerContribution || 0);
       const nsitf = roundMoney(earnings.grossPay * 0.01);
@@ -250,11 +261,10 @@ export async function GET(request: Request) {
 
     const requests = employeeRequests.length ? employeeRequests : seededRequests;
 
-    const employmentText = `${employee.employmentType || ''} ${employee.employeeCategory || ''} ${employee.staffCategory || ''}`.toLowerCase();
-    const contractEmployee = /contract|lumpsum|daily rate/.test(employmentText);
+    const fourteenDayPaidLeaveEmployee = isFourteenDayPaidLeaveEmployee(employee);
     const confirmedPermanent = String(employee.status || '').toLowerCase().includes('confirmed') || (employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() <= Date.now() : false);
     const leaveYear = new Date().getFullYear();
-    const annualEntitlement = contractEmployee ? 14 : confirmedPermanent ? 30 : 0;
+    const annualEntitlement = annualLeaveEntitlementForEmployee(employee);
     const carryForward = Math.min(7, employee.employeeDbId % 8);
     leaveContext = { annualEntitlement, leaveUsed, leaveBalance: Math.max(0, annualEntitlement - leaveUsed), carryForward };
     const currentPayroll = payrollForPeriod(ESS_CURRENT_PAYROLL_PERIOD);
@@ -265,17 +275,18 @@ export async function GET(request: Request) {
     const casualUsed = employee.employeeDbId % 2;
     const compassionateUsed = employee.employeeDbId % 2;
     const examUsed = employee.employeeDbId % 2;
-    const maternityEligible = !contractEmployee && /female/i.test(String((employee as any).gender || (employee as any).title || ''));
+    const maternityEligible = !fourteenDayPaidLeaveEmployee && /female/i.test(String((employee as any).gender || (employee as any).title || ''));
     const leavePolicyCards = [
-      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: 0, balance: Math.max(0, annualEntitlement - leaveUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Eligible - contract annual entitlement' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: 'Eligible only from 10 current-year Annual Leave working days', policyNote: contractEmployee ? 'Contract employees receive 14 working days annually.' : 'Permanent employees receive 30 working days after confirmation.' },
-      { id: 'sick-leave', type: 'Sick Leave', entitlement: contractEmployee ? 0 : 10, basis: 'Working days', used: sickUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 10) - sickUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Medical certificate may be required.' },
-      { id: 'casual-leave', type: 'Casual Leave', entitlement: contractEmployee ? 0 : 5, basis: 'Working days', used: casualUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 5) - casualUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Short-duration absence subject to manager approval.' },
-      { id: 'compassionate-leave', type: 'Compassionate Leave', entitlement: contractEmployee ? 0 : 5, basis: 'Working days', used: compassionateUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 5) - compassionateUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Supporting document required where applicable.' },
-      { id: 'exam-leave', type: 'Exam Leave', entitlement: contractEmployee ? 0 : 5, basis: 'Working days', used: examUsed, pending: 0, balance: Math.max(0, (contractEmployee ? 0 : 5) - examUsed), expiryDate: '', eligibilityStatus: contractEmployee ? 'Not configured for contract employees' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Exam timetable or institution evidence required.' },
+      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: 0, balance: Math.max(0, annualEntitlement - leaveUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Eligible - 14 paid working days annual entitlement' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: `Eligible only from ${dormantLongPolicy.allowanceMinimumAnnualDays} current-year Annual Leave working days`, policyNote: fourteenDayPaidLeaveEmployee ? 'Contract, lumpsum, NYSC, and IT employees receive 14 paid working days annually.' : 'Permanent employees receive 30 working days after confirmation.' },
+      { id: 'sick-leave', type: 'Sick Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 10, basis: 'Working days', used: sickUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 10) - sickUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Medical certificate may be required.' },
+      { id: 'casual-leave', type: 'Casual Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: casualUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - casualUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Short-duration absence subject to manager approval.' },
+      { id: 'compassionate-leave', type: 'Compassionate Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: compassionateUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - compassionateUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Supporting document required where applicable.' },
+      { id: 'exam-leave', type: 'Exam Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: examUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - examUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Exam timetable or institution evidence required.' },
       { id: 'maternity-leave', type: 'Maternity Leave', entitlement: maternityEligible ? 90 : 0, basis: 'Calendar days', used: 0, pending: 0, balance: maternityEligible ? 90 : 0, expiryDate: '', eligibilityStatus: maternityEligible ? 'Eligible' : 'Gender/category eligibility not met', allowanceStatus: 'No leave allowance', policyNote: '90 calendar days for eligible female employees.' },
       { id: 'carry-forward-leave', type: 'Carry Forward Leave', entitlement: carryForward, basis: 'Working days', used: Math.min(carryForward, employee.employeeDbId % 3), pending: 0, balance: Math.max(0, carryForward - Math.min(carryForward, employee.employeeDbId % 3)), expiryDate: `${leaveYear}-03-31`, eligibilityStatus: carryForward ? 'Available until 31 March' : 'No carry-forward balance', allowanceStatus: 'Does not trigger leave allowance', policyNote: 'Unused Annual Leave rolls over on 1 January up to 7 working days.' },
     ];
-    const allowanceEligible = annualEntitlement - leaveUsed >= 10;
+    const currentYearAllowanceAlreadyPaid = await hasLeaveAllowanceInYear(employee, leaveYear);
+    const allowanceEligible = annualEntitlement - leaveUsed >= 10 && !currentYearAllowanceAlreadyPaid;
     const leaveWorkflow = [
       { stage: 'Employee', owner: employee.fullName, status: 'Submitted', sla: 'Immediate' },
       { stage: 'Supervisor/Line Manager', owner: employee.managerName || 'Line Manager', status: 'Pending', sla: '2 business days' },
@@ -376,7 +387,7 @@ export async function GET(request: Request) {
         ],
         workflows: leaveWorkflow,
         allowance: [
-          { label: 'Leave Allowance Status', value: allowanceEligible ? 'Eligible when applying for 10+ current-year Annual Leave working days' : 'Not currently eligible', status: allowanceEligible ? 'Ready' : 'Review' },
+          { label: 'Leave Allowance Status', value: currentYearAllowanceAlreadyPaid ? `Already paid/approved for ${leaveYear}` : allowanceEligible ? `Eligible when applying for ${dormantLongPolicy.allowanceMinimumAnnualDays}+ current-year Annual Leave working days` : 'Not currently eligible', status: allowanceEligible ? 'Ready' : 'Review' },
           { label: 'Payroll Integration', value: 'Payroll is notified after eligible Annual Leave approval', status: 'Enabled' },
           { label: 'Carry Forward Rule', value: 'Carry Forward Leave does not trigger allowance', status: 'Enforced' },
         ],
@@ -543,6 +554,14 @@ export async function POST(request: Request) {
 
     const catalogItem = serviceCatalog.find((item) => item.label === category || item.id === category);
     const now = new Date().toISOString();
+    const leaveType = compact(body.leaveType || body.type);
+    const leaveDays = Number(body.days || 0);
+    const startDate = compact(body.startDate);
+    const endDate = compact(body.endDate);
+    const leaveYear = Number(body.leaveYear || new Date().getFullYear());
+    const allowanceAlreadyPaid = catalogItem?.id === 'leave' || /leave/i.test(category)
+      ? await hasLeaveAllowanceInYear(employee, leaveYear)
+      : false;
     const requestItem: EssRequest = {
       id: `ess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       employeeId: employee.employeeId,
@@ -553,7 +572,21 @@ export async function POST(request: Request) {
       submittedAt: now,
       updatedAt: now,
       approvers: catalogItem?.workflow.slice(1) || ['HR Operations'],
-      comments: [{ at: now, actor: 'Employee Self-Service', comment: 'Request submitted from workforce portal.' }],
+      leaveType: leaveType || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      days: leaveDays || undefined,
+      payrollPeriod: startDate ? startDate.slice(0, 7) : undefined,
+      paidLeave: /leave/i.test(category) && leaveType === 'Annual Leave',
+      comments: [{
+        at: now,
+        actor: 'Employee Self-Service',
+        comment: allowanceAlreadyPaid
+          ? `Request submitted from workforce portal. Leave allowance has already been paid/approved for ${leaveYear}.`
+          : leaveType === 'Annual Leave' && leaveDays >= dormantLongPolicy.allowanceMinimumAnnualDays
+            ? 'Request submitted from workforce portal. Leave allowance will post to payroll after approval.'
+            : 'Request submitted from workforce portal.',
+      }],
     };
 
     const requests = await readRequests();

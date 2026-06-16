@@ -74,6 +74,19 @@ export type SagePayrollEmployee = {
   ratePerDay: number | null;
   hoursPerDay: number | null;
   hoursPerPeriod: number | null;
+  latestPaye: number | null;
+  latestPensionEmployee: number | null;
+  latestNhf: number | null;
+  latestOtherDeductions: number | null;
+  latestTotalDeductions: number | null;
+  latestNetPay: number | null;
+  latestPensionEmployer: number | null;
+  latestNsitf: number | null;
+  latestItf: number | null;
+  latestTotalEmployerContributions: number | null;
+  latestEarningLinesJson: string | null;
+  latestDeductionLinesJson: string | null;
+  latestContributionLinesJson: string | null;
   workMonday: boolean | null;
   workTuesday: boolean | null;
   workWednesday: boolean | null;
@@ -146,6 +159,21 @@ activeEmployeeCodes AS (
     AND ge.Status = 'A'
     AND c.Status = 'A'
 ),
+activeEmployees AS (
+  SELECT e.EmployeeID, e.EmployeeCode
+  FROM Employee.Employee e
+  JOIN Entity.GenEntity ge
+    ON ge.GenEntityID = e.GenEntityID
+  JOIN Company.Company c
+    ON c.CompanyID = e.CompanyID
+  LEFT JOIN Employee.EmployeeStatus es
+    ON es.EmployeeStatusID = e.EmployeeStatusID
+  WHERE
+    e.TerminationDate IS NULL
+    AND ISNULL(es.Code, 'A') = 'A'
+    AND ge.Status = 'A'
+    AND c.Status = 'A'
+),
 activeContractEmployees AS (
   SELECT e.EmployeeID, e.EmployeeCode
   FROM Employee.Employee e
@@ -161,6 +189,101 @@ activeContractEmployees AS (
     AND ISNULL(es.Code, 'A') = 'A'
     AND ge.Status = 'A'
     AND c.Status = 'A'
+),
+activeStipendEmployees AS (
+  SELECT e.EmployeeID, e.EmployeeCode
+  FROM Employee.Employee e
+  JOIN Entity.GenEntity ge
+    ON ge.GenEntityID = e.GenEntityID
+  JOIN Company.Company c
+    ON c.CompanyID = e.CompanyID
+  LEFT JOIN Employee.EmployeeStatus es
+    ON es.EmployeeStatusID = e.EmployeeStatusID
+  WHERE
+    (
+      UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'IT%'
+      OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'I%'
+      OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'N%'
+      OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'NYSC%'
+    )
+    AND e.TerminationDate IS NULL
+    AND ISNULL(es.Code, 'A') = 'A'
+    AND ge.Status = 'A'
+    AND c.Status = 'A'
+),
+stipendGrossPeriods AS (
+  SELECT
+    se.EmployeeID,
+    epp.EmployeePayPeriodID,
+    SUM(ISNULL(pel.Total, 0)) AS grossPay,
+    ROW_NUMBER() OVER (PARTITION BY se.EmployeeID ORDER BY epp.EmployeePayPeriodID DESC) AS rn
+  FROM activeStipendEmployees se
+  JOIN Employee.EmployeePayPeriod epp
+    ON epp.EmployeeID = se.EmployeeID
+  JOIN Payroll.Payslip p
+    ON p.EmployeePayPeriodID = epp.EmployeePayPeriodID
+  JOIN Payroll.PayslipEarnLine pel
+    ON pel.PayslipID = p.PayslipID
+  WHERE ISNULL(pel.Total, 0) <> 0
+  GROUP BY se.EmployeeID, epp.EmployeePayPeriodID
+),
+stipendGross AS (
+  SELECT EmployeeID, grossPay
+  FROM stipendGrossPeriods
+  WHERE rn = 1
+),
+latestPayslipPeriods AS (
+  SELECT
+    ae.EmployeeID,
+    epp.EmployeePayPeriodID,
+    p.PayslipID,
+    ROW_NUMBER() OVER (PARTITION BY ae.EmployeeID ORDER BY epp.EmployeePayPeriodID DESC, p.PayslipID DESC) AS rn
+  FROM activeEmployees ae
+  JOIN Employee.EmployeePayPeriod epp
+    ON epp.EmployeeID = ae.EmployeeID
+  JOIN Payroll.Payslip p
+    ON p.EmployeePayPeriodID = epp.EmployeePayPeriodID
+),
+latestPayslipDeductions AS (
+  SELECT
+    lp.EmployeeID,
+    SUM(CASE WHEN dd.DefCode = 'PAYE' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS paye,
+    SUM(CASE WHEN dd.DefCode = 'PENSION_EE' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS pensionEmployee,
+    SUM(CASE WHEN dd.DefCode = 'NHF' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS nhf,
+    SUM(CASE WHEN dd.DefCode NOT IN ('PAYE', 'PENSION_EE', 'NHF') THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS otherDeductions,
+    SUM(ISNULL(pdl.Total, 0)) AS totalDeductions
+  FROM latestPayslipPeriods lp
+  JOIN Payroll.PayslipDeductionLine pdl
+    ON pdl.PayslipID = lp.PayslipID
+  JOIN Payroll.DeductionDef dd
+    ON dd.DeductionDefID = pdl.DefID
+  WHERE lp.rn = 1
+  GROUP BY lp.EmployeeID
+),
+latestPayslipContributions AS (
+  SELECT
+    lp.EmployeeID,
+    SUM(CASE WHEN ccd.DefCode = 'PENSION_ER' THEN ISNULL(pccl.Total, 0) ELSE 0 END) AS pensionEmployer,
+    SUM(CASE WHEN ccd.DefCode = 'NSITF' THEN ISNULL(pccl.Total, 0) ELSE 0 END) AS nsitf,
+    SUM(CASE WHEN ccd.DefCode = 'ITF_LEVY' THEN ISNULL(pccl.Total, 0) ELSE 0 END) AS itf,
+    SUM(ISNULL(pccl.Total, 0)) AS totalEmployerContributions
+  FROM latestPayslipPeriods lp
+  JOIN Payroll.PayslipCompanyContributionLine pccl
+    ON pccl.PayslipID = lp.PayslipID
+  JOIN Payroll.CompanyContributionDef ccd
+    ON ccd.CompanyContributionDefID = pccl.DefID
+  WHERE lp.rn = 1
+  GROUP BY lp.EmployeeID
+),
+latestPayslipNetPay AS (
+  SELECT
+    lp.EmployeeID,
+    SUM(ISNULL(pnp.PaymentAmount, 0)) AS netPay
+  FROM latestPayslipPeriods lp
+  JOIN Payroll.PayslipNetPay pnp
+    ON pnp.PayslipID = lp.PayslipID
+  WHERE lp.rn = 1
+  GROUP BY lp.EmployeeID
 ),
 contractWeekdayRates AS (
   SELECT
@@ -302,12 +425,25 @@ SELECT
   ed.AccountNo AS accountNo,
   ed.AccountName AS accountName,
   ed.AccountTypeID AS accountTypeId,
-  ed.AnnualSalary AS annualSalary,
-  COALESCE(NULLIF(ed.PeriodSalary, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' THEN cdr.ratePerDay ELSE NULL END) AS periodSalary,
+  COALESCE(NULLIF(ed.AnnualSalary, 0), CASE WHEN sg.grossPay > 0 THEN sg.grossPay * 12 ELSE NULL END) AS annualSalary,
+  COALESCE(NULLIF(ed.PeriodSalary, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' THEN cdr.ratePerDay ELSE NULL END, sg.grossPay) AS periodSalary,
   COALESCE(NULLIF(ed.RatePerHour, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' AND cdr.ratePerDay > 0 THEN cdr.ratePerDay / 8.0 ELSE NULL END) AS ratePerHour,
   COALESCE(NULLIF(ed.RatePerDay, 0), CASE WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' THEN cdr.ratePerDay ELSE NULL END) AS ratePerDay,
   ed.HoursPerDay AS hoursPerDay,
   ed.HoursPerPeriod AS hoursPerPeriod,
+  lpd.paye AS latestPaye,
+  lpd.pensionEmployee AS latestPensionEmployee,
+  lpd.nhf AS latestNhf,
+  lpd.otherDeductions AS latestOtherDeductions,
+  lpd.totalDeductions AS latestTotalDeductions,
+  lpnp.netPay AS latestNetPay,
+  lpc.pensionEmployer AS latestPensionEmployer,
+  lpc.nsitf AS latestNsitf,
+  lpc.itf AS latestItf,
+  lpc.totalEmployerContributions AS latestTotalEmployerContributions,
+  NULL AS latestEarningLinesJson,
+  NULL AS latestDeductionLinesJson,
+  NULL AS latestContributionLinesJson,
   ed.WorkMonday AS workMonday,
   ed.WorkTuesday AS workTuesday,
   ed.WorkWednesday AS workWednesday,
@@ -352,6 +488,14 @@ LEFT JOIN latestContract lc
   AND lc.rn = 1
 LEFT JOIN contractDailyRates cdr
   ON cdr.EmployeeID = e.EmployeeID
+LEFT JOIN stipendGross sg
+  ON sg.EmployeeID = e.EmployeeID
+LEFT JOIN latestPayslipDeductions lpd
+  ON lpd.EmployeeID = e.EmployeeID
+LEFT JOIN latestPayslipContributions lpc
+  ON lpc.EmployeeID = e.EmployeeID
+LEFT JOIN latestPayslipNetPay lpnp
+  ON lpnp.EmployeeID = e.EmployeeID
 WHERE
   ge.Status = 'A'
   AND c.Status = 'A'
@@ -386,6 +530,130 @@ export async function readActiveSagePayrollEmployees() {
   try {
     const result = await pool.request().query(activeEmployeeQuery);
     return result.recordset as SagePayrollEmployee[];
+  } finally {
+    await pool.close();
+  }
+}
+
+type SagePayslipLine = {
+  employeeId: number;
+  code: string;
+  name: string;
+  amount: number;
+  taxableAmount?: number | null;
+  ytdTotal?: number | null;
+};
+
+const latestPayslipLinesQuery = `
+IF OBJECT_ID('tempdb..#LatestPayslipPeriods') IS NOT NULL DROP TABLE #LatestPayslipPeriods;
+
+WITH activeEmployees AS (
+  SELECT e.EmployeeID
+  FROM Employee.Employee e
+  JOIN Entity.GenEntity ge
+    ON ge.GenEntityID = e.GenEntityID
+  JOIN Company.Company c
+    ON c.CompanyID = e.CompanyID
+  LEFT JOIN Employee.EmployeeStatus es
+    ON es.EmployeeStatusID = e.EmployeeStatusID
+  WHERE
+    e.TerminationDate IS NULL
+    AND ISNULL(es.Code, 'A') = 'A'
+    AND ge.Status = 'A'
+    AND c.Status = 'A'
+),
+latestPayslipPeriods AS (
+  SELECT
+    ae.EmployeeID,
+    epp.EmployeePayPeriodID,
+    p.PayslipID,
+    ROW_NUMBER() OVER (PARTITION BY ae.EmployeeID ORDER BY epp.EmployeePayPeriodID DESC, p.PayslipID DESC) AS rn
+  FROM activeEmployees ae
+  JOIN Employee.EmployeePayPeriod epp
+    ON epp.EmployeeID = ae.EmployeeID
+  JOIN Payroll.Payslip p
+    ON p.EmployeePayPeriodID = epp.EmployeePayPeriodID
+)
+SELECT EmployeeID, EmployeePayPeriodID, PayslipID
+INTO #LatestPayslipPeriods
+FROM latestPayslipPeriods
+WHERE rn = 1;
+
+SELECT
+  lp.EmployeeID AS employeeId,
+  edef.DefCode AS code,
+  COALESCE(NULLIF(LTRIM(RTRIM(edef.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(edef.LongDescription)), ''), edef.DefCode) AS name,
+  pel.Total AS amount,
+  pel.TaxableAmount AS taxableAmount,
+  pel.YTDTotal AS ytdTotal
+FROM #LatestPayslipPeriods lp
+JOIN Payroll.PayslipEarnLine pel
+  ON pel.PayslipID = lp.PayslipID
+JOIN Payroll.EarningDef edef
+  ON edef.EarningDefID = pel.DefID
+WHERE ISNULL(pel.Total, 0) <> 0
+ORDER BY lp.EmployeeID, edef.DefCode;
+
+SELECT
+  lp.EmployeeID AS employeeId,
+  dd.DefCode AS code,
+  COALESCE(NULLIF(LTRIM(RTRIM(dd.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(dd.LongDescription)), ''), dd.DefCode) AS name,
+  pdl.Total AS amount,
+  pdl.YTDTotal AS ytdTotal
+FROM #LatestPayslipPeriods lp
+JOIN Payroll.PayslipDeductionLine pdl
+  ON pdl.PayslipID = lp.PayslipID
+JOIN Payroll.DeductionDef dd
+  ON dd.DeductionDefID = pdl.DefID
+WHERE ISNULL(pdl.Total, 0) <> 0
+ORDER BY lp.EmployeeID, dd.DefCode;
+
+SELECT
+  lp.EmployeeID AS employeeId,
+  ccd.DefCode AS code,
+  COALESCE(NULLIF(LTRIM(RTRIM(ccd.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(ccd.LongDescription)), ''), ccd.DefCode) AS name,
+  pccl.Total AS amount,
+  pccl.YTDTotal AS ytdTotal
+FROM #LatestPayslipPeriods lp
+JOIN Payroll.PayslipCompanyContributionLine pccl
+  ON pccl.PayslipID = lp.PayslipID
+JOIN Payroll.CompanyContributionDef ccd
+  ON ccd.CompanyContributionDefID = pccl.DefID
+WHERE ISNULL(pccl.Total, 0) <> 0
+ORDER BY lp.EmployeeID, ccd.DefCode;
+
+DROP TABLE #LatestPayslipPeriods;
+`;
+
+const groupLinesByEmployee = (lines: SagePayslipLine[]) => lines.reduce((map, line) => {
+  const current = map.get(line.employeeId) || [];
+  current.push({
+    code: line.code,
+    name: line.name,
+    amount: line.amount,
+    taxableAmount: line.taxableAmount ?? null,
+    ytdTotal: line.ytdTotal ?? null,
+  });
+  map.set(line.employeeId, current);
+  return map;
+}, new Map<number, Array<Omit<SagePayslipLine, 'employeeId'>>>());
+
+export async function readActiveSagePayrollEmployeesWithLatestPayslipLines() {
+  const employees = await readActiveSagePayrollEmployees();
+  const pool = new sql.ConnectionPool(config());
+  await pool.connect();
+  try {
+    const result = await pool.request().query(latestPayslipLinesQuery);
+    const recordsets = (Array.isArray(result.recordsets) ? result.recordsets : []) as unknown[];
+    const earningsByEmployee = groupLinesByEmployee((recordsets[0] || []) as SagePayslipLine[]);
+    const deductionsByEmployee = groupLinesByEmployee((recordsets[1] || []) as SagePayslipLine[]);
+    const contributionsByEmployee = groupLinesByEmployee((recordsets[2] || []) as SagePayslipLine[]);
+    return employees.map((employee) => ({
+      ...employee,
+      latestEarningLinesJson: JSON.stringify(earningsByEmployee.get(employee.employeeId) || []),
+      latestDeductionLinesJson: JSON.stringify(deductionsByEmployee.get(employee.employeeId) || []),
+      latestContributionLinesJson: JSON.stringify(contributionsByEmployee.get(employee.employeeId) || []),
+    }));
   } finally {
     await pool.close();
   }

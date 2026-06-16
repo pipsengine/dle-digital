@@ -48,7 +48,15 @@ export async function middleware(request: NextRequest) {
   const permission = requiredPermission(pathname);
   if (permission && !hasPermission(session.permissions, permission)) return denied(request, 403);
 
-  const response = NextResponse.next();
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-auth-user', session.username);
+  requestHeaders.set('x-auth-roles', session.roles.join(','));
+  requestHeaders.set('x-hris-actor', session.fullName || session.username);
+  if (!requestHeaders.get('x-hris-role')) {
+    requestHeaders.set('x-hris-role', session.roles.includes('Super Administrator') ? 'Super Administrator' : 'OrganizationAdmin');
+  }
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('x-auth-user', session.username);
   response.headers.set('x-auth-roles', session.roles.join(','));
   return response;

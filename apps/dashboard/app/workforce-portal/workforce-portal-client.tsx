@@ -647,7 +647,7 @@ const calcLeaveDays = (from: string, to: string, basis: string) => {
   return days;
 };
 
-function EssLeaveWorkspace({ payload, employee }: { payload: Payload | null; employee?: Payload['employee'] }) {
+function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string }) => Promise<void>; saving?: boolean }) {
   const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
   const [leaveType, setLeaveType] = useState('Annual Leave');
   const [startDate, setStartDate] = useState('');
@@ -743,7 +743,14 @@ function EssLeaveWorkspace({ payload, employee }: { payload: Payload | null; emp
             <p className="text-xs font-semibold text-slate-600">Available balance: {balance} days</p>
             <div className="space-y-2">{validations.map((item, index) => <div key={`${item}-${index}`} className={`rounded-lg border px-3 py-2 text-xs font-bold ${item.includes('does not qualify') ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{item}</div>)}</div>
             {!validations.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">{'Ready to submit. Workflow: Employee -> Supervisor -> Manager/GM -> HR -> Payroll when applicable -> Completed.'}</div> : null}
-            <button type="button" disabled={Boolean(validations.filter((item) => !item.includes('does not qualify')).length)} className="h-11 w-full rounded-lg bg-blue-600 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-500">Submit Leave Application</button>
+            <button
+              type="button"
+              onClick={() => onLeaveSubmitted?.({ leaveType, startDate, endDate, days, reason })}
+              disabled={saving || Boolean(validations.filter((item) => !item.includes('does not qualify')).length)}
+              className="h-11 w-full rounded-lg bg-blue-600 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
+            >
+              {saving ? 'Submitting...' : 'Submit Leave Application'}
+            </button>
           </div>
         </section>
       )}
@@ -830,6 +837,37 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to submit request');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitLeaveApplication = async (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string }) => {
+    if (!payload) return;
+    setSaving(true);
+    setToast('');
+    setError('');
+    try {
+      const res = await fetch('/api/workforce-portal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          category: 'Leave Application',
+          title: `${input.leaveType} ${input.startDate} to ${input.endDate}`,
+          priority: 'Normal',
+          leaveType: input.leaveType,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          days: input.days,
+          reason: input.reason,
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<{ request: EssRequest }>;
+      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to submit leave application');
+      setToast('Leave application submitted for approval.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to submit leave application');
     } finally {
       setSaving(false);
     }
@@ -1067,7 +1105,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           )}
 
           {tab === 'leave' && widgets && (
-            <EssLeaveWorkspace payload={payload} employee={employee} />
+            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} saving={saving} />
           )}
 
           {tab === 'time' && widgets && (

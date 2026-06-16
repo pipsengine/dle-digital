@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { updateEmployeeDailyRatePayInDb } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
+import { isTimesheetPaidLeaveLine, normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { calculateContractDayRateEarnings } from '@/lib/payroll-earnings-engine';
 
@@ -55,15 +55,16 @@ const buildPayload = async (request: Request) => {
     current.idleHours += item.idleHours;
     if (item.payrollReady) {
       current.payrollReadyDays += item.daysWorked;
-      current.payrollReadyHours += item.attendanceHours;
+      current.payrollReadyHours += item.bookedHours || item.attendanceHours;
       current.latestPayrollUpdate = item.updateAt || current.latestPayrollUpdate;
     }
     attendanceByKey.set(key, current);
   };
 
   for (const line of lines) {
+    const paidLeave = isTimesheetPaidLeaveLine(line);
     const payload = {
-      daysWorked: line.clockIn ? 1 : 0,
+      daysWorked: line.clockIn || paidLeave ? 1 : 0,
       attendanceHours: normalizePaidWorkHours(num(line.attendanceDuration)),
       bookedHours: normalizePaidWorkHours(num(line.totalHours)),
       idleHours: num(line.idleHours),
@@ -95,7 +96,7 @@ const buildPayload = async (request: Request) => {
     const ratePerHour = num(employee.ratePerHour) || (ratePerDay && hoursPerDay ? ratePerDay / hoursPerDay : 0);
     const payMode = ratePerHour > 0 && ratePerDay <= 0 ? 'Hourly' : 'Daily';
     const payableDays = attendance.payrollReadyDays || attendance.daysWorked;
-    const payableHours = attendance.payrollReadyHours || attendance.attendanceHours;
+    const payableHours = attendance.payrollReadyHours || attendance.bookedHours || attendance.attendanceHours;
     const dayRateEarnings = calculateContractDayRateEarnings({
       ratePerDay: ratePerDay || ratePerHour * hoursPerDay,
       weekdayDays: payMode === 'Hourly' ? payableHours / hoursPerDay : payableDays,
@@ -103,7 +104,7 @@ const buildPayload = async (request: Request) => {
     const grossPay = dayRateEarnings.grossPay || (payMode === 'Hourly' ? payableHours * ratePerHour : payableDays * ratePerDay);
     const issues: string[] = [];
     if (!ratePerDay && !ratePerHour) issues.push('Daily or hourly rate is missing');
-    if (!attendance.daysWorked && !attendance.attendanceHours) issues.push('No daily timesheet found');
+    if (!attendance.daysWorked && !attendance.bookedHours && !attendance.attendanceHours) issues.push('No daily timesheet found');
     if (!attendance.payrollReadyDays && !attendance.payrollReadyHours) issues.push('Timesheet is not yet payroll-ready');
     if (!employee.setupAssignedToPayroll) issues.push('Employee is not assigned to payroll setup');
     return {

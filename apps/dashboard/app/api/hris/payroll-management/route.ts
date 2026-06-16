@@ -4,6 +4,7 @@ import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-emplo
 import { calculatePayrollEarnings, sageOpeningPayslipReconciliation } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig, type PayrollTaxVersion } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig, type PensionVersion } from '@/lib/payroll-pension-engine';
+import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 
 type Role =
   | 'Super Admin'
@@ -117,7 +118,9 @@ const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxV
   const sageReconciliation = sageOpeningPayslipReconciliation(employee, PAYROLL_SETUP_PREVIEW_PERIOD);
   const pension = sageReconciliation?.pensionEmployee ?? calculatePension(pensionInputFromEmployee(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true }), pensionVersion).employeeContribution;
   const paye = sageReconciliation?.paye ?? tax.monthlyPaye;
-  const otherDeductions = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12;
+  const nhf = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'nhf')?.amount || 0) / 12;
+  const unionDues = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'union-dues')?.amount || 0) / 12;
+  const otherDeductions = sageReconciliation ? 0 : ((tax.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12) + nhf + unionDues;
   const grossPay = earnings.grossPay;
   const deductions = pension + paye + otherDeductions;
   return {
@@ -245,6 +248,7 @@ const buildPayload = async (request: Request) => {
   const taxVersion = activeTaxVersion(taxConfig);
   const pensionVersion = activePensionVersion(pensionConfig);
   if (!taxVersion || !pensionVersion) throw new Error('No active payroll tax or pension configuration is available.');
+  await syncSageLeaveAllowanceEvents();
   const records = buildRecords(employeeRows, taxVersion, pensionVersion);
   const eligible = records.filter((record) => !['Terminated', 'Resigned', 'Retired', 'Inactive'].includes(record.employmentStatus));
   const ready = records.filter((record) => record.payrollStatus === 'Ready');

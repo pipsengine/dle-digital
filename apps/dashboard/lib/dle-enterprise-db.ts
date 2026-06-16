@@ -94,6 +94,39 @@ export type DleEmployeeDirectoryRow = {
   ratePerDay: number | null;
   hoursPerDay: number | null;
   hoursPerPeriod: number | null;
+  sagePayrollEarnings?: Array<{
+    code: string;
+    name: string;
+    amount: number;
+    taxableAmount?: number | null;
+    ytdTotal?: number | null;
+  }>;
+  sagePayrollDeductions?: {
+    paye?: number | null;
+    pensionEmployee?: number | null;
+    nhf?: number | null;
+    other?: number | null;
+    totalDeductions?: number | null;
+    netPay?: number | null;
+    lines?: Array<{
+      code: string;
+      name: string;
+      amount: number;
+      ytdTotal?: number | null;
+    }>;
+  };
+  sagePayrollContributions?: {
+    pensionEmployer?: number | null;
+    nsitf?: number | null;
+    itf?: number | null;
+    totalEmployerContributions?: number | null;
+    lines?: Array<{
+      code: string;
+      name: string;
+      amount: number;
+      ytdTotal?: number | null;
+    }>;
+  };
   setupAssignedToPayroll: boolean;
   sourceSystem: string;
   sourceEmployeeId: string;

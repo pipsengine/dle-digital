@@ -354,9 +354,52 @@ const nodeTone = (lvl: OrgChartNode['level']) => {
   return { border: 'border-slate-200', bg: 'bg-white', fg: 'text-slate-800' };
 };
 
-type EmployeeOption = { employeeId: string; fullName: string; department?: string; jobTitle?: string; currentManager?: string; location?: string; businessUnit?: string };
+type EmployeeOption = { employeeId: string; fullName: string; department?: string; jobTitle?: string; currentManager?: string; location?: string; businessUnit?: string; employmentStatus?: string };
 type FormOptions = { employees: EmployeeOption[]; changeTypes: ReportingChangeType[]; delegationScopes: string[]; delegationAssignmentTypes: string[] };
 type DraftModel = { requestId?: string; changeType: ReportingChangeType; effectiveDate: string; endDate: string; reason: string; notes: string; newValues: Record<string, string>; delegations: ReportingDelegation[] };
+
+const employeeSelectorValue = (employee: EmployeeOption) => `${employee.fullName} [${employee.employeeId}]`;
+
+function EmployeeSelectField({
+  label,
+  value,
+  employees,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  employees: EmployeeOption[];
+  onChange: (value: string) => void;
+}) {
+  const normalized = value.trim();
+  const sortedEmployees = useMemo(
+    () =>
+      [...employees].sort((a, b) =>
+        `${a.fullName} ${a.employeeId}`.localeCompare(`${b.fullName} ${b.employeeId}`),
+      ),
+    [employees],
+  );
+  const hasValue = normalized && !sortedEmployees.some((employee) => employeeSelectorValue(employee) === normalized || employee.fullName === normalized || employee.employeeId === normalized);
+
+  return (
+    <label className="block">
+      <span className="text-[11px] font-extrabold text-slate-600">{label}</span>
+      <select
+        value={normalized}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/10"
+      >
+        <option value="">Select employee</option>
+        {hasValue ? <option value={normalized}>{normalized}</option> : null}
+        {sortedEmployees.map((employee) => (
+          <option key={employee.employeeId} value={employeeSelectorValue(employee)}>
+            {employee.fullName} [{employee.employeeId}] - {employee.jobTitle || 'Employee'} - {employee.department || 'Unassigned'}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 function OrgChartPreview({ orgChart }: { orgChart?: { nodes: OrgChartNode[]; edges: OrgChartEdge[] } }) {
   const [scale, setScale] = useState(1);
@@ -1023,16 +1066,15 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
               ['delegatedApprover', 'Delegated Approver'],
             ].map(([k, label]) => (
               <div key={k} className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-[11px] font-extrabold text-slate-600">{label}</div>
-                <input value={draft.newValues[k] || ''} onChange={(e) => setDraft((d) => ({ ...d, newValues: { ...d.newValues, [k]: e.target.value } }))} list="employee-name-options" className="mt-2 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800" />
+                <EmployeeSelectField
+                  label={label}
+                  value={draft.newValues[k] || ''}
+                  employees={employees}
+                  onChange={(value) => setDraft((d) => ({ ...d, newValues: { ...d.newValues, [k]: value } }))}
+                />
               </div>
             ))}
           </div>
-          <datalist id="employee-name-options">
-            {employees.slice(0, 120).map((e) => (
-              <option key={e.employeeId} value={e.fullName} />
-            ))}
-          </datalist>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1090,10 +1132,12 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
                         ))}
                       </select>
                     </label>
-                    <label className="block">
-                      <span className="text-[11px] font-extrabold text-slate-600">Assigned Employee</span>
-                      <input value={d.assignedEmployee} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, assignedEmployee: e.target.value } : x)) }))} list="employee-name-options" className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
-                    </label>
+                    <EmployeeSelectField
+                      label="Assigned Employee"
+                      value={d.assignedEmployee}
+                      employees={employees}
+                      onChange={(value) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, assignedEmployee: value } : x)) }))}
+                    />
                     <label className="block">
                       <span className="text-[11px] font-extrabold text-slate-600">Role</span>
                       <input value={d.delegatedRole} onChange={(e) => setDraft((cur) => ({ ...cur, delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, delegatedRole: e.target.value } : x)) }))} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800" />
@@ -1173,16 +1217,16 @@ export default function ReportingLineClient({ initialNow, employeeId }: { initia
                         </select>
                       </td>
                       <td className="px-4 py-2">
-                        <input
+                        <EmployeeSelectField
+                          label="Assigned Employee"
                           value={d.assignedEmployee}
-                          onChange={(e) =>
+                          employees={employees}
+                          onChange={(value) =>
                             setDraft((cur) => ({
                               ...cur,
-                              delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, assignedEmployee: e.target.value } : x)),
+                              delegations: cur.delegations.map((x, i) => (i === idx ? { ...x, assignedEmployee: value } : x)),
                             }))
                           }
-                          list="employee-name-options"
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-800"
                         />
                       </td>
                       <td className="px-4 py-2">
