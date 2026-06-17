@@ -13,6 +13,8 @@ services:
       NODE_ENV: production
       PORT: 3010
       HOSTNAME: 0.0.0.0
+      AUTH_SUPER_ADMIN_SKIP_FIRST_CHANGE: "1"
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       APP_URL: ${APP_URL:-http://localhost:3010}
       BIOMETRIC_DB_HOST: ${BIOMETRIC_DB_HOST:-192.168.5.5}

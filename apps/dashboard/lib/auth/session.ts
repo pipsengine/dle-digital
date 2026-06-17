@@ -48,6 +48,21 @@ const base64UrlDecode = (value: string) => {
 
 const secret = () => process.env.AUTH_SESSION_SECRET || process.env.NEXTAUTH_SECRET || 'dle-development-session-secret-change-before-production';
 
+export const shouldUseSecureAuthCookie = (request?: Request) => {
+  const configured = process.env.AUTH_COOKIE_SECURE;
+  if (configured != null && configured !== '') return !['0', 'false', 'no', 'off'].includes(configured.toLowerCase());
+  const forwardedProto = request?.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === 'https';
+  if (request?.url) {
+    try {
+      return new URL(request.url).protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+  return process.env.NODE_ENV === 'production';
+};
+
 const sign = async (data: string) => {
   const key = await crypto.subtle.importKey('raw', enc.encode(secret()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const signature = await crypto.subtle.sign('HMAC', key, enc.encode(data));

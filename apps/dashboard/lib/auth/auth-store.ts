@@ -238,7 +238,7 @@ const globalAdminDefault = (): GlobalAdminState => {
     username: 'Admin',
     passwordHash: hashed.hash,
     passwordSalt: hashed.salt,
-    firstLoginRequired: process.env.AUTH_SUPER_ADMIN_SKIP_FIRST_CHANGE === '1' ? false : true,
+    firstLoginRequired: false,
     passwordResetRequired: false,
     failedAttempts: 0,
     lockedUntil: null,
@@ -285,8 +285,8 @@ const globalSessionUser = (state: GlobalAdminState): SessionUser => ({
   roles: ['Super Administrator'],
   permissions: ['*'],
   status: 'Active',
-  firstLoginRequired: state.firstLoginRequired,
-  passwordResetRequired: state.passwordResetRequired,
+  firstLoginRequired: false,
+  passwordResetRequired: false,
   isGlobalAdmin: true,
 });
 

@@ -94,6 +94,10 @@ Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '00-dle-enterprise-database.sql
 Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '10-dle-enterprise-backup-strategy.sql') -Tokens $tokens
 Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '20-dle-enterprise-rbac-foundation.sql') -Tokens $tokens
 Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '30-dle-enterprise-employee-onboarding.sql') -Tokens $tokens
+Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '40-dle-enterprise-timesheet-foundation.sql') -Tokens $tokens
+Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '41-dle-enterprise-organization-departments.sql') -Tokens $tokens
+Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '42-dle-enterprise-organization-locations-sites.sql') -Tokens $tokens
+Invoke-SqlBatchFile -Path (Join-Path $scriptRoot '43-dle-enterprise-employees-remove-source-soft-delete-columns.sql') -Tokens $tokens
 
-Write-Host "DLE_Enterprise database baseline, encrypted backup certificate, SQL Agent jobs, monitoring, RBAC foundation, and HRIS employee onboarding entities are configured."
+Write-Host "DLE_Enterprise database baseline, encrypted backup certificate, SQL Agent jobs, monitoring, RBAC foundation, HRIS employee onboarding, timesheet, department, and location entities are configured."
 Write-Host "Backup root: $BackupRoot"

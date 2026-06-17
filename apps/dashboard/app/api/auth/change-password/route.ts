@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { changePassword } from '@/lib/auth/auth-store';
-import { AUTH_COOKIE, createSessionToken, roleHome, verifySessionToken, SESSION_MAX_AGE_SECONDS } from '@/lib/auth/session';
+import { AUTH_COOKIE, createSessionToken, roleHome, verifySessionToken, SESSION_MAX_AGE_SECONDS, shouldUseSecureAuthCookie } from '@/lib/auth/session';
 
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     response.cookies.set(AUTH_COOKIE, nextToken, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: shouldUseSecureAuthCookie(request),
       path: '/',
       maxAge: SESSION_MAX_AGE_SECONDS,
     });
