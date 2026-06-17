@@ -1,4 +1,5 @@
 import sql from 'mssql';
+import { loadWorkspaceEnv } from '@/lib/dle-enterprise-db';
 
 export type SagePayrollEmployee = {
   employeeId: number;
@@ -114,20 +115,23 @@ export const normalizePayrollMatchKey = (value: string | number | null | undefin
   return numericOnly || compact;
 };
 
-const config = () => ({
-  server: process.env.SAGE_PAYROLL_DB_HOST || '192.168.5.8',
-  port: Number(process.env.SAGE_PAYROLL_DB_PORT || 1433),
-  database: process.env.SAGE_PAYROLL_DB_NAME || 'DLE_JUNE',
-  user: process.env.SAGE_PAYROLL_DB_USER || 'sa',
-  password: process.env.SAGE_PAYROLL_DB_PASSWORD || '',
-  options: {
-    encrypt: false,
-    trustServerCertificate: true,
-    instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE || 'MSSQLSERVERPEOPL',
-  },
-  connectionTimeout: Number(process.env.SAGE_PAYROLL_DB_CONNECT_TIMEOUT || 15000),
-  requestTimeout: Number(process.env.SAGE_PAYROLL_DB_REQUEST_TIMEOUT || 30000),
-});
+const config = () => {
+  loadWorkspaceEnv();
+  return {
+    server: process.env.SAGE_PAYROLL_DB_HOST || '192.168.5.8',
+    port: Number(process.env.SAGE_PAYROLL_DB_PORT || 1433),
+    database: process.env.SAGE_PAYROLL_DB_NAME || 'DLE_JUNE',
+    user: process.env.SAGE_PAYROLL_DB_USER || 'sa',
+    password: process.env.SAGE_PAYROLL_DB_PASSWORD || '',
+    options: {
+      encrypt: false,
+      trustServerCertificate: true,
+      instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE || 'MSSQLSERVERPEOPL',
+    },
+    connectionTimeout: Number(process.env.SAGE_PAYROLL_DB_CONNECT_TIMEOUT || 15000),
+    requestTimeout: Number(process.env.SAGE_PAYROLL_DB_REQUEST_TIMEOUT || 30000),
+  };
+};
 
 const activeEmployeeQuery = `
 WITH latestContract AS (

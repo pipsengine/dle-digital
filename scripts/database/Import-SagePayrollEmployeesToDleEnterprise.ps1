@@ -31,6 +31,14 @@ function EnvOrDefault {
   return $value
 }
 
+function Get-Field {
+  param($Row, [string]$Name)
+  if ($null -eq $Row) { return $null }
+  try { return $Row[$Name] } catch {}
+  try { return $Row.$Name } catch {}
+  return $null
+}
+
 function DbNullIfBlank {
   param($Value)
   if ($null -eq $Value) { return [DBNull]::Value }
@@ -79,6 +87,8 @@ $sageDb = EnvOrDefault 'SAGE_PAYROLL_DB_NAME' 'DLE_JUNE'
 $sageUser = EnvOrDefault 'SAGE_PAYROLL_DB_USER' 'sa'
 $sagePassword = EnvOrDefault 'SAGE_PAYROLL_DB_PASSWORD'
 $sageInstance = EnvOrDefault 'SAGE_PAYROLL_DB_INSTANCE' 'MSSQLSERVERPEOPL'
+$dleUser = EnvOrDefault 'DLE_ENTERPRISE_DB_USER'
+$dlePassword = EnvOrDefault 'DLE_ENTERPRISE_DB_PASSWORD'
 
 if ([string]::IsNullOrWhiteSpace($sagePassword)) {
   throw 'SAGE_PAYROLL_DB_PASSWORD is required in .env or process environment.'
@@ -86,10 +96,13 @@ if ([string]::IsNullOrWhiteSpace($sagePassword)) {
 
 $sageConnectionString = "Server=tcp:$sageHost,$sagePort;Database=$sageDb;User ID=$sageUser;Password=$sagePassword;TrustServerCertificate=True;Encrypt=False"
 if (-not [string]::IsNullOrWhiteSpace($sageInstance)) {
-  $sageConnectionString = "Server=$sageHost\$sageInstance,$sagePort;Database=$sageDb;User ID=$sageUser;Password=$sagePassword;TrustServerCertificate=True;Encrypt=False"
+  $sageConnectionString = "Server=$sageHost\$sageInstance;Database=$sageDb;User ID=$sageUser;Password=$sagePassword;TrustServerCertificate=True;Encrypt=False"
 }
 
 $dleConnectionString = "Server=$DleServerInstance;Database=$DleDatabase;Integrated Security=True;TrustServerCertificate=True"
+if (-not [string]::IsNullOrWhiteSpace($dleUser) -and -not [string]::IsNullOrWhiteSpace($dlePassword)) {
+  $dleConnectionString = "Server=$DleServerInstance;Database=$DleDatabase;User ID=$dleUser;Password=$dlePassword;TrustServerCertificate=True;Encrypt=False"
+}
 
 $sageQuery = @'
 WITH latestContract AS (
@@ -200,7 +213,7 @@ function Get-DataTable {
     $da = [System.Data.SqlClient.SqlDataAdapter]::new($cmd)
     $dt = [System.Data.DataTable]::new()
     [void]$da.Fill($dt)
-    return $dt
+    return ,$dt
   }
   finally {
     $cn.Close()
@@ -213,7 +226,7 @@ $sageRows = Get-DataTable -ConnectionString $sageConnectionString -Query $sageQu
 Write-Host "Sage rows found: $($sageRows.Rows.Count)"
 
 if ($WhatIf) {
-  $sageRows | Select-Object -First 10 | Format-Table employeeId, employeeCode, directoryEmployeeCode, displayName, jobTitle, departmentName, siteName, statusName -AutoSize
+  $sageRows.Rows | Select-Object -First 10 | Format-Table employeeId, employeeCode, directoryEmployeeCode, displayName, jobTitle, departmentName, siteName, statusName -AutoSize
   Write-Host "WhatIf mode: no DLE_Enterprise changes were made."
   return
 }
@@ -230,54 +243,54 @@ try {
   foreach ($row in $sageRows.Rows) {
     $tx = $dle.BeginTransaction()
     try {
-      $employeeCode = Normalize-String $row.directoryEmployeeCode
-      if (-not $employeeCode) { $employeeCode = Employee-Code (Normalize-String $row.employeeCode) }
-      $sourceEmployeeId = Normalize-String $row.employeeId
-      $fullName = Normalize-String $row.displayName
+      $employeeCode = Normalize-String (Get-Field $row 'directoryEmployeeCode')
+      if (-not $employeeCode) { $employeeCode = Employee-Code (Normalize-String (Get-Field $row 'employeeCode')) }
+      $sourceEmployeeId = Normalize-String (Get-Field $row 'employeeId')
+      $fullName = Normalize-String (Get-Field $row 'displayName')
       if (-not $fullName) { $fullName = ($sourceEmployeeId) }
-      $firstNames = Normalize-String $row.firstNames
-      $lastName = Normalize-String $row.lastName
+      $firstNames = Normalize-String (Get-Field $row 'firstNames')
+      $lastName = Normalize-String (Get-Field $row 'lastName')
       if (-not $firstNames) { $firstNames = $fullName }
       if (-not $lastName) { $lastName = $fullName }
       $employeeType = Employee-Type $employeeCode
-      $status = Employment-Status (Normalize-String $row.statusName) (Normalize-String $row.statusCode)
+      $status = Employment-Status (Normalize-String (Get-Field $row 'statusName')) (Normalize-String (Get-Field $row 'statusCode'))
       $rawPayload = [ordered]@{
-        employeeId = $row.employeeId
-        employeeCode = $row.employeeCode
+        employeeId = (Get-Field $row 'employeeId')
+        employeeCode = (Get-Field $row 'employeeCode')
         directoryEmployeeCode = $employeeCode
-        entityCode = $row.entityCode
-        displayName = $row.displayName
-        firstNames = $row.firstNames
-        lastName = $row.lastName
-        emailAddress = $row.emailAddress
-        cellNo = $row.cellNo
-        workTelNo = $row.workTelNo
-        jobTitle = $row.jobTitle
-        jobGrade = $row.jobGrade
-        departmentCode = $row.departmentCode
-        departmentName = $row.departmentName
-        siteCode = $row.siteCode
-        siteName = $row.siteName
-        hierarchyLocationCode = $row.hierarchyLocationCode
-        hierarchyLocationName = $row.hierarchyLocationName
-        hierarchyDepartmentCode = $row.hierarchyDepartmentCode
-        hierarchyDepartmentName = $row.hierarchyDepartmentName
-        hierarchyEmployeeTypeCode = $row.hierarchyEmployeeTypeCode
-        hierarchyEmployeeTypeName = $row.hierarchyEmployeeTypeName
-        managerEmployeeId = $row.managerEmployeeId
-        managerEmployeeCode = $row.managerEmployeeCode
-        managerName = $row.managerName
-        nationality = $row.nationality
-        dateEngaged = $row.dateEngaged
-        dateJoinedGroup = $row.dateJoinedGroup
-        probationPeriodEndDate = $row.probationPeriodEndDate
-        contractStartDate = $row.contractStartDate
-        contractExpiryDate = $row.contractExpiryDate
-        companyCode = $row.companyCode
-        companyName = $row.companyName
-        statusCode = $row.statusCode
-        statusName = $row.statusName
-        terminationDate = $row.terminationDate
+        entityCode = (Get-Field $row 'entityCode')
+        displayName = (Get-Field $row 'displayName')
+        firstNames = (Get-Field $row 'firstNames')
+        lastName = (Get-Field $row 'lastName')
+        emailAddress = (Get-Field $row 'emailAddress')
+        cellNo = (Get-Field $row 'cellNo')
+        workTelNo = (Get-Field $row 'workTelNo')
+        jobTitle = (Get-Field $row 'jobTitle')
+        jobGrade = (Get-Field $row 'jobGrade')
+        departmentCode = (Get-Field $row 'departmentCode')
+        departmentName = (Get-Field $row 'departmentName')
+        siteCode = (Get-Field $row 'siteCode')
+        siteName = (Get-Field $row 'siteName')
+        hierarchyLocationCode = (Get-Field $row 'hierarchyLocationCode')
+        hierarchyLocationName = (Get-Field $row 'hierarchyLocationName')
+        hierarchyDepartmentCode = (Get-Field $row 'hierarchyDepartmentCode')
+        hierarchyDepartmentName = (Get-Field $row 'hierarchyDepartmentName')
+        hierarchyEmployeeTypeCode = (Get-Field $row 'hierarchyEmployeeTypeCode')
+        hierarchyEmployeeTypeName = (Get-Field $row 'hierarchyEmployeeTypeName')
+        managerEmployeeId = (Get-Field $row 'managerEmployeeId')
+        managerEmployeeCode = (Get-Field $row 'managerEmployeeCode')
+        managerName = (Get-Field $row 'managerName')
+        nationality = (Get-Field $row 'nationality')
+        dateEngaged = (Get-Field $row 'dateEngaged')
+        dateJoinedGroup = (Get-Field $row 'dateJoinedGroup')
+        probationPeriodEndDate = (Get-Field $row 'probationPeriodEndDate')
+        contractStartDate = (Get-Field $row 'contractStartDate')
+        contractExpiryDate = (Get-Field $row 'contractExpiryDate')
+        companyCode = (Get-Field $row 'companyCode')
+        companyName = (Get-Field $row 'companyName')
+        statusCode = (Get-Field $row 'statusCode')
+        statusName = (Get-Field $row 'statusName')
+        terminationDate = (Get-Field $row 'terminationDate')
       }
       $rawJson = $rawPayload | ConvertTo-Json -Depth 5 -Compress
 
@@ -287,6 +300,7 @@ try {
       $cmd.CommandText = @'
 DECLARE @employee_id bigint;
 DECLARE @was_insert bit = 0;
+DECLARE @safe_official_email nvarchar(320) = NULLIF(@official_email, N'');
 
 SELECT @employee_id = employee_id
 FROM hris.EmployeeSourceRecords WITH (UPDLOCK, HOLDLOCK)
@@ -318,6 +332,17 @@ BEGIN
   WHERE employee_id = @employee_id;
 END;
 
+IF @safe_official_email IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM hris.EmployeeContactInfo
+    WHERE official_email = @safe_official_email
+      AND employee_id <> @employee_id
+  )
+BEGIN
+  SET @safe_official_email = NULL;
+END;
+
 MERGE hris.EmployeePersonalInfo AS target
 USING (SELECT @employee_id AS employee_id) AS source
 ON target.employee_id = source.employee_id
@@ -333,12 +358,12 @@ MERGE hris.EmployeeContactInfo AS target
 USING (SELECT @employee_id AS employee_id) AS source
 ON target.employee_id = source.employee_id
 WHEN MATCHED THEN UPDATE SET
-  official_email = @official_email,
+  official_email = @safe_official_email,
   primary_phone = @primary_phone,
   alternate_phone = @alternate_phone,
   modified_at = SYSUTCDATETIME()
 WHEN NOT MATCHED THEN INSERT (employee_id, official_email, primary_phone, alternate_phone)
-VALUES (@employee_id, @official_email, @primary_phone, @alternate_phone);
+VALUES (@employee_id, @safe_official_email, @primary_phone, @alternate_phone);
 
 MERGE hris.EmployeeEmploymentInfo AS target
 USING (SELECT @employee_id AS employee_id) AS source
@@ -427,29 +452,29 @@ SELECT @employee_id AS employee_id, @was_insert AS was_insert;
         '@source_employee_id' = $sourceEmployeeId
         '@first_name' = $firstNames
         '@last_name' = $lastName
-        '@nationality' = Normalize-String $row.nationality
-        '@official_email' = Normalize-String $row.emailAddress
-        '@primary_phone' = Normalize-String $row.cellNo
-        '@alternate_phone' = Normalize-String $row.workTelNo
-        '@employee_type_name' = Normalize-String $row.hierarchyEmployeeTypeName
-        '@date_joined' = Normalize-Date $row.dateEngaged
-        '@probation_end_date' = Normalize-Date $row.probationPeriodEndDate
-        '@contract_start_date' = Normalize-Date $row.contractStartDate
-        '@contract_end_date' = Normalize-Date $row.contractExpiryDate
-        '@work_location' = Normalize-String $row.siteName
-        '@expatriate_status' = if ((Normalize-String $row.nationality).ToLowerInvariant() -and (Normalize-String $row.nationality).ToLowerInvariant() -ne 'nigeria' -and (Normalize-String $row.nationality).ToLowerInvariant() -ne 'nigerian') { 'Expatriate' } else { 'Local' }
-        '@job_title' = Normalize-String $row.jobTitle
-        '@job_grade' = Normalize-String $row.jobGrade
-        '@department' = Normalize-String $row.departmentName
-        '@department_code' = Normalize-String $row.departmentCode
-        '@company_code' = Normalize-String $row.companyCode
-        '@site_code' = Normalize-String $row.siteCode
-        '@site_name' = Normalize-String $row.siteName
-        '@manager_name' = Normalize-String $row.managerName
-        '@source_employee_code' = Normalize-String $row.employeeCode
-        '@source_entity_code' = Normalize-String $row.entityCode
-        '@source_status_code' = Normalize-String $row.statusCode
-        '@source_status_name' = Normalize-String $row.statusName
+        '@nationality' = Normalize-String (Get-Field $row 'nationality')
+        '@official_email' = Normalize-String (Get-Field $row 'emailAddress')
+        '@primary_phone' = Normalize-String (Get-Field $row 'cellNo')
+        '@alternate_phone' = Normalize-String (Get-Field $row 'workTelNo')
+        '@employee_type_name' = Normalize-String (Get-Field $row 'hierarchyEmployeeTypeName')
+        '@date_joined' = Normalize-Date (Get-Field $row 'dateEngaged')
+        '@probation_end_date' = Normalize-Date (Get-Field $row 'probationPeriodEndDate')
+        '@contract_start_date' = Normalize-Date (Get-Field $row 'contractStartDate')
+        '@contract_end_date' = Normalize-Date (Get-Field $row 'contractExpiryDate')
+        '@work_location' = Normalize-String (Get-Field $row 'siteName')
+        '@expatriate_status' = if ((Normalize-String (Get-Field $row 'nationality')).ToLowerInvariant() -and (Normalize-String (Get-Field $row 'nationality')).ToLowerInvariant() -ne 'nigeria' -and (Normalize-String (Get-Field $row 'nationality')).ToLowerInvariant() -ne 'nigerian') { 'Expatriate' } else { 'Local' }
+        '@job_title' = Normalize-String (Get-Field $row 'jobTitle')
+        '@job_grade' = Normalize-String (Get-Field $row 'jobGrade')
+        '@department' = Normalize-String (Get-Field $row 'departmentName')
+        '@department_code' = Normalize-String (Get-Field $row 'departmentCode')
+        '@company_code' = Normalize-String (Get-Field $row 'companyCode')
+        '@site_code' = Normalize-String (Get-Field $row 'siteCode')
+        '@site_name' = Normalize-String (Get-Field $row 'siteName')
+        '@manager_name' = Normalize-String (Get-Field $row 'managerName')
+        '@source_employee_code' = Normalize-String (Get-Field $row 'employeeCode')
+        '@source_entity_code' = Normalize-String (Get-Field $row 'entityCode')
+        '@source_status_code' = Normalize-String (Get-Field $row 'statusCode')
+        '@source_status_name' = Normalize-String (Get-Field $row 'statusName')
         '@raw_payload_json' = $rawJson
       }
 
@@ -476,7 +501,7 @@ SELECT @employee_id AS employee_id, @was_insert AS was_insert;
     catch {
       $tx.Rollback()
       $failed++
-      $failures.Add("Sage employee $($row.employeeId) / $($row.employeeCode): $($_.Exception.Message)")
+      $failures.Add("Sage employee $((Get-Field $row 'employeeId')) / $((Get-Field $row 'employeeCode')): $($_.Exception.Message)")
     }
   }
 }

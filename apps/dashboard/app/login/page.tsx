@@ -19,12 +19,14 @@ export default function LoginPage() {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ login, password, rememberDevice }),
       });
       const json = await res.json();
       if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Login failed.');
-      window.location.assign(json.data.redirectTo === '/change-password' ? `/change-password${next ? `?next=${encodeURIComponent(next)}` : ''}` : json.data.redirectTo || '/');
+      const redirectTo = json.data.user?.isGlobalAdmin ? '/' : json.data.redirectTo;
+      window.location.assign(redirectTo === '/change-password' ? `/change-password${next ? `?next=${encodeURIComponent(next)}` : ''}` : redirectTo || '/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
     } finally {

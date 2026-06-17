@@ -138,6 +138,101 @@ type ApiResponse<T> = {
   error?: string;
 };
 
+const text = (value: unknown, fallback = '') => {
+  if (value === null || value === undefined) return fallback;
+  const next = String(value).trim();
+  return next || fallback;
+};
+
+const optionalText = (value: unknown) => text(value) || undefined;
+
+const numberValue = (value: unknown, fallback = 0) => {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+};
+
+const boolValue = (value: unknown) => value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
+
+const auditId = () => {
+  const randomUuid = typeof globalThis.crypto?.randomUUID === 'function' ? globalThis.crypto.randomUUID.bind(globalThis.crypto) : null;
+  return randomUuid ? randomUuid() : `audit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const normalizeEmployee = (record: Partial<Employee>): Employee => {
+  const employeeId = text(record.employeeId || record.employeeCode || record.id, 'Unknown');
+  const fullName = text(record.fullName, employeeId);
+  return {
+    ...record,
+    id: text(record.id, employeeId),
+    employeeId,
+    employeeCode: optionalText(record.employeeCode),
+    fullName,
+    preferredName: optionalText(record.preferredName),
+    title: optionalText(record.title),
+    firstName: optionalText(record.firstName),
+    middleName: optionalText(record.middleName),
+    lastName: optionalText(record.lastName),
+    gender: optionalText(record.gender),
+    dateOfBirth: optionalText(record.dateOfBirth),
+    maritalStatus: optionalText(record.maritalStatus),
+    email: text(record.email || record.officialEmail || record.personalEmail, ''),
+    officialEmail: optionalText(record.officialEmail),
+    personalEmail: optionalText(record.personalEmail),
+    phone: text(record.phone || record.primaryPhone || record.alternatePhone, ''),
+    primaryPhone: optionalText(record.primaryPhone),
+    alternatePhone: optionalText(record.alternatePhone),
+    officeExtension: optionalText(record.officeExtension),
+    residentialAddress: optionalText(record.residentialAddress),
+    permanentAddress: optionalText(record.permanentAddress),
+    city: optionalText(record.city),
+    state: optionalText(record.state),
+    country: text(record.country, 'Nigeria'),
+    postalCode: optionalText(record.postalCode),
+    jobTitle: text(record.jobTitle || record.designation, 'Unassigned role'),
+    designation: optionalText(record.designation),
+    jobGrade: optionalText(record.jobGrade),
+    department: text(record.department, 'Unassigned'),
+    division: text(record.division, 'Unassigned'),
+    businessUnit: text(record.businessUnit, 'Unassigned'),
+    costCenter: optionalText(record.costCenter),
+    managerName: optionalText(record.managerName),
+    functionalManager: optionalText(record.functionalManager),
+    departmentHead: optionalText(record.departmentHead),
+    hrBusinessPartner: optionalText(record.hrBusinessPartner),
+    location: text(record.location || record.workLocation || record.officeLocation, 'Unassigned'),
+    workLocation: optionalText(record.workLocation),
+    officeLocation: optionalText(record.officeLocation),
+    projectSite: optionalText(record.projectSite),
+    shift: optionalText(record.shift) as Employee['shift'],
+    staffCategory: optionalText(record.staffCategory),
+    employeeCategory: optionalText(record.employeeCategory),
+    employmentType: text(record.employmentType, 'Unclassified'),
+    status: text(record.status, 'Active'),
+    nationality: text(record.nationality, 'Nigerian'),
+    expatriate: boolValue(record.expatriate),
+    fieldWorker: boolValue(record.fieldWorker),
+    remoteWorker: boolValue(record.remoteWorker),
+    dateJoined: text(record.dateJoined),
+    probationStartDate: optionalText(record.probationStartDate),
+    probationEndDate: optionalText(record.probationEndDate),
+    confirmationDueDate: optionalText(record.confirmationDueDate),
+    contractStartDate: optionalText(record.contractStartDate),
+    yearsOfService: numberValue(record.yearsOfService),
+    lastPromotion: optionalText(record.lastPromotion),
+    trainingCompliance: (['Compliant', 'Overdue', 'At Risk'].includes(text(record.trainingCompliance))
+      ? text(record.trainingCompliance)
+      : 'Compliant') as Employee['trainingCompliance'],
+    performanceRating: optionalText(record.performanceRating) as Employee['performanceRating'],
+    contractEndDate: optionalText(record.contractEndDate),
+    emergencyContactsComplete: boolValue(record.emergencyContactsComplete),
+    emergencyContactCount: numberValue(record.emergencyContactCount),
+    documentCount: numberValue(record.documentCount),
+    hasManagerAssigned: boolValue(record.hasManagerAssigned),
+    createdAt: optionalText(record.createdAt),
+    modifiedAt: optionalText(record.modifiedAt),
+  };
+};
+
 type Role =
   | 'Super Admin'
   | 'HR Director'
@@ -614,7 +709,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
   const [presetName, setPresetName] = useState('');
   const [presets, setPresets] = useState<{ name: string; filters: Record<string, string[]> }[]>([
     { name: 'All Employees', filters: {} },
-    { name: 'Contract Expiring (≤ 30 days)', filters: { contractExpiry: ['≤30'] } },
+    { name: 'Contract Expiring (<= 30 days)', filters: { contractExpiry: ['<=30'] } },
     { name: 'Missing Emergency Contacts', filters: { emergencyContacts: ['Missing'] } },
   ]);
   const [activePreset, setActivePreset] = useState('All Employees');
@@ -669,18 +764,19 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
         throw new Error(payload?.error || `Employee directory request failed (${res.status})`);
       }
       const data = payload.data;
-      setEmployees(data.employees);
+      const normalizedEmployees = (Array.isArray(data.employees) ? data.employees : []).map(normalizeEmployee);
+      setEmployees(normalizedEmployees);
       setDirectorySource(data.source);
       setDirectoryWarning(data.dataSource?.warning || null);
       setSyncedAt(data.syncedAt);
       setPage(1);
       setAudit((prev) => [
         {
-          id: crypto.randomUUID(),
+          id: auditId(),
           type: 'directory.view',
           at: new Date().toISOString(),
           actorRole: role,
-          message: `Directory synced from ${data.source} (${data.employees.length} employees)`,
+          message: `Directory synced from ${data.source} (${normalizedEmployees.length} employees)`,
         },
         ...prev,
       ]);
@@ -700,7 +796,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
   }, [loadEmployees]);
 
   const options = useMemo(() => {
-    const uniq = (values: string[]) => Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+    const uniq = (values: Array<string | undefined>) => Array.from(new Set(values.map((value) => text(value)).filter(Boolean))).sort((a, b) => a.localeCompare(b));
     return {
       departments: uniq(employees.map((e) => e.department)),
       divisions: uniq(employees.map((e) => e.division)),
@@ -763,8 +859,8 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
 
     return hits.map((e) => ({
       id: e.id,
-      label: `${e.fullName} • ${e.employeeId}`,
-      sub: `${e.jobTitle} — ${e.department}`,
+      label: `${e.fullName} - ${e.employeeId}`,
+      sub: `${e.jobTitle} - ${e.department}`,
       employee: e,
     }));
   }, [debouncedQuery, employees]);
@@ -782,10 +878,10 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       const contractExpiry = filters.contractExpiry;
       if (contractExpiry.size > 0) {
         const days = e.contractEndDate ? Math.ceil((new Date(e.contractEndDate).getTime() - nowMs) / (24 * 3600 * 1000)) : undefined;
-        if (contractExpiry.has('≤30')) {
+        if (contractExpiry.has('<=30')) {
           if (!days || days > 30) return false;
         }
-        if (contractExpiry.has('≤14')) {
+        if (contractExpiry.has('<=14')) {
           if (!days || days > 14) return false;
         }
       }
@@ -950,7 +1046,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
     setDrawerTab('overview');
     setAudit((prev) => [
       {
-        id: crypto.randomUUID(),
+        id: auditId(),
         type: 'employee.open',
         at: new Date().toISOString(),
         actorRole: role,
@@ -964,7 +1060,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
   const openEmployeeProfile = (e: Employee) => {
     setAudit((prev) => [
       {
-        id: crypto.randomUUID(),
+        id: auditId(),
         type: 'employee.profile.open',
         at: new Date().toISOString(),
         actorRole: role,
@@ -980,11 +1076,11 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
 
   const aiAction = (action: string) => {
     setAudit((prev) => [
-      { id: crypto.randomUUID(), type: 'ai.insight.action', at: new Date().toISOString(), actorRole: role, message: `AI action triggered: ${action}` },
+      { id: auditId(), type: 'ai.insight.action', at: new Date().toISOString(), actorRole: role, message: `AI action triggered: ${action}` },
       ...prev,
     ]);
 
-    if (action.includes('Contract')) setFilters((prev) => ({ ...prev, contractExpiry: new Set(['≤14']) }));
+    if (action.includes('Contract')) setFilters((prev) => ({ ...prev, contractExpiry: new Set(['<=14']) }));
     if (action.includes('Emergency')) setFilters((prev) => ({ ...prev, emergencyContacts: new Set(['Missing']) }));
     if (action.includes('Assign Managers')) setFilters((prev) => ({ ...prev, manager: new Set(['Unassigned']) }));
     setPage(1);
@@ -992,7 +1088,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
 
   const exportDirectory = () => {
     setAudit((prev) => [
-      { id: crypto.randomUUID(), type: 'export.generate', at: new Date().toISOString(), actorRole: role, message: `Directory export requested (${filteredEmployees.length} records)` },
+      { id: auditId(), type: 'export.generate', at: new Date().toISOString(), actorRole: role, message: `Directory export requested (${filteredEmployees.length} records)` },
       ...prev,
     ]);
   };
@@ -1000,7 +1096,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
   const orgNodes = useMemo(() => {
     const byDept = new Map<string, Employee[]>();
     for (const e of filteredEmployees) {
-      const key = `${e.businessUnit} • ${e.division} • ${e.department}`;
+      const key = `${e.businessUnit} - ${e.division} - ${e.department}`;
       byDept.set(key, [...(byDept.get(key) || []), e]);
     }
     return Array.from(byDept.entries())
@@ -1049,7 +1145,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
     );
   };
 
-  const masked = (value: string) => (permissions.canViewPayroll ? value : '••••••');
+  const masked = (value: string) => (permissions.canViewPayroll ? value : '******');
 
   const renderCell = (col: ColumnKey, e: Employee) => {
     if (col === 'employee') {
@@ -1092,7 +1188,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
         <div className="text-sm">
           <div className="font-semibold text-slate-800">{e.jobTitle}</div>
           <div className="text-xs text-slate-500 font-semibold mt-0.5">
-            {e.designation || 'No designation'} {e.jobGrade ? <span className="mx-1">•</span> : null} {e.jobGrade || ''}
+            {e.designation || 'No designation'} {e.jobGrade ? <span className="mx-1">-</span> : null} {e.jobGrade || ''}
           </div>
         </div>
       );
@@ -1109,7 +1205,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
         <div className="text-sm">
           <div className="font-extrabold text-slate-800 truncate">{e.department}</div>
           <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">
-            {e.division} <span className="mx-1">•</span> {e.businessUnit}
+            {e.division} <span className="mx-1">-</span> {e.businessUnit}
           </div>
         </div>
       );
@@ -1166,7 +1262,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       );
     if (col === 'joined') return <div className="text-sm font-extrabold text-slate-800">{formatDate(e.dateJoined)}</div>;
     if (col === 'yos') return <div className="text-sm font-extrabold text-slate-800">{e.yearsOfService}y</div>;
-    if (col === 'promotion') return <div className="text-sm font-extrabold text-slate-800">{e.lastPromotion ? formatDate(e.lastPromotion) : '—'}</div>;
+    if (col === 'promotion') return <div className="text-sm font-extrabold text-slate-800">{e.lastPromotion ? formatDate(e.lastPromotion) : '-'}</div>;
     if (col === 'actions')
       return (
         <EmployeeActionsMenu employee={e} canChangeStatus={permissions.canChangeStatus} onQuickView={() => openEmployee(e)} />
@@ -1193,12 +1289,12 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       { key: 'leaveStatus', label: 'Leave Status', options: ['On Leave', 'Not On Leave'], searchable: false },
       { key: 'probationStatus', label: 'Probation Status', options: ['Probation', 'Not Probation'], searchable: false },
       { key: 'yearsOfService', label: 'Years of Service', options: ['0-1', '2-5', '6-10', '11+'], searchable: false },
-      { key: 'contractExpiry', label: 'Contract Expiry', options: ['≤14', '≤30'], searchable: false },
+      { key: 'contractExpiry', label: 'Contract Expiry', options: ['<=14', '<=30'], searchable: false },
       { key: 'emergencyContacts', label: 'Emergency Contacts', options: ['Missing', 'Complete'], searchable: false },
       { key: 'jobGrade', label: 'Job Grade', options: ['JG-01', 'JG-02', 'JG-03', 'JG-04', 'JG-05', 'JG-06', 'JG-07', 'JG-08'], searchable: true },
       { key: 'designation', label: 'Designation', options: ['Engineer', 'Supervisor', 'Technician', 'Officer', 'Manager', 'Director'], searchable: true },
       { key: 'gender', label: 'Gender', options: ['Male', 'Female', 'Prefer not to say'], searchable: false },
-      { key: 'retirementWindow', label: 'Retirement Window', options: ['≤ 12 months', '1-3 years', '3-5 years', '5+ years'], searchable: false },
+      { key: 'retirementWindow', label: 'Retirement Window', options: ['<= 12 months', '1-3 years', '3-5 years', '5+ years'], searchable: false },
     ],
     [options]
   );
@@ -1313,7 +1409,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
           if (!permissions.canAdd) return;
           setAudit((prev) => [
             {
-              id: crypto.randomUUID(),
+              id: auditId(),
               type: 'employee.open',
               at: new Date().toISOString(),
               actorRole: role,
@@ -1333,7 +1429,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       <button
         type="button"
         disabled={!permissions.canBulkImport}
-        onClick={() => setAudit((prev) => [{ id: crypto.randomUUID(), type: 'import.open', at: new Date().toISOString(), actorRole: role, message: 'Bulk import opened' }, ...prev])}
+        onClick={() => setAudit((prev) => [{ id: auditId(), type: 'import.open', at: new Date().toISOString(), actorRole: role, message: 'Bulk import opened' }, ...prev])}
         className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold border transition-colors ${
           permissions.canBulkImport ? 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50' : 'bg-slate-100 text-slate-400 border-slate-200'
         }`}
@@ -1354,7 +1450,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       </button>
       <button
         type="button"
-        onClick={() => setAudit((prev) => [{ id: crypto.randomUUID(), type: 'report.generate', at: new Date().toISOString(), actorRole: role, message: 'Generate report requested' }, ...prev])}
+        onClick={() => setAudit((prev) => [{ id: auditId(), type: 'report.generate', at: new Date().toISOString(), actorRole: role, message: 'Generate report requested' }, ...prev])}
         className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-extrabold border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors"
       >
         <BarChart3 className="w-4 h-4" />
@@ -1499,7 +1595,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                   setQuery(e.target.value);
                   setPage(1);
                 }}
-                placeholder="Search by ID, name, email, phone, department, title, manager, location, skills, certification, or project…"
+                placeholder="Search by ID, name, email, phone, department, title, manager, location, skills, certification, or project..."
                 className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-white border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-dle-blue/20 focus:border-dle-blue"
               />
               {query.length > 0 && (
@@ -1585,7 +1681,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                 <input
                   value={presetName}
                   onChange={(e) => setPresetName(e.target.value)}
-                  placeholder="Save preset…"
+                  placeholder="Save preset..."
                   className="w-[140px] text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none"
                 />
                 <button
@@ -1706,7 +1802,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                       <div className="min-w-0">
                         <div className="text-sm font-extrabold text-slate-900 truncate">{e.fullName}</div>
                         <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">
-                          {e.employeeId} <span className="mx-1">•</span> {e.jobTitle}
+                          {e.employeeId} <span className="mx-1">-</span> {e.jobTitle}
                         </div>
                       </div>
                     </div>
@@ -1741,7 +1837,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                       className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white text-xs font-extrabold text-slate-700 hover:bg-slate-50 transition-colors"
                       onClick={() =>
                         setAudit((prev) => [
-                          { id: crypto.randomUUID(), type: 'employee.profile.open', at: new Date().toISOString(), actorRole: role, message: `Full profile opened for ${e.employeeId}`, employeeId: e.employeeId },
+                          { id: auditId(), type: 'employee.profile.open', at: new Date().toISOString(), actorRole: role, message: `Full profile opened for ${e.employeeId}`, employeeId: e.employeeId },
                           ...prev,
                         ])
                       }
@@ -1764,7 +1860,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                 </span>
                 <div>
                   <div className="text-sm font-extrabold text-slate-900">Organization View</div>
-                  <div className="text-xs text-slate-500 font-semibold mt-0.5">Groupings across BU → Division → Department</div>
+                  <div className="text-xs text-slate-500 font-semibold mt-0.5">Groupings across BU - Division - Department</div>
                 </div>
               </div>
               <div className="text-xs font-extrabold px-3 py-2 rounded-xl bg-slate-100 text-slate-700">Groups: {formatNumber(orgNodes.length)}</div>
@@ -1804,7 +1900,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                   <div className="md:col-span-2">
                     <div className="text-sm font-extrabold text-slate-900">{n.loc}</div>
                     <div className="text-xs text-slate-500 font-semibold mt-0.5">
-                      Active: {formatNumber(n.active)} <span className="mx-1">•</span> Field: {formatNumber(n.field)} <span className="mx-1">•</span> Expat: {formatNumber(n.expatriates)}
+                      Active: {formatNumber(n.active)} <span className="mx-1">-</span> Field: {formatNumber(n.field)} <span className="mx-1">-</span> Expat: {formatNumber(n.expatriates)}
                     </div>
                   </div>
                   <div className="md:col-span-3">
@@ -1889,11 +1985,11 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
               <div className="min-w-0">
                 <div className="text-sm font-extrabold text-slate-900">{a.message}</div>
                 <div className="text-xs text-slate-500 font-semibold mt-1">
-                  {formatDateTimeUtc(a.at)} <span className="mx-2">•</span> Role: {a.actorRole}{' '}
-                  <span className="mx-2">•</span> Event: <span className="font-mono">{a.type}</span>
+                  {formatDateTimeUtc(a.at)} <span className="mx-2">-</span> Role: {a.actorRole}{' '}
+                  <span className="mx-2">-</span> Event: <span className="font-mono">{a.type}</span>
                   {a.employeeId && (
                     <>
-                      <span className="mx-2">•</span> Employee: <span className="font-mono">{a.employeeId}</span>
+                      <span className="mx-2">-</span> Employee: <span className="font-mono">{a.employeeId}</span>
                     </>
                   )}
                 </div>
@@ -1974,7 +2070,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                       <StatusBadge status={drawerEmployee.status} />
                     </div>
                     <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">
-                      {drawerEmployee.employeeId} <span className="mx-1">•</span> {drawerEmployee.jobTitle}
+                      {drawerEmployee.employeeId} <span className="mx-1">-</span> {drawerEmployee.jobTitle}
                     </div>
                   </div>
                 </div>
@@ -2021,7 +2117,7 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
                         </div>
                         <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3">
                           <div className="text-[11px] font-extrabold text-slate-600">Payroll Summary</div>
-                          <div className="text-sm font-extrabold text-slate-900 mt-1">{masked('₦ 1,250,000')}</div>
+                          <div className="text-sm font-extrabold text-slate-900 mt-1">{masked('NGN 1,250,000')}</div>
                         </div>
                         <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3">
                           <div className="text-[11px] font-extrabold text-slate-600">Years of Service</div>

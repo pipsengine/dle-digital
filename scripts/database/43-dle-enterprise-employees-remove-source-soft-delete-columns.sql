@@ -9,44 +9,48 @@ BEGIN
   IF COL_LENGTH(N'hris.Employees', N'source_system') IS NOT NULL
     AND COL_LENGTH(N'hris.Employees', N'source_employee_id') IS NOT NULL
   BEGIN
-    INSERT [hris].[EmployeeSourceRecords] (
-      employee_id, source_system, source_employee_id, source_employee_code, raw_payload_json
-    )
-    SELECT
-      e.employee_id,
-      e.source_system,
-      e.source_employee_id,
-      e.employee_code,
-      N'{"migratedFrom":"hris.Employees"}'
-    FROM [hris].[Employees] e
-    WHERE e.source_employee_id IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM [hris].[EmployeeSourceRecords] src
-        WHERE src.source_system = e.source_system
-          AND src.source_employee_id = e.source_employee_id
-      );
+    EXEC(N'
+      INSERT [hris].[EmployeeSourceRecords] (
+        employee_id, source_system, source_employee_id, source_employee_code, raw_payload_json
+      )
+      SELECT
+        e.employee_id,
+        e.source_system,
+        e.source_employee_id,
+        e.employee_code,
+        N''{"migratedFrom":"hris.Employees"}''
+      FROM [hris].[Employees] e
+      WHERE e.source_employee_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM [hris].[EmployeeSourceRecords] src
+          WHERE src.source_system = e.source_system
+            AND src.source_employee_id = e.source_employee_id
+        );
+    ');
   END;
 
   IF COL_LENGTH(N'hris.Employees', N'source_draft_id') IS NOT NULL
   BEGIN
-    INSERT [hris].[EmployeeSourceRecords] (
-      employee_id, source_system, source_employee_id, source_employee_code, raw_payload_json
-    )
-    SELECT
-      e.employee_id,
-      N'DLE Employee Draft',
-      e.source_draft_id,
-      e.employee_code,
-      N'{"migratedFrom":"hris.Employees.source_draft_id"}'
-    FROM [hris].[Employees] e
-    WHERE e.source_draft_id IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM [hris].[EmployeeSourceRecords] src
-        WHERE src.source_system = N'DLE Employee Draft'
-          AND src.source_employee_id = e.source_draft_id
-      );
+    EXEC(N'
+      INSERT [hris].[EmployeeSourceRecords] (
+        employee_id, source_system, source_employee_id, source_employee_code, raw_payload_json
+      )
+      SELECT
+        e.employee_id,
+        N''DLE Employee Draft'',
+        e.source_draft_id,
+        e.employee_code,
+        N''{"migratedFrom":"hris.Employees.source_draft_id"}''
+      FROM [hris].[Employees] e
+      WHERE e.source_draft_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM [hris].[EmployeeSourceRecords] src
+          WHERE src.source_system = N''DLE Employee Draft''
+            AND src.source_employee_id = e.source_draft_id
+        );
+    ');
   END;
 END;
 GO

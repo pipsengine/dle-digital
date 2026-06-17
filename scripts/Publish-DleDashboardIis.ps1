@@ -1,5 +1,7 @@
 param(
   [string]$OutputPath = "deployment\iis\site",
+  [ValidateSet("ReverseProxy", "HttpPlatform")]
+  [string]$HostingMode = "HttpPlatform",
   [switch]$SkipInstall
 )
 
@@ -39,10 +41,20 @@ try {
   New-Item -ItemType Directory -Path $PublicTarget -Force | Out-Null
   Copy-Item -Path (Join-Path $AppPath "public\*") -Destination $PublicTarget -Recurse -Force
 
-  Copy-Item -LiteralPath (Join-Path $RepoRoot "deployment\iis\web.config") -Destination (Join-Path $ResolvedOutputPath "web.config") -Force
+  $WebConfigSource = if ($HostingMode -eq "HttpPlatform") {
+    Join-Path $RepoRoot "deployment\iis\web.httpplatform.config"
+  } else {
+    Join-Path $RepoRoot "deployment\iis\web.config"
+  }
+  Copy-Item -LiteralPath $WebConfigSource -Destination (Join-Path $ResolvedOutputPath "web.config") -Force
   Copy-Item -LiteralPath (Join-Path $RepoRoot "deployment\iis\Start-DleDashboard.ps1") -Destination (Join-Path $ResolvedOutputPath "Start-DleDashboard.ps1") -Force
+  $EnvPath = Join-Path $RepoRoot ".env"
+  if (Test-Path -LiteralPath $EnvPath) {
+    Copy-Item -LiteralPath $EnvPath -Destination (Join-Path $ResolvedOutputPath ".env") -Force
+  }
 
   Write-Host "IIS deployment package created at $ResolvedOutputPath"
+  Write-Host "Hosting mode: $HostingMode"
   Write-Host "Run Start-DleDashboard.ps1 as a Windows service, then point IIS at this folder."
 }
 finally {

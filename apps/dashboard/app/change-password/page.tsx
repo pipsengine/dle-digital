@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Eye, EyeOff, KeyRound } from 'lucide-react';
 import { passwordPolicyErrors } from '@/lib/auth/session';
 
@@ -13,6 +13,23 @@ export default function ChangePasswordPage() {
   const [loading, setLoading] = useState(false);
   const next = useMemo(() => new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('next') || '', []);
   const policy = passwordPolicyErrors(newPassword);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        const user = json?.data;
+        if (!active || !user) return;
+        if (user.isGlobalAdmin || (!user.firstLoginRequired && !user.passwordResetRequired)) {
+          window.location.replace(next || '/');
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [next]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();

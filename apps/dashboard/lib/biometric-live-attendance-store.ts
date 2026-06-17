@@ -3,6 +3,7 @@ import path from 'node:path';
 import mysql from 'mysql2/promise';
 import type { RowDataPacket } from 'mysql2';
 import type { AttendanceStatus, BiometricSource, Shift } from '@/lib/attendance-data';
+import { loadWorkspaceEnv } from '@/lib/dle-enterprise-db';
 
 export type LiveAttendanceRecord = {
   id: string;
@@ -197,8 +198,9 @@ const cachedLiveRead = async <T>(key: string, loader: () => Promise<T>): Promise
   return pending;
 };
 
-const getPool = () =>
-  mysql.createPool({
+const getPool = () => {
+  loadWorkspaceEnv();
+  return mysql.createPool({
     host: process.env.BIOMETRIC_DB_HOST || '192.168.5.5',
     port: Number(process.env.BIOMETRIC_DB_PORT || 3306),
     user: process.env.BIOMETRIC_DB_USER || 'root',
@@ -208,6 +210,7 @@ const getPool = () =>
     connectionLimit: 4,
     connectTimeout: Number(process.env.BIOMETRIC_DB_CONNECT_TIMEOUT || 20000),
   });
+};
 
 const formatMysqlDate = (date = new Date()) =>
   `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;

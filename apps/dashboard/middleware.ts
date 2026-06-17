@@ -33,12 +33,21 @@ const denied = (request: NextRequest, status = 403) => {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname.startsWith('/change-password')) {
+    const session = await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
+    if (session?.isGlobalAdmin || (session && !session.firstLoginRequired && !session.passwordResetRequired)) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/';
+      url.search = '';
+      return NextResponse.redirect(url);
+    }
+  }
   if (isPublicPath(pathname)) return NextResponse.next();
 
   const session = await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
   if (!session) return denied(request, 401);
 
-  if ((session.firstLoginRequired || session.passwordResetRequired) && !pathname.startsWith('/change-password') && !pathname.startsWith('/api/auth/change-password')) {
+  if (!session.isGlobalAdmin && (session.firstLoginRequired || session.passwordResetRequired) && !pathname.startsWith('/change-password') && !pathname.startsWith('/api/auth/change-password')) {
     const url = request.nextUrl.clone();
     url.pathname = '/change-password';
     url.searchParams.set('next', pathname + request.nextUrl.search);

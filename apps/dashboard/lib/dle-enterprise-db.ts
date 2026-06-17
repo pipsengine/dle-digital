@@ -286,7 +286,7 @@ const bool = (v: string | undefined, fallback: boolean) => {
   return !['0', 'false', 'no', 'off'].includes(v.toLowerCase());
 };
 
-const loadWorkspaceEnv = () => {
+export const loadWorkspaceEnv = () => {
   if (workspaceEnvLoaded || process.env.DLE_ENTERPRISE_DB_HOST) return;
   workspaceEnvLoaded = true;
   const candidates = [

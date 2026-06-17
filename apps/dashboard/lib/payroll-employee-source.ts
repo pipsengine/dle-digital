@@ -266,7 +266,7 @@ const readCachedPayrollEmployees = async () => {
 const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
   try {
     const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
-    if (employees?.length) {
+    if (employees) {
       return { employees: await enrichEmployeesFromSagePayroll(employees), source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
     }
   } catch {

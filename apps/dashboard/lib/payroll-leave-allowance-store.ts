@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sql from 'mssql';
-import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { loadWorkspaceEnv, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 
 export type PayrollLeaveAllowanceEvent = {
@@ -43,20 +43,23 @@ const EVENTS_PATH = path.join(DATA_ROOT, 'payroll-leave-allowance-events.json');
 
 let syncCache: { mtime: number; events: PayrollLeaveAllowanceEvent[] } | null = null;
 
-const config = () => ({
-  server: process.env.SAGE_PAYROLL_DB_HOST || '192.168.5.8',
-  port: Number(process.env.SAGE_PAYROLL_DB_PORT || 1433),
-  database: process.env.SAGE_PAYROLL_DB_NAME || 'DLE_JUNE',
-  user: process.env.SAGE_PAYROLL_DB_USER || 'sa',
-  password: process.env.SAGE_PAYROLL_DB_PASSWORD || '',
-  options: {
-    encrypt: false,
-    trustServerCertificate: true,
-    instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE || 'MSSQLSERVERPEOPL',
-  },
-  connectionTimeout: Number(process.env.SAGE_PAYROLL_DB_CONNECT_TIMEOUT || 15000),
-  requestTimeout: Number(process.env.SAGE_PAYROLL_DB_REQUEST_TIMEOUT || 60000),
-});
+const config = () => {
+  loadWorkspaceEnv();
+  return {
+    server: process.env.SAGE_PAYROLL_DB_HOST || '192.168.5.8',
+    port: Number(process.env.SAGE_PAYROLL_DB_PORT || 1433),
+    database: process.env.SAGE_PAYROLL_DB_NAME || 'DLE_JUNE',
+    user: process.env.SAGE_PAYROLL_DB_USER || 'sa',
+    password: process.env.SAGE_PAYROLL_DB_PASSWORD || '',
+    options: {
+      encrypt: false,
+      trustServerCertificate: true,
+      instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE || 'MSSQLSERVERPEOPL',
+    },
+    connectionTimeout: Number(process.env.SAGE_PAYROLL_DB_CONNECT_TIMEOUT || 15000),
+    requestTimeout: Number(process.env.SAGE_PAYROLL_DB_REQUEST_TIMEOUT || 60000),
+  };
+};
 
 const readEventsRaw = async (): Promise<PayrollLeaveAllowanceEvent[]> => {
   try {
