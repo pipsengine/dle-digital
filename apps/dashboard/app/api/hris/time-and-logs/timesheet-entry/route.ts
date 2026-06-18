@@ -679,10 +679,10 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const activeProjects = projects.filter(p => ['Active', 'Approved', 'Open'].includes(p.status));
   const projectSiteOptions = Array.from(
     new Set(
-      [
-        ...locations.flatMap((location) => [location.site, location.name]),
-        ...activeProjects.map((project) => project.site),
-      ].map(clean).filter((site) => site && site !== 'Unassigned Location'),
+      locations
+        .flatMap((location) => [location.site, location.name])
+        .map(clean)
+        .filter((site) => site && site !== 'Unassigned Location'),
     ),
   ).sort((a, b) => a.localeCompare(b));
   const systemLocationNames = Array.from(

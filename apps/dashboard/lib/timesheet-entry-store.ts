@@ -1199,6 +1199,17 @@ export async function upsertProject(project: Project): Promise<Project> {
   await tx.begin();
   try {
     await new sql.Request(tx)
+      .input('Id', sql.NVarChar(100), locationId(site))
+      .input('Code', sql.NVarChar(80), workCenterCode(site))
+      .input('Name', sql.NVarChar(180), site)
+      .input('Site', sql.NVarChar(180), site)
+      .query(`
+MERGE [hris].[TimesheetLocations] AS target
+USING (SELECT @Id AS [Id]) AS source ON target.[Id]=source.[Id]
+WHEN MATCHED THEN UPDATE SET [Code]=@Code,[Name]=@Name,[Site]=@Site,[SourceSystem]=N'HRIS Project Registry',[UpdatedAt]=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT ([Id],[Code],[Name],[Site],[SourceSystem]) VALUES (@Id,@Code,@Name,@Site,N'HRIS Project Registry');`);
+
+    await new sql.Request(tx)
       .input('Id', sql.NVarChar(80), id)
       .input('Code', sql.NVarChar(50), code)
       .input('Name', sql.NVarChar(255), name)
@@ -1606,11 +1617,13 @@ export async function readSystemTimesheetLocations(): Promise<TimesheetLocation[
   } catch {
     return fallbackLocations();
   }
+  await ensureDefaultTimesheetLocations(pool);
+  const stored = await readStoredTimesheetLocations(pool);
+  if (stored.length) return stored;
+
   const table = await pool.request().query(`SELECT OBJECT_ID(N'[hris].[OrganizationLocationsSites]', N'U') AS [TableId]`);
   if (!table.recordset[0]?.TableId) {
-    await ensureDefaultTimesheetLocations(pool);
-    const stored = await readStoredTimesheetLocations(pool);
-    return stored.length ? stored : fallbackLocations();
+    return fallbackLocations();
   }
 
   const result = await pool.request().query(`
@@ -1628,9 +1641,7 @@ ORDER BY CASE WHEN [Name]=N'Unassigned Location' THEN 1 ELSE 0 END, [Name]`);
     updatedAt: toIso(row.LastSyncedAt),
   }));
   if (locations.length) return locations;
-  await ensureDefaultTimesheetLocations(pool);
-  const stored = await readStoredTimesheetLocations(pool);
-  return stored.length ? stored : fallbackLocations();
+  return fallbackLocations();
 }
 
 async function ensureDefaultTimesheetLocations(pool: sql.ConnectionPool) {

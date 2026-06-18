@@ -830,9 +830,9 @@ export default function TimesheetEntryClient() {
 
   const workCenterOptions = workCenterNamesForLocation(workCenters, selectedLocation);
   const locationOptions = Array.from(new Set((payload?.filterOptions.locations ?? []).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  const siteLocationOptions = Array.from(
-    new Set((payload?.filterOptions.projectSites ?? []).filter((location) => location && location !== 'Unassigned Location')),
-  ).sort((a, b) => a.localeCompare(b));
+  const siteLocationOptions = (payload?.filterOptions.projectSites ?? [])
+    .filter((location) => location && location !== 'Unassigned Location')
+    .sort((a, b) => a.localeCompare(b));
   const projectManagerOptions = payload?.projectManagers ?? [];
   const projectManagerIsSelected = projectManagerOptions.some((employee) => `${employee.employeeCode} - ${employee.fullName}`.toLowerCase() === newProjectManager.trim().toLowerCase());
   const workflowStages = payload?.workflowStages ?? [];
