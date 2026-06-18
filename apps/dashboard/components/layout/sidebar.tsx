@@ -17,6 +17,13 @@ const requiredPermission = (route?: string) => {
   if (!route || route === '/') return 'enterprise.view';
   if (route === '/administration') return 'admin.roles.view';
   if (route.startsWith('/administration/access-control')) return 'admin.roles.view';
+  if (route.startsWith('/administration/user-management')) return 'admin.users.view';
+  if (route.startsWith('/administration/audit-trail')) return 'audit.view';
+  if (route.startsWith('/administration/approval-workflow')) return 'workflow.configure';
+  if (route.startsWith('/administration/system-settings')) return 'security.configure';
+  if (route.startsWith('/administration/integrations')) return 'integration.view';
+  if (route.startsWith('/administration/ai-and-automation')) return 'it.view';
+  if (route.startsWith('/administration/compliance-and-governance')) return 'audit.view';
   if (route.startsWith('/hris/administration/user-management')) return 'admin.users.view';
   if (route.startsWith('/hris/administration/roles-and-permissions')) return 'admin.roles.view';
   if (route.startsWith('/hris/administration/audit-trail')) return 'audit.view';
@@ -24,7 +31,7 @@ const requiredPermission = (route?: string) => {
   if (route.startsWith('/hris/employees')) return 'employees.view';
   if (route.startsWith('/hris/leave-management')) return 'leave.view';
   if (route.startsWith('/hris')) return 'hris.view';
-  if (route.startsWith('/workforce-portal')) return 'ess.view';
+  if (route.startsWith('/workforce-portal')) return '';
   if (route.startsWith('/finance-accounting')) return 'finance.view';
   if (route.startsWith('/procurement')) return 'procurement.view';
   if (route.startsWith('/projects-engineering')) return 'project.view';
@@ -43,26 +50,55 @@ const canAccess = (permissions: string[], required: string) => {
 export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [permissions, setPermissions] = useState<string[]>(['*']);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [sessionContext, setSessionContext] = useState<{ roles: string[]; department: string; unit: string; isGlobalAdmin: boolean }>({
+    roles: [],
+    department: '',
+    unit: '',
+    isGlobalAdmin: false,
+  });
 
   useEffect(() => {
     fetch('/api/auth/me', { cache: 'no-store' })
       .then((res) => res.ok ? res.json() : null)
       .then((json) => {
         if (json?.data?.permissions) setPermissions(json.data.permissions);
+        if (json?.data) {
+          setSessionContext({
+            roles: Array.isArray(json.data.roles) ? json.data.roles : [],
+            department: String(json.data.department || ''),
+            unit: String(json.data.unit || ''),
+            isGlobalAdmin: Boolean(json.data.isGlobalAdmin),
+          });
+        }
       })
       .catch(() => setPermissions([]));
   }, []);
 
   const visibleNavigation = useMemo(() => {
+    const hrText = `${sessionContext.department} ${sessionContext.unit} ${sessionContext.roles.join(' ')}`.toLowerCase();
+    const canUseHrManagement =
+      sessionContext.isGlobalAdmin ||
+      sessionContext.roles.includes('Super Administrator') ||
+      /\bhr\b/.test(hrText) ||
+      hrText.includes('human resources') ||
+      hrText.includes('human resource') ||
+      hrText.includes('human capital');
+
     return navigationConfig
       .map((item) => {
-        const subItems = item.subItems?.filter((sub) => canAccess(permissions, requiredPermission(sub.route)));
-        const canSeeItem = canAccess(permissions, requiredPermission(item.route)) || !!subItems?.length;
+        const subItems = item.subItems?.filter((sub) => {
+          if (sub.route === '/hris') return canUseHrManagement && canAccess(permissions, requiredPermission(sub.route));
+          if (sub.route === '/workforce-portal') return true;
+          return canAccess(permissions, requiredPermission(sub.route));
+        });
+        const canSeeItem = item.id === 'hris'
+          ? !!subItems?.length
+          : canAccess(permissions, requiredPermission(item.route)) || !!subItems?.length;
         return canSeeItem ? { ...item, subItems } : null;
       })
       .filter(Boolean) as NavItem[];
-  }, [permissions]);
+  }, [permissions, sessionContext]);
 
   const activeGroupId = useMemo(() => {
     const activeGroup = visibleNavigation.find((item) => {

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { appendOrganizationAuditEvent } from '@/lib/organization-audit-store';
 import { getUiPermissions, hasPermission, resolveAccessContext } from '@/lib/hris-access';
@@ -24,7 +26,7 @@ import {
   upsertTimesheetWorkCenter,
   deactivateTimesheetWorkCenter,
   upsertProject,
-  writeTimesheetData,
+  writeTimesheetHeaderLines,
   workflowStages,
   type TimesheetHeader,
   type TimesheetLine,
@@ -44,8 +46,18 @@ import {
   type WorkflowStage,
 } from '@/lib/timesheet-entry-store';
 import { readBiometricDevices, type BiometricDeviceRecord } from '@/lib/biometric-attendance-store';
-import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { readPayrollEmployees, type PayrollEmployeeSource } from '@/lib/payroll-employee-source';
 import type { StructureInsight } from '@/lib/organization-data';
+
+type ProjectManagerOption = {
+  employeeId: string;
+  employeeCode: string;
+  fullName: string;
+  jobTitle: string;
+  department: string;
+  location: string;
+  status: string;
+};
 
 type TimesheetPayload = {
   generatedAt: string;
@@ -66,15 +78,7 @@ type TimesheetPayload = {
   workCenters: TimesheetWorkCenter[];
   departments: TimesheetDepartment[];
   locations: TimesheetLocation[];
-  projectManagers: Array<{
-    employeeId: string;
-    employeeCode: string;
-    fullName: string;
-    jobTitle: string;
-    department: string;
-    location: string;
-    status: string;
-  }>;
+  projectManagers: ProjectManagerOption[];
   supervisorEmployees: Array<{
     employeeId: string;
     employeeCode: string;
@@ -144,6 +148,7 @@ type UpdatePayload = {
     | 'REJECT'
     | 'MATRIX_SAVE'
     | 'CREATE_PROJECT'
+    | 'UPSERT_PROJECT'
     | 'UPSERT_WORK_CENTER'
     | 'DELETE_WORK_CENTER'
     | 'COPY_PREVIOUS_DAY'
@@ -155,7 +160,7 @@ type UpdatePayload = {
   headerId?: string;
   lines?: TimesheetLine[];
   reviewerNote?: string;
-  project?: Omit<Project, 'id'>;
+  project?: Partial<Project> & Pick<Project, 'code' | 'name' | 'site' | 'projectManager'>;
   workCenter?: Partial<TimesheetWorkCenter> & { name: string };
   bulkAllocation?: {
     employeeIds: string[];
@@ -174,7 +179,6 @@ async function handleBulkApply(request: Request, payload: UpdatePayload) {
   const header = headers.find(h => h.id === payload.headerId);
   if (!header) throw new Error('Header not found');
 
-  const otherLines = allLines.filter(l => l.headerId !== header.id);
   const currentLines = allLines.filter(l => l.headerId === header.id);
 
   const updatedLines = currentLines.map(line => {
@@ -208,7 +212,7 @@ async function handleBulkApply(request: Request, payload: UpdatePayload) {
     } as TimesheetLine;
   });
 
-  await writeTimesheetData({ headers, lines: [...otherLines, ...updatedLines] });
+  await writeTimesheetHeaderLines(header, updatedLines);
   return header;
 }
 
@@ -258,7 +262,6 @@ async function handleCopyPreviousDay(request: Request, date: string, supervisorI
   // 3. Map allocations from previous lines to current employees
   // We keep current attendance (clockIn/Out) but copy project/idle allocations
   const currentLines = allLines.filter(l => l.headerId === currentHeader!.id);
-  const otherLines = allLines.filter(l => l.headerId !== currentHeader!.id);
 
   const updatedLines = currentLines.map(line => {
     const prevLine = prevLines.find(pl => pl.employeeId === line.employeeId);
@@ -277,7 +280,7 @@ async function handleCopyPreviousDay(request: Request, date: string, supervisorI
     } as TimesheetLine;
   });
 
-  await writeTimesheetData({ headers, lines: [...otherLines, ...updatedLines] });
+  await writeTimesheetHeaderLines(currentHeader, updatedLines);
   return currentHeader;
 }
 
@@ -519,6 +522,67 @@ const timesheetRecordEmployeeSummary = (record: TimesheetRecord) => ({
   status: record.status === 'Returned' ? 'Needs Review' : 'Active',
 });
 
+const resolveDashboardRoot = () => {
+  const cwd = process.cwd();
+  const dashboardSuffix = path.join('apps', 'dashboard');
+  return cwd.endsWith(dashboardSuffix) ? cwd : path.join(cwd, dashboardSuffix);
+};
+
+const activeText = (value: unknown) => clean(value).toLowerCase();
+const isInactiveText = (value: unknown) => /exited|suspended|terminated|inactive|disabled|resigned|retired|deleted/.test(activeText(value));
+
+const readActiveAuthProjectManagers = async (): Promise<ProjectManagerOption[]> => {
+  try {
+    const usersPath = path.join(resolveDashboardRoot(), 'data', 'auth', 'users.json');
+    const users = JSON.parse(await readFile(usersPath, 'utf8')) as Array<Record<string, unknown>>;
+    return users
+      .filter((user) => !user.deleted && !isInactiveText(user.status) && !isInactiveText(user.employmentStatus))
+      .map((user) => ({
+        employeeId: clean(user.employeeId) || clean(user.employeeCode) || clean(user.username),
+        employeeCode: clean(user.employeeCode) || clean(user.employeeId) || clean(user.username),
+        fullName: clean(user.fullName) || clean(user.username),
+        jobTitle: clean(user.jobTitle) || 'Unassigned Job Title',
+        department: clean(user.department) || clean(user.unit) || 'Unassigned Department',
+        location: clean(user.location),
+        status: clean(user.employmentStatus) || clean(user.status) || 'Active',
+      }))
+      .filter((user) => user.employeeCode && user.fullName);
+  } catch {
+    return [];
+  }
+};
+
+const buildProjectManagerOptions = async (employees: PayrollEmployeeSource['employees']): Promise<ProjectManagerOption[]> => {
+  const byCode = new Map<string, ProjectManagerOption>();
+  const add = (manager: ProjectManagerOption) => {
+    const code = clean(manager.employeeCode || manager.employeeId);
+    if (!code || !clean(manager.fullName)) return;
+    byCode.set(code.toLowerCase(), {
+      ...manager,
+      employeeId: clean(manager.employeeId) || code,
+      employeeCode: code,
+      fullName: clean(manager.fullName),
+      jobTitle: clean(manager.jobTitle) || 'Unassigned Job Title',
+      department: clean(manager.department) || 'Unassigned Department',
+      location: clean(manager.location),
+      status: clean(manager.status) || 'Active',
+    });
+  };
+
+  employees.forEach((employee) => add({
+    employeeId: employee.employeeId,
+    employeeCode: employee.employeeCode,
+    fullName: employee.fullName,
+    jobTitle: employee.jobTitle,
+    department: employee.department,
+    location: employee.location || employee.workLocation || employee.officeLocation,
+    status: employee.status,
+  }));
+
+  (await readActiveAuthProjectManagers()).forEach(add);
+  return Array.from(byCode.values()).sort((a, b) => a.fullName.localeCompare(b.fullName) || a.employeeCode.localeCompare(b.employeeCode));
+};
+
 const resolveProjectManagerForSubmission = (lines: TimesheetLine[], projects: Project[]) => {
   const hoursByProject = new Map<string, number>();
   for (const line of lines) {
@@ -568,17 +632,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const employees = (await readPayrollEmployees()).employees;
   const activeEmployees = employees.filter((employee) => !['Resigned', 'Terminated', 'Retired'].includes(employee.status));
   const supervisorIndex = buildSupervisorIndex(activeEmployees);
-  const projectManagers = activeEmployees
-    .map((employee) => ({
-      employeeId: employee.employeeId,
-      employeeCode: employee.employeeCode,
-      fullName: employee.fullName,
-      jobTitle: employee.jobTitle,
-      department: employee.department,
-      location: employee.location || employee.workLocation || employee.officeLocation,
-      status: employee.status,
-    }))
-    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const projectManagers = await buildProjectManagerOptions(activeEmployees);
 
   const targetDate = date || todayDateInputValue();
   const requestedSupervisor = clean(supervisorId);
@@ -812,21 +866,25 @@ export async function PATCH(request: Request) {
   const { action, date, supervisorId, locationName, workCenterName, headerId, lines: updatedLines } = payload;
 
   try {
-    if (action === 'CREATE_PROJECT') {
+    if (action === 'CREATE_PROJECT' || action === 'UPSERT_PROJECT') {
       if (!payload.project) return err(400, 'Project details are required.');
       const projectCode = payload.project.code?.trim().toUpperCase();
       if (!projectCode) return err(400, 'Project code is required.');
       if (!payload.project.name?.trim()) return err(400, 'Project name is required.');
+      if (!payload.project.clientName?.trim()) return err(400, 'Client name is required.');
       if (!payload.project.site?.trim()) return err(400, 'Site location is required.');
       if (!payload.project.projectManager?.trim()) return err(400, 'Project Manager is required.');
+      const projectId = payload.project.id || `prj-${Date.now()}`;
       await upsertProject({
         ...payload.project,
         code: projectCode,
         name: payload.project.name.trim(),
+        clientName: payload.project.clientName.trim(),
         site: payload.project.site.trim(),
         projectManager: payload.project.projectManager.trim(),
-        id: `prj-${Date.now()}`,
-        tasks: payload.project.tasks?.length ? payload.project.tasks : [{ id: `task-prj-${Date.now()}`, name: 'General Project Work' }],
+        id: projectId,
+        status: payload.project.status || 'Active',
+        tasks: payload.project.tasks?.length ? payload.project.tasks : [{ id: `task-${projectId}`, name: 'General Project Work' }],
       });
       return ok(await buildPayload(request, date, supervisorId, workCenterName, locationName));
     }
@@ -900,8 +958,6 @@ export async function PATCH(request: Request) {
         ...line,
         idleAllocations: line.idleAllocations.map(withDefaultIdleReason),
       }));
-      const otherLines = allLines.filter(l => l.headerId !== headerId);
-      
       if (action === 'SUBMIT') {
         const projects = await readProjects();
         let projectManagerAssignment: ReturnType<typeof resolveProjectManagerForSubmission>;
@@ -936,7 +992,7 @@ export async function PATCH(request: Request) {
         header.status = normalizeTimesheetStatus(header.status);
       }
 
-      await writeTimesheetData({ headers, lines: [...otherLines, ...normalizedLines] });
+      await writeTimesheetHeaderLines(header, normalizedLines);
       return ok(await buildPayload(request, header.timesheetDate, header.supervisorId, header.workCenterName, locationName));
     }
 

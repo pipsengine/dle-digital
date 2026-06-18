@@ -171,7 +171,7 @@ export const roleDefinitions: RoleDefinition[] = [
   role('Logistics Officer', 'Logistics & Fleet', ['logistics.view', 'logistics.create', 'logistics.edit'], 'Logistics operations.'),
   role('Driver Supervisor', 'Logistics & Fleet', ['driver.view', 'driver.approve', 'fleet.view'], 'Driver supervision.'),
   role('Vehicle Custodian', 'Logistics & Fleet', ['fleet.view', 'fleet.submit'], 'Vehicle custody.'),
-  role('IT Administrator', 'IT Support', ['it.*', 'admin.users.view'], 'IT administration.'),
+  role('IT Administrator', 'IT Support', ['it.*', 'admin.users.view', 'admin.roles.view', 'audit.view', 'integration.view', 'security.configure', 'workflow.configure'], 'IT administration.'),
   role('IT Support Officer', 'IT Support', ['it.view', 'it.create', 'it.edit'], 'IT support operations.'),
   role('Service Desk Agent', 'IT Support', ['service-desk.view', 'service-desk.create', 'service-desk.edit'], 'Service desk operations.'),
   role('Infrastructure Officer', 'IT Support', ['infrastructure.view', 'infrastructure.edit'], 'Infrastructure support.'),
@@ -200,6 +200,7 @@ export const defaultRoleForEmployee = (jobTitle: string, department: string) => 
   if (text.includes('procurement') || text.includes('purchase')) return 'Procurement Officer';
   if (text.includes('hse') || text.includes('safety')) return 'HSE Officer';
   if (text.includes('quality') || text.includes('qc')) return 'Quality Inspector';
+  if (text.includes('information technology') || /\bit\b/.test(text) || text.includes('ict') || text.includes('technology') || text.includes('systems administrator') || text.includes('system administrator')) return 'IT Administrator';
   if (text.includes('manager') || text.includes('head')) return 'Manager';
   if (text.includes('supervisor')) return 'Supervisor';
   return 'Employee';

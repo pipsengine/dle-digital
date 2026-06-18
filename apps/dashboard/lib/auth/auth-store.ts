@@ -118,9 +118,25 @@ const readJson = async <T,>(file: string, fallback: T): Promise<T> => {
   }
 };
 
+const authMirrorPath = (file: string) => {
+  const normalizedFile = path.normalize(file);
+  const deployedMarker = path.normalize(path.join('deployment', 'iis', 'site', 'apps', 'dashboard', 'data', 'auth'));
+  const markerIndex = normalizedFile.toLowerCase().lastIndexOf(deployedMarker.toLowerCase());
+  if (markerIndex === -1) return null;
+  const repoRoot = normalizedFile.slice(0, markerIndex);
+  const fileName = path.basename(normalizedFile);
+  return path.join(repoRoot, 'apps', 'dashboard', 'data', 'auth', fileName);
+};
+
 const writeJson = async (file: string, value: unknown) => {
   await ensure();
-  await writeFile(file, JSON.stringify(value, null, 2), 'utf8');
+  const content = JSON.stringify(value, null, 2);
+  await writeFile(file, content, 'utf8');
+  const mirror = authMirrorPath(file);
+  if (mirror && path.normalize(mirror) !== path.normalize(file)) {
+    await mkdir(path.dirname(mirror), { recursive: true });
+    await writeFile(mirror, content, 'utf8');
+  }
 };
 
 export const hashPassword = (password: string, salt = crypto.randomBytes(16).toString('hex')) => ({
@@ -271,6 +287,8 @@ const publicUser = async (user: UserAccount): Promise<SessionUser> => ({
   employeeCode: user.employeeCode,
   fullName: user.fullName,
   email: user.email,
+  department: user.department,
+  unit: user.unit,
   roles: user.roles,
   permissions: await effectivePermissionsForUser(user.id, user.roles),
   status: user.status,
@@ -282,6 +300,8 @@ const globalSessionUser = (state: GlobalAdminState): SessionUser => ({
   userId: 'global-admin',
   username: 'Admin',
   fullName: 'Global Super Administrator',
+  department: 'System Administration',
+  unit: 'Global Administration',
   roles: ['Super Administrator'],
   permissions: ['*'],
   status: 'Active',
