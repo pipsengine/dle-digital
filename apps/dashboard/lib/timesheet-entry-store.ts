@@ -1619,6 +1619,17 @@ export async function readSystemTimesheetLocations(): Promise<TimesheetLocation[
   }
   await ensureDefaultTimesheetLocations(pool);
   const stored = await readStoredTimesheetLocations(pool);
+  const payrollOrRegistryLocations = stored.filter((location) => location.sourceSystem !== 'DLE Enterprise');
+  if (payrollOrRegistryLocations.length) return payrollOrRegistryLocations;
+
+  try {
+    const synced = await syncSageTimesheetDimensions();
+    const syncedLocations = synced.locations.filter((location) => location.sourceSystem !== 'DLE Enterprise');
+    if (syncedLocations.length) return syncedLocations;
+  } catch (error) {
+    console.warn('Sage timesheet location sync failed; falling back to stored/default locations:', error);
+  }
+
   if (stored.length) return stored;
 
   const table = await pool.request().query(`SELECT OBJECT_ID(N'[hris].[OrganizationLocationsSites]', N'U') AS [TableId]`);
