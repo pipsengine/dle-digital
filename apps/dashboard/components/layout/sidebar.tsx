@@ -1,7 +1,7 @@
 'use client';
 
 import type * as React from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
@@ -13,17 +13,62 @@ import {
 } from 'lucide-react';
 import { navigationConfig, NavItem } from '@/lib/config/navigation';
 
+const requiredPermission = (route?: string) => {
+  if (!route || route === '/') return 'enterprise.view';
+  if (route.startsWith('/hris/administration/user-management')) return 'admin.users.view';
+  if (route.startsWith('/hris/administration/roles-and-permissions')) return 'admin.roles.view';
+  if (route.startsWith('/hris/administration/audit-trail')) return 'audit.view';
+  if (route.startsWith('/hris/payroll')) return 'payroll.view';
+  if (route.startsWith('/hris/employees')) return 'employees.view';
+  if (route.startsWith('/hris/leave-management')) return 'leave.view';
+  if (route.startsWith('/hris')) return 'hris.view';
+  if (route.startsWith('/workforce-portal')) return 'ess.view';
+  if (route.startsWith('/finance-accounting')) return 'finance.view';
+  if (route.startsWith('/procurement')) return 'procurement.view';
+  if (route.startsWith('/projects-engineering')) return 'project.view';
+  if (route.startsWith('/hse-management')) return 'hse.view';
+  if (route.startsWith('/quality-management')) return 'quality.view';
+  if (route.startsWith('/document-management')) return 'documents.view';
+  if (route.startsWith('/logistics-fleet')) return 'fleet.view';
+  return 'enterprise.view';
+};
+
+const canAccess = (permissions: string[], required: string) => {
+  if (permissions.includes('*') || permissions.includes(required)) return true;
+  return permissions.includes(`${required.split('.')[0]}.*`);
+};
+
 export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [permissions, setPermissions] = useState<string[]>(['*']);
+
+  useEffect(() => {
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        if (json?.data?.permissions) setPermissions(json.data.permissions);
+      })
+      .catch(() => setPermissions([]));
+  }, []);
+
+  const visibleNavigation = useMemo(() => {
+    return navigationConfig
+      .map((item) => {
+        const subItems = item.subItems?.filter((sub) => canAccess(permissions, requiredPermission(sub.route)));
+        const canSeeItem = canAccess(permissions, requiredPermission(item.route)) || !!subItems?.length;
+        return canSeeItem ? { ...item, subItems } : null;
+      })
+      .filter(Boolean) as NavItem[];
+  }, [permissions]);
 
   const activeGroupId = useMemo(() => {
-    const activeGroup = navigationConfig.find((item) => {
+    const activeGroup = visibleNavigation.find((item) => {
       if (!item.subItems?.length) return false;
       return item.subItems.some((sub) => pathname === sub.route || pathname.startsWith(`${sub.route}/`));
     });
     return activeGroup?.id;
-  }, [pathname]);
+  }, [pathname, visibleNavigation]);
 
   const toggleGroup = (id: string) => {
     setExpandedGroups(prev => ({
@@ -145,9 +190,9 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
     );
   };
 
-  const mainItems = navigationConfig.filter(i => i.group === 'main');
-  const adminItems = navigationConfig.filter(i => i.group === 'administration');
-  const supportItems = navigationConfig.filter(i => i.group === 'support');
+  const mainItems = visibleNavigation.filter(i => i.group === 'main');
+  const adminItems = visibleNavigation.filter(i => i.group === 'administration');
+  const supportItems = visibleNavigation.filter(i => i.group === 'support');
 
   return (
     <motion.aside 

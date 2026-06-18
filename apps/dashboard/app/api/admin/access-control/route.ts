@@ -1,0 +1,51 @@
+import { NextResponse } from 'next/server';
+import {
+  cloneRolePermissions,
+  compareRolePermissions,
+  readAccessControlPayload,
+  saveAccessAssignment,
+} from '@/lib/auth/access-control-store';
+import { readUsers } from '@/lib/auth/auth-store';
+import { AUTH_COOKIE, hasPermission, verifySessionToken } from '@/lib/auth/session';
+
+const tokenFrom = (request: Request) => request.headers.get('cookie')?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${AUTH_COOKIE}=`))?.split('=').slice(1).join('=');
+
+const authorize = async (request: Request, write = false) => {
+  const token = tokenFrom(request);
+  const session = await verifySessionToken(token ? decodeURIComponent(token) : '');
+  if (!session) return { error: NextResponse.json({ status: 'error', error: 'Unauthenticated' }, { status: 401 }) };
+  const canView = hasPermission(session.permissions, 'admin.roles.view') || hasPermission(session.permissions, 'admin.*');
+  const canWrite = session.roles.includes('Super Administrator') || hasPermission(session.permissions, 'admin.roles.assign') || hasPermission(session.permissions, 'admin.roles.edit') || hasPermission(session.permissions, 'admin.*');
+  if (!canView || (write && !canWrite)) return { error: NextResponse.json({ status: 'error', error: 'Forbidden' }, { status: 403 }) };
+  return { session };
+};
+
+export async function GET(request: Request) {
+  const auth = await authorize(request);
+  if (auth.error) return auth.error;
+  const url = new URL(request.url);
+  const compare = url.searchParams.get('compare');
+  if (compare) {
+    const [left, right] = compare.split(':');
+    if (!left || !right) return NextResponse.json({ status: 'error', error: 'Provide compare as leftRole:rightRole.' }, { status: 400 });
+    return NextResponse.json({ status: 'success', data: await compareRolePermissions(left, right) });
+  }
+  const [payload, users] = await Promise.all([readAccessControlPayload(), readUsers()]);
+  return NextResponse.json({ status: 'success', data: { ...payload, users } });
+}
+
+export async function POST(request: Request) {
+  const auth = await authorize(request, true);
+  if (auth.error) return auth.error;
+  try {
+    const body = await request.json().catch(() => ({}));
+    if (body.action === 'clone-role') {
+      const result = await cloneRolePermissions(String(body.sourceRole || ''), String(body.targetRole || ''), request.headers, auth.session!, String(body.reason || ''));
+      return NextResponse.json({ status: 'success', data: result });
+    }
+    const result = await saveAccessAssignment(body, request.headers, auth.session!);
+    return NextResponse.json({ status: 'success', data: result });
+  } catch (error) {
+    return NextResponse.json({ status: 'error', error: error instanceof Error ? error.message : 'Unable to save access changes.' }, { status: 400 });
+  }
+}

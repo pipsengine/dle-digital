@@ -6,6 +6,7 @@ import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { defaultRoleForEmployee, enterpriseRoles, permissionsForRoles, roleDefinitions } from '@/lib/auth/rbac';
 import type { SessionUser } from '@/lib/auth/session';
 import { passwordPolicyErrors } from '@/lib/auth/session';
+import { effectivePermissionsForRoles, effectivePermissionsForUser } from '@/lib/auth/access-control-store';
 
 export type UserStatus = 'Active' | 'Inactive' | 'Disabled' | 'Locked' | 'Pending First Login' | 'Password Reset Required';
 
@@ -227,9 +228,8 @@ export const syncUsersFromEmployeeDirectory = async () => {
 
 export const readUsers = async () => {
   const stored = await readJson<UserAccount[]>(USERS_PATH, []);
-  return stored
-    .filter((user) => !user.deleted)
-    .map((user) => ({ ...user, permissions: permissionsForRoles(user.roles) }));
+  const activeUsers = stored.filter((user) => !user.deleted);
+  return Promise.all(activeUsers.map(async (user) => ({ ...user, permissions: await effectivePermissionsForUser(user.id, user.roles) })));
 };
 
 const globalAdminDefault = (): GlobalAdminState => {
@@ -264,7 +264,7 @@ const client = (headers: Headers) => ({
   device: compact(headers.get('user-agent')) || 'Unknown device',
 });
 
-const publicUser = (user: UserAccount): SessionUser => ({
+const publicUser = async (user: UserAccount): Promise<SessionUser> => ({
   userId: user.id,
   username: user.username,
   employeeId: user.employeeId,
@@ -272,7 +272,7 @@ const publicUser = (user: UserAccount): SessionUser => ({
   fullName: user.fullName,
   email: user.email,
   roles: user.roles,
-  permissions: permissionsForRoles(user.roles),
+  permissions: await effectivePermissionsForUser(user.id, user.roles),
   status: user.status,
   firstLoginRequired: user.firstLoginRequired,
   passwordResetRequired: user.passwordResetRequired,
@@ -410,7 +410,7 @@ export const updateUser = async (userId: string, action: string, payload: any, h
   }
   if (action === 'assign-roles') {
     const roles = Array.isArray(payload.roles) ? payload.roles.filter((item: string) => enterpriseRoles.includes(item as any)) : target.roles;
-    updated = { ...target, roles, permissions: permissionsForRoles(roles), updatedAt: nowIso() };
+    updated = { ...target, roles, permissions: await effectivePermissionsForRoles(roles), updatedAt: nowIso() };
   }
   if (action === 'assign-access') {
     updated = {
