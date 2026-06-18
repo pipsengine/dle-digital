@@ -1,5 +1,14 @@
 [
   {
+    "id": "login-1781785773535-43fb2526",
+    "at": "2026-06-18T12:29:33.535Z",
+    "userId": "global-admin",
+    "username": "Admin",
+    "ipAddress": "172.20.0.1",
+    "device": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.8655",
+    "status": "Success"
+  },
+  {
     "id": "login-1781785498671-93cfecdc",
     "at": "2026-06-18T12:24:58.672Z",
     "userId": "global-admin",

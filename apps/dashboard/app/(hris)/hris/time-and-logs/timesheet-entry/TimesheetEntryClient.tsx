@@ -366,6 +366,9 @@ export default function TimesheetEntryClient() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectSite, setNewProjectSite] = useState('');
   const [newProjectManager, setNewProjectManager] = useState('');
+  const [databaseProjectSites, setDatabaseProjectSites] = useState<string[]>([]);
+  const [projectSiteLoading, setProjectSiteLoading] = useState(false);
+  const [projectSiteError, setProjectSiteError] = useState<string | null>(null);
   const [showWorkCenterManager, setShowWorkCenterManager] = useState(false);
   const [workCenters, setWorkCenters] = useState<Payload['workCenters']>([]);
   const [workCenterDraft, setWorkCenterDraft] = useState('');
@@ -414,6 +417,29 @@ export default function TimesheetEntryClient() {
       setLoading(false);
     }
   }, [matrixColumns.length, selectedLocation, selectedSupervisor]);
+
+  const loadProjectSites = useCallback(async () => {
+    setProjectSiteLoading(true);
+    setProjectSiteError(null);
+    try {
+      const res = await fetch('/api/hris/time-and-logs/project-sites', { cache: 'no-store' });
+      const json = await res.json();
+      if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to load project sites');
+      const sites = Array.from(new Set((json.data?.projectSites ?? []).map((site: unknown) => String(site ?? '').trim()).filter(Boolean))) as string[];
+      setDatabaseProjectSites(sites.sort((a, b) => a.localeCompare(b)));
+    } catch (error) {
+      setProjectSiteError(error instanceof Error ? error.message : 'Unable to load project sites');
+      setDatabaseProjectSites([]);
+    } finally {
+      setProjectSiteLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showProjectModal) {
+      void loadProjectSites();
+    }
+  }, [loadProjectSites, showProjectModal]);
 
   useEffect(() => {
     void load(selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter);
@@ -830,7 +856,7 @@ export default function TimesheetEntryClient() {
 
   const workCenterOptions = workCenterNamesForLocation(workCenters, selectedLocation);
   const locationOptions = Array.from(new Set((payload?.filterOptions.locations ?? []).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-  const siteLocationOptions = (payload?.filterOptions.projectSites ?? [])
+  const siteLocationOptions = (databaseProjectSites.length ? databaseProjectSites : payload?.filterOptions.projectSites ?? [])
     .filter((location) => location && location !== 'Unassigned Location')
     .sort((a, b) => a.localeCompare(b));
   const projectManagerOptions = payload?.projectManagers ?? [];
@@ -1596,7 +1622,21 @@ export default function TimesheetEntryClient() {
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Project Code</label><input type="text" placeholder="e.g. DL26005" value={newProjectCode} onChange={(e) => setNewProjectCode(e.target.value.toUpperCase())} className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 placeholder:text-slate-300 focus:border-indigo-500 focus:outline-none transition-all" /></div>
-                <div><label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Site Location</label><select value={newProjectSite} onChange={(e) => setNewProjectSite(e.target.value)} className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 focus:border-indigo-500 focus:outline-none transition-all"><option value="">Select Site...</option>{siteLocationOptions.map((site) => <option key={site} value={site}>{site}</option>)}</select></div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Site Location</label>
+                  <select
+                    value={newProjectSite}
+                    onChange={(e) => setNewProjectSite(e.target.value)}
+                    disabled={projectSiteLoading || !!projectSiteError || siteLocationOptions.length === 0}
+                    className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 transition-all focus:border-indigo-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    <option value="">{projectSiteLoading ? 'Loading sites...' : projectSiteError ? 'Unable to load sites' : 'Select Site...'}</option>
+                    {siteLocationOptions.map((site) => <option key={site} value={site}>{site}</option>)}
+                  </select>
+                  {projectSiteError && (
+                    <p className="mt-1 text-[10px] font-bold text-rose-500">Site locations could not be read from DLE Enterprise.</p>
+                  )}
+                </div>
               </div>
               <div><label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5">Project Name</label><input type="text" placeholder="e.g. NLNG Train 7 - Piping Works" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} className="w-full rounded-xl border-2 border-slate-200 px-4 py-3 text-sm font-black text-slate-900 placeholder:text-slate-300 focus:border-indigo-500 focus:outline-none transition-all" /></div>
               <div>
@@ -1620,7 +1660,7 @@ export default function TimesheetEntryClient() {
                   })}
                 </datalist>
               </div>
-              <div className="pt-4 flex gap-3"><button onClick={() => setShowProjectModal(false)} className="flex-1 rounded-2xl border-2 border-slate-100 py-4 text-xs font-black text-slate-400 hover:bg-slate-50 transition-all uppercase tracking-widest">Cancel</button><button onClick={handleCreateProject} disabled={submitting || !newProjectCode.trim() || !newProjectName || !newProjectSite || !projectManagerIsSelected} className="flex-[2] rounded-2xl bg-indigo-600 py-4 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50 shadow-xl shadow-indigo-100 transition-all uppercase tracking-widest">{submitting ? 'Creating...' : 'Register Project'}</button></div>
+              <div className="pt-4 flex gap-3"><button onClick={() => setShowProjectModal(false)} className="flex-1 rounded-2xl border-2 border-slate-100 py-4 text-xs font-black text-slate-400 hover:bg-slate-50 transition-all uppercase tracking-widest">Cancel</button><button onClick={handleCreateProject} disabled={submitting || projectSiteLoading || !!projectSiteError || !newProjectCode.trim() || !newProjectName || !newProjectSite || !projectManagerIsSelected} className="flex-[2] rounded-2xl bg-indigo-600 py-4 text-xs font-black text-white hover:bg-indigo-700 disabled:opacity-50 shadow-xl shadow-indigo-100 transition-all uppercase tracking-widest">{submitting ? 'Creating...' : 'Register Project'}</button></div>
             </div>
           </div>
         </div>
