@@ -68,6 +68,11 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('x-auth-user', session.username);
   response.headers.set('x-auth-roles', session.roles.join(','));
+  if (pathname.startsWith('/hris') || pathname.startsWith('/api/hris')) {
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+  }
   return response;
 }
 

@@ -267,7 +267,7 @@ export default function AttendanceActivityClient({ initialNow }: { initialNow: s
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-5 2xl:grid-cols-[1fr_390px]">
-        <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
+        <section className="flex min-h-0 min-w-0 flex-col rounded-lg border border-slate-200 bg-white shadow-sm 2xl:max-h-[calc(100vh-360px)]">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
             <div>
               <h2 className="text-base font-black">Time And Attendance Activity Log</h2>
@@ -275,9 +275,9 @@ export default function AttendanceActivityClient({ initialNow }: { initialNow: s
             </div>
             <CalendarDays className="h-5 w-5 text-blue-600" />
           </div>
-          <div className="overflow-x-auto">
+          <div className="min-h-0 flex-1 overflow-auto">
             <table className="w-full min-w-[1120px] divide-y divide-slate-100">
-              <thead className="bg-slate-50">
+              <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
                 <tr>
                   {['Employee', 'Time Activity', 'Schedule', 'Punches', 'Lateness', 'Location / Device', 'Status', 'Total Hours Worked'].map((header) => (
                     <th key={header} className="px-4 py-3 text-left text-[11px] font-black uppercase text-slate-500">{header}</th>
