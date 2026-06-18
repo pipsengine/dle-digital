@@ -1,5 +1,14 @@
 [
   {
+    "id": "sec-1781786355204-822a3820",
+    "at": "2026-06-18T12:39:15.204Z",
+    "user": "Admin",
+    "action": "Login",
+    "ipAddress": "172.20.0.1",
+    "device": "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US) WindowsPowerShell/5.1.26100.8655",
+    "performedBy": "Admin"
+  },
+  {
     "id": "sec-1781785773555-6981024d",
     "at": "2026-06-18T12:29:33.555Z",
     "user": "Admin",
