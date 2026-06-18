@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { assignEmployeesToSupervisor, readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
 
 type Role =
   | 'Super Admin'
@@ -222,6 +223,13 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
     });
   }
 
+  if (seg0 === 'supervisor-assignments') {
+    if (role === 'Employee') return jsonErr(403, 'Permission denied');
+    const assignmentBatch = url.searchParams.get('assignmentBatch') || undefined;
+    const supervisorEmployeeCode = url.searchParams.get('supervisorEmployeeCode') || undefined;
+    return jsonOk(await readSupervisorAssignments({ assignmentBatch, supervisorEmployeeCode }));
+  }
+
   if (seg0 === 'ai-insights') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
     const employeeId = url.searchParams.get('employeeId') || '';
@@ -355,7 +363,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
   const currentManager = typeof body?.currentManager === 'string' ? body.currentManager.trim() : '';
   const newManager = typeof body?.newManager === 'string' ? body.newManager.trim() : '';
   const employeeIds = Array.isArray(body?.employeeIds) ? (body.employeeIds as any[]).filter((x) => typeof x === 'string').map((x) => x.trim()).filter(Boolean) : [];
-  if (!currentManager) return jsonErr(400, 'Current manager/supervisor is required');
+  if (!currentManager && !employeeIds.length) return jsonErr(400, 'Current manager/supervisor or selected employees are required');
   if (!newManager) return jsonErr(400, 'New manager/supervisor is required');
   if (newManager.toLowerCase().includes('inactive')) return jsonErr(400, 'Cannot assign to inactive manager/supervisor');
 
@@ -366,11 +374,33 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
     const match = employees.find((e) => e.employeeId.toLowerCase() === needle || e.fullName.toLowerCase() === needle);
     return match?.fullName || value.trim();
   };
+  const resolveSupervisorCode = (value: string) => {
+    const needle = value.trim().toLowerCase();
+    const match = employees.find((e) => e.employeeId.toLowerCase() === needle || e.fullName.toLowerCase() === needle);
+    return match?.employeeId || value.trim();
+  };
   const currentSupervisor = resolveSupervisor(currentManager);
   const newSupervisor = resolveSupervisor(newManager);
-  const candidates = employees.filter((e) => e.currentManager === currentManager || e.currentManager === currentSupervisor).map((e) => e.employeeId);
+  const newSupervisorCode = resolveSupervisorCode(newManager);
+  const candidates = currentManager
+    ? employees.filter((e) => e.currentManager === currentManager || e.currentManager === currentSupervisor).map((e) => e.employeeId)
+    : [];
   const impacted = (employeeIds.length ? employeeIds : candidates).slice(0, 250);
   if (impacted.length === 0) return jsonErr(400, 'No employees found for the selected current manager/supervisor');
+
+  const databaseAssignment = await assignEmployeesToSupervisor({
+    supervisorEmployeeCode: newSupervisorCode,
+    employeeCodes: impacted,
+    assignmentBatch: typeof body?.assignmentBatch === 'string' && body.assignmentBatch.trim() ? body.assignmentBatch.trim() : undefined,
+    assignmentGroup: typeof body?.assignmentGroup === 'string' && body.assignmentGroup.trim() ? body.assignmentGroup.trim() : 'Reporting Line',
+    reason: typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : `Bulk reassignment from ${currentSupervisor || 'selected employees'} to ${newSupervisor}`,
+    performedBy: role,
+    sourceRows: impacted.map((employeeCode) => ({
+      employeeCode,
+      sourceLabel: employeeCode,
+      matchConfidence: 'SelectedEmployeeCode',
+    })),
+  });
 
   const now = new Date().toISOString();
   const requestId = `repreq-bulk-${Math.random().toString(16).slice(2)}`;
@@ -406,5 +436,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
   };
   s.requests.set(requestId, req);
   for (const empId of impacted) addToIndex(empId, requestId);
-  return jsonOk({ requestId, impactedEmployees: impacted.length, previewEmployeeIds: impacted.slice(0, 30) });
+  return jsonOk({
+    requestId,
+    impactedEmployees: impacted.length,
+    previewEmployeeIds: impacted.slice(0, 30),
+    databaseUpdated: true,
+    assignmentBatch: databaseAssignment.assignmentBatch,
+    supervisor: databaseAssignment.supervisor,
+    assignments: databaseAssignment.assignments,
+  });
 }
