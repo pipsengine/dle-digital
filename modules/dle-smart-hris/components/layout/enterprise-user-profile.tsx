@@ -50,10 +50,10 @@ type EnterpriseUserProfileProps = Partial<ProfileUser> & {
 
 const defaults: Record<EnterpriseUserProfileContext, ProfileUser> = {
   enterprise: {
-    name: 'Employee Identity Not Linked',
-    role: 'Identity setup required',
-    employeeCode: 'UNLINKED',
-    department: 'No employee record resolved',
+    name: 'Loading profile...',
+    role: 'Resolving signed-in user',
+    employeeCode: 'SIGNED-IN',
+    department: 'Enterprise workspace',
     photoUrl: '/brand/dorman-long-logo.jpg',
     profileHref: '/dashboard',
     grade: 'Unassigned',
@@ -68,9 +68,9 @@ const defaults: Record<EnterpriseUserProfileContext, ProfileUser> = {
     rbacRole: 'Employee',
   },
   hris: {
-    name: 'Employee Identity Not Linked',
-    role: 'Identity setup required',
-    employeeCode: 'UNLINKED',
+    name: 'Loading profile...',
+    role: 'Resolving signed-in user',
+    employeeCode: 'SIGNED-IN',
     department: 'Human Capital',
     photoUrl: '/brand/dorman-long-logo.jpg',
     profileHref: '/hris/employees/employee-profile',
@@ -172,6 +172,30 @@ export function EnterpriseUserProfile({
 
   useEffect(() => {
     let ignore = false;
+
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (ignore || !payload?.data) return;
+        const session = payload.data;
+        setCurrentUser((current) => ({
+          ...current,
+          ...pruneEmpty({
+            name: session.fullName,
+            role: Array.isArray(session.roles) ? session.roles[0] : '',
+            employeeCode: session.employeeCode || session.employeeId || session.username,
+            department: session.department || session.unit,
+            employmentStatus: session.status,
+            onlineStatus: 'Online',
+            availabilityStatus: 'Online',
+            rbacRole: Array.isArray(session.roles) ? session.roles[0] : '',
+            profileHref: session.employeeCode || session.employeeId
+              ? `/hris/employees/employee-profile/${encodeURIComponent(session.employeeCode || session.employeeId)}`
+              : '/hris/administration/user-management/user-accounts',
+          }),
+        }));
+      })
+      .catch(() => undefined);
 
     fetch(`/api/current-user?context=${context}`, { cache: 'no-store' })
       .then((response) => (response.ok ? response.json() : null))

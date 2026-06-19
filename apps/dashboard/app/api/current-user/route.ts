@@ -166,34 +166,37 @@ export async function GET(request: Request) {
     });
   }
 
-  const sessionIdentities = [session?.employeeCode, session?.employeeId, session?.username].filter(Boolean) as string[];
+  const sessionIdentities = [session?.employeeCode, session?.employeeId, session?.username, session?.fullName].filter(Boolean) as string[];
   const configuredIdentities = session ? sessionIdentities : configuredEmployeeIdentities(request, context);
   const configuredEmployee = findEmployee(employeeSource.employees, configuredIdentities);
   const employee = configuredEmployee;
   const linked = Boolean(employee);
   const teamMembers = teamMembersFor(employeeSource.employees, employee);
   const activeTeamMembers = teamMembers.filter(isActiveEmployee);
-  const role = rbacRole(employee, teamMembers.length);
+  const role = employee ? rbacRole(employee, teamMembers.length) : session?.roles?.[0] || 'Employee';
   const pendingApprovals = role === 'Employee' || activeTeamMembers.length === 0 ? 0 : Math.min(24, Math.ceil(activeTeamMembers.length / 4));
+  const sessionCode = compact(session?.employeeCode || session?.employeeId || session?.username);
+  const sessionRole = compact(session?.roles?.[0]) || 'Signed-in User';
+  const sessionDepartment = compact(session?.department || session?.unit) || 'Application Access';
 
   return NextResponse.json({
     status: 'success',
     data: {
-      name: employee?.fullName || 'Employee Identity Not Linked',
-      role: displayJobTitle(employee),
-      employeeCode: employee?.employeeCode || employee?.employeeId || 'UNLINKED',
-      department: employee?.department || employee?.businessUnit || 'No employee record resolved',
+      name: employee?.fullName || session?.fullName || session?.username || 'Signed-in User',
+      role: employee ? displayJobTitle(employee) : sessionRole,
+      employeeCode: employee?.employeeCode || employee?.employeeId || sessionCode || 'SIGNED-IN',
+      department: employee?.department || employee?.businessUnit || sessionDepartment,
       photoUrl: envFirst(`${context.toUpperCase()}_USER_PHOTO_URL`, 'CURRENT_USER_PHOTO_URL') || '/brand/dorman-long-logo.jpg',
-      profileHref: profileHref(context, employee),
+      profileHref: employee ? profileHref(context, employee) : '/hris/administration/user-management/user-accounts',
       email: employee?.officialEmail || employee?.email || employee?.personalEmail || '',
       grade: employee?.salaryGrade || employee?.jobGrade || 'Unassigned',
       location: employee?.workLocation || employee?.location || employee?.officeLocation || 'Unassigned',
-      employmentStatus: employee?.status || 'Unknown',
+      employmentStatus: employee?.status || session?.status || 'Active',
       dateJoined: employee?.dateJoined || '',
       yearsOfService: employee?.yearsOfService ?? 0,
       reportingManager: employee?.managerName || employee?.functionalManager || employee?.departmentHead || 'Not assigned',
       availabilityStatus: availabilityStatus(employee),
-      onlineStatus: availabilityStatus(employee) === 'Online' ? 'Online' : 'Offline',
+      onlineStatus: employee ? (availabilityStatus(employee) === 'Online' ? 'Online' : 'Offline') : 'Online',
       notificationCount,
       pendingApprovals,
       teamSize: activeTeamMembers.length,
