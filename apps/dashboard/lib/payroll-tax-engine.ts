@@ -139,15 +139,16 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
   if (component.calculationBasis === 'percent_of_monthly_basic_annualized') amount = monthlyBasic * rate * 12;
   if (component.calculationBasis === 'percent_of_monthly_base_annualized') amount = monthlyBase * rate * 12;
   if (component.calculationBasis === 'percent_of_annual_gross') amount = annualGross * rate;
-  if (component.calculationBasis === 'percent_of_annual_rent') amount = annualRent * rate;
+  if (component.calculationBasis === 'percent_of_annual_rent') {
+    amount = annualRent > 0 ? annualRent * rate : Number(component.annualCap || 0);
+  }
   if (component.calculationBasis === 'configured_employee_amount') amount = Number(input.courtGarnisheeMonthly || 0) * 12;
   if (component.calculationBasis === 'employer_statutory_tracking_only') amount = annualGross * rate;
   return roundMoney(capAnnual(amount, component));
 };
 
 export const calculatePayrollTax = (input: PayrollTaxInput, version: PayrollTaxVersion) => {
-  const bhtBasis = /\bBHT\b|BASIC,\s*HOUSING\s*AND\s*TRANSPORT/i.test(version.basis || '');
-  const annualGrossIncome = roundMoney((bhtBasis ? Number(input.monthlyBasePay || 0) : Number(input.monthlyTaxablePay ?? (Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0)))) * 12);
+  const annualGrossIncome = roundMoney(Number(input.monthlyTaxablePay ?? (Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0))) * 12);
   const statutoryItems = [...version.statutoryDeductions].sort((a, b) => a.priority - b.priority).map((config) => ({
     id: config.id,
     label: config.label,
