@@ -352,16 +352,31 @@ function PayrollHistoryPanel({ rows }: { rows: PayrollHistoryRow[] }) {
   );
 }
 
-const lineAmount = (lines: PayrollLine[] | undefined, matchers: string[]) => {
-  const hit = (lines || []).find((line) => {
-    const text = `${line.code || ''} ${line.label || ''}`.toUpperCase();
-    return matchers.some((matcher) => text.includes(matcher));
-  });
-  return hit ? { ...hit, label: hit.label } : null;
+const matchesPayrollLine = (line: PayrollLine, matchers: string[]) => {
+  const text = `${line.code || ''} ${line.label || ''}`.toUpperCase();
+  return matchers.some((matcher) => text.includes(matcher));
 };
 
-const standardLines = (lines: PayrollLine[] | undefined, defs: Array<[string, string[]]>) =>
-  defs.map(([label, matchers]) => lineAmount(lines, matchers) || { label, units: 0, amount: 0 });
+const lineAmount = (lines: PayrollLine[] | undefined, matchers: string[]) => {
+  const matched = (lines || []).filter((line) => matchesPayrollLine(line, matchers));
+  if (!matched.length) return null;
+  const first = matched[0];
+  return {
+    ...first,
+    units: matched.reduce((sum, line) => sum + Number(line.units || 0), 0),
+    amount: matched.reduce((sum, line) => sum + Number(line.amount || 0), 0),
+  };
+};
+
+const standardLines = (lines: PayrollLine[] | undefined, defs: Array<[string, string[]]>) => {
+  const source = lines || [];
+  const standard = defs.map(([label, matchers]) => lineAmount(source, matchers) || { label, units: 0, amount: 0 });
+  const unmatched = source.filter((line) =>
+    Number(line.amount || 0) !== 0 &&
+    !defs.some(([, matchers]) => matchesPayrollLine(line, matchers))
+  );
+  return [...standard, ...unmatched];
+};
 
 function PayslipWorkspace({ payload, employee }: { payload: Payload | null; employee?: Payload['employee'] }) {
   const periods = payload?.payrollHistory || [];

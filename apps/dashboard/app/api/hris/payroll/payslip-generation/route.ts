@@ -56,7 +56,19 @@ const resolveDashboardRoot = () => {
   return cwd.endsWith(dashboardSuffix) ? cwd : path.join(cwd, dashboardSuffix);
 };
 
-const BATCH_PATH = path.join(resolveDashboardRoot(), 'data', 'hris', 'payslip-generation-batches.json');
+const resolveRuntimeDataDirs = () => {
+  const cwd = process.cwd();
+  const dirs = [
+    process.env.DLE_PAYSLIP_BATCHES_PATH ? path.dirname(path.resolve(process.env.DLE_PAYSLIP_BATCHES_PATH)) : '',
+    process.env.DLE_HRIS_DATA_DIR ? path.resolve(process.env.DLE_HRIS_DATA_DIR) : '',
+    path.join(cwd, 'data', 'hris'),
+    cwd.endsWith(`${path.sep}site`) ? path.join(path.dirname(cwd), 'runtime-data', 'hris') : '',
+    path.join(resolveDashboardRoot(), 'data', 'hris'),
+  ].filter(Boolean);
+  return Array.from(new Set(dirs));
+};
+
+const BATCH_PATHS = resolveRuntimeDataDirs().map((dir) => path.join(dir, 'payslip-generation-batches.json'));
 
 const getRole = (request: Request): Role => {
   const value = request.headers.get('x-hris-role');
@@ -78,18 +90,41 @@ const periodLabel = (period: string) => {
   return new Date(year || new Date().getFullYear(), (month || 1) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 };
 
+const periodStartDate = (period: string) => {
+  const [year, month] = period.split('-').map(Number);
+  return `${year || new Date().getFullYear()}-${String(month || 1).padStart(2, '0')}-01`;
+};
+
+const periodEndDate = (period: string) => {
+  const [year, month] = period.split('-').map(Number);
+  const end = new Date(year || new Date().getFullYear(), month || 1, 0);
+  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+};
+
 const readBatches = async (): Promise<PayslipBatch[]> => {
-  try {
-    const parsed = JSON.parse(await readFile(BATCH_PATH, 'utf8'));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  for (const batchPath of BATCH_PATHS) {
+    try {
+      const parsed = JSON.parse(await readFile(batchPath, 'utf8'));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      // Try the next runtime data location.
+    }
   }
+  return [];
 };
 
 const writeBatches = async (batches: PayslipBatch[]) => {
-  await mkdir(path.dirname(BATCH_PATH), { recursive: true });
-  await writeFile(BATCH_PATH, JSON.stringify(batches, null, 2), 'utf8');
+  let lastError: unknown = null;
+  for (const batchPath of BATCH_PATHS) {
+    try {
+      await mkdir(path.dirname(batchPath), { recursive: true });
+      await writeFile(batchPath, JSON.stringify(batches, null, 2), 'utf8');
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Unable to write payslip generation batch file.');
 };
 
 const statusFrom = (issues: string[]): PayslipStatus => {
@@ -309,6 +344,9 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       maskedAccount: '**** ****',
       period: requestedPeriod,
       periodLabel: periodLabel(requestedPeriod),
+      payPeriodStart: periodStartDate(requestedPeriod),
+      payPeriodEnd: periodEndDate(requestedPeriod),
+      payDate: periodEndDate(requestedPeriod),
       earningProfile: amounts.profileName,
       earningProfileId: amounts.profileId,
       taxablePay: amounts.taxablePay,

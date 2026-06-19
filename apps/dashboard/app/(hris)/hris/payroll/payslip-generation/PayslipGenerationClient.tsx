@@ -36,9 +36,12 @@ type Payslip = {
   maskedAccount: string;
   period: string;
   periodLabel: string;
-  earnings: Array<{ label: string; amount: number | null }>;
-  deductions: Array<{ label: string; amount: number | null }>;
-  employerContributions: Array<{ label: string; amount: number | null }>;
+  payPeriodStart?: string;
+  payPeriodEnd?: string;
+  payDate?: string;
+  earnings: Array<{ code?: string; label: string; units?: number; taxable?: boolean; amount: number | null }>;
+  deductions: Array<{ code?: string; label: string; units?: number; amount: number | null }>;
+  employerContributions: Array<{ code?: string; label: string; units?: number; amount: number | null }>;
   grossPay: number | null;
   totalDeductions: number | null;
   netPay: number | null;
@@ -82,9 +85,16 @@ type Payload = {
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
+const moneyFmt2 = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const numberFmt = new Intl.NumberFormat('en-GB');
 const money = (value: number | null | undefined, allowed = true) => (!allowed || value === null || value === undefined ? 'Restricted' : moneyFmt.format(value));
+const money2 = (value: number | null | undefined, allowed = true) => (!allowed || value === null || value === undefined ? 'Restricted' : moneyFmt2.format(value));
 const number = (value: number | null | undefined) => numberFmt.format(Number(value || 0));
+const fmtDate = (value?: string) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-GB');
+};
 const toneStyles: Record<Tone, { card: string; icon: string; chip: string; bar: string }> = {
   blue: { card: 'bg-blue-50 border-blue-200', icon: 'bg-blue-600 text-white', chip: 'bg-blue-100 text-blue-800', bar: 'bg-blue-600' },
   green: { card: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-600 text-white', chip: 'bg-emerald-100 text-emerald-800', bar: 'bg-emerald-600' },
@@ -115,26 +125,78 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
   );
 }
 
+function PayslipLineTable({
+  title,
+  lines,
+  totalLabel,
+  total,
+  canViewMoney,
+  amountTone = 'text-slate-950',
+}: {
+  title: string;
+  lines: Array<{ code?: string; label: string; units?: number; taxable?: boolean; amount: number | null }>;
+  totalLabel: string;
+  total: number | null;
+  canViewMoney: boolean;
+  amountTone?: string;
+}) {
+  const visible = lines.filter((line) => Number(line.amount || 0) !== 0);
+  const rows: Array<{ code?: string; label: string; units?: number; taxable?: boolean; amount: number | null }> =
+    visible.length ? visible : [{ label: 'No items', units: 0, amount: 0 }];
+  return (
+    <div className="overflow-hidden rounded-none border border-[#2f67b1] bg-white">
+      <div className="border-b border-[#2f67b1] bg-slate-50 px-3 py-1 text-center text-[11px] font-black uppercase text-slate-500">{title}</div>
+      <table className="w-full border-collapse text-[11px]">
+        <thead>
+          <tr className="border-b border-[#9bb9df] text-left text-slate-950">
+            <th className="w-[42%] px-2 py-1.5 text-sm font-black uppercase">Description</th>
+            <th className="w-[20%] px-2 py-1.5 text-xs font-black uppercase">Code</th>
+            <th className="w-[14%] px-2 py-1.5 text-right text-xs font-black uppercase">Units</th>
+            <th className="px-2 py-1.5 text-right text-sm font-black uppercase">Amount (NGN)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((line, index) => (
+            <tr key={`${title}-${line.code || line.label}-${index}`} className="border-b border-[#cbdcf2]">
+              <td className="px-2 py-1 font-semibold text-slate-900">
+                {line.label}
+                {line.taxable !== undefined ? <span className="ml-2 text-[10px] font-bold text-slate-500">{line.taxable ? 'Taxable' : 'Non-taxable'}</span> : null}
+              </td>
+              <td className="px-2 py-1 font-semibold text-slate-600">{line.code || '-'}</td>
+              <td className="px-2 py-1 text-right font-semibold text-slate-700">{Number(line.units || 0).toFixed(2)}</td>
+              <td className={`px-2 py-1 text-right font-black ${amountTone}`}>{money2(line.amount, canViewMoney)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="bg-blue-50">
+            <td colSpan={3} className="px-2 py-1.5 text-xs font-black uppercase text-blue-950">{totalLabel}</td>
+            <td className="px-2 py-1.5 text-right text-xs font-black text-blue-950">{money2(total, canViewMoney)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; slip: Payslip; canViewMoney: boolean }) {
-  const tableRows = (items: Array<{ label: string; amount: number | null }>) => items.length ? items : [{ label: 'No items', amount: 0 }];
   const payslipTitle = slip.isDailyRate ? 'Daily Rate Payslip' : 'Official Payslip';
   return (
-    <div className="rounded-3xl border border-slate-200 bg-slate-100 p-4 sm:p-6 lg:p-8 print:border-0 print:bg-white print:p-0">
-      <div id="payslip-print-area" className="mx-auto w-full max-w-[980px] overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-sm print:max-w-none print:rounded-none print:border-0 print:shadow-none">
-        <div className="h-2 bg-blue-600 print:bg-blue-600" />
-        <div className="border-b border-slate-200 bg-white px-6 py-6 sm:px-8">
+    <div className="rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6 lg:p-8 print:border-0 print:bg-white print:p-0">
+      <div id="payslip-print-area" className="mx-auto w-full max-w-[980px] overflow-hidden rounded-none border border-[#2f67b1] bg-white shadow-sm print:max-w-none print:border-[#2f67b1] print:shadow-none">
+        <div className="border-b border-[#2f67b1] bg-white px-5 py-5">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-4">
-              <div className="relative h-16 w-52 shrink-0 overflow-hidden rounded-xl border border-slate-100 bg-white p-2">
+              <div className="relative h-16 w-52 shrink-0 bg-white">
                 <Image src={payload.company.logoUrl} alt={payload.company.name} fill sizes="208px" className="object-contain" />
               </div>
               <div className="min-w-0">
-                <h2 className="text-xl font-black text-slate-950">{payload.company.name}</h2>
-                <p className="mt-1 max-w-xl text-xs font-semibold leading-5 text-slate-500">{payload.company.address}</p>
-                <p className="mt-1 text-xs font-bold text-slate-500">{payload.company.website} | {payload.company.email}</p>
+                <h2 className="text-lg font-black text-slate-950">{payload.company.name}</h2>
+                <p className="mt-1 max-w-xl text-xs font-semibold leading-5 text-slate-700">{payload.company.address}</p>
+                <p className="mt-1 text-xs font-bold text-slate-700">{payload.company.website} | {payload.company.email}</p>
               </div>
             </div>
-            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 text-left sm:text-right">
+            <div className="border border-[#9bb9df] bg-blue-50 px-5 py-4 text-left sm:text-right">
               <p className="text-xs font-black uppercase tracking-normal text-blue-700">{payslipTitle}</p>
               <p className="mt-1 text-2xl font-black text-slate-950">{slip.periodLabel}</p>
               <p className="mt-1 text-xs font-semibold text-slate-500">{slip.payslipId}</p>
@@ -142,10 +204,25 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
           </div>
         </div>
 
-        <div className="px-6 py-6 sm:px-8">
+        <div className="border-b border-[#9bb9df] px-5 py-3 text-[11px]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="grid grid-cols-[130px_10px_1fr] gap-y-1">
+              <p className="font-black">Company Name</p><p>:</p><p>DORMANLONG ENGINEERING LIMITED</p>
+              <p className="font-black">Company Address</p><p>:</p><p>12/14 AGEGE MOTOR ROAD, IDI-ORO MUSHIN, LAGOS</p>
+              <p className="font-black">TIN</p><p>:</p><p>01234567-0001</p>
+            </div>
+            <div className="grid grid-cols-[120px_10px_1fr] gap-y-1 md:border-l md:border-[#9bb9df] md:pl-5">
+              <p className="font-black">Pay Period</p><p>:</p><p>{fmtDate(slip.payPeriodStart)} - {fmtDate(slip.payPeriodEnd)}</p>
+              <p className="font-black">Pay Date</p><p>:</p><p>{fmtDate(slip.payDate)}</p>
+              <p className="font-black">Payroll No.</p><p>:</p><p>{slip.payslipId}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 py-4">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-              <p className="text-xs font-black uppercase tracking-normal text-slate-500">Employee Information</p>
+            <div className="border border-[#2f67b1] bg-white p-4">
+              <p className="border-b border-[#9bb9df] pb-2 text-xs font-black uppercase tracking-normal text-[#123f82]">Employee Information</p>
               <div className="mt-4 grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
                 {[
                   ['Employee', `${slip.fullName} (${slip.employeeId})`],
@@ -165,24 +242,24 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
                 ))}
               </div>
             </div>
-            <div className="flex flex-col justify-between rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div className="flex flex-col justify-between border border-emerald-200 bg-emerald-50 p-5">
               <div>
                 <p className="text-xs font-black uppercase tracking-normal text-emerald-700">Net Pay</p>
-                <p className="mt-4 text-3xl font-black text-emerald-950">{money(slip.netPay, canViewMoney)}</p>
+                <p className="mt-4 text-3xl font-black text-emerald-950">{money2(slip.netPay, canViewMoney)}</p>
                 <p className="mt-2 text-xs font-semibold text-emerald-700">Delivery: {slip.deliveryStatus}</p>
               </div>
               <span className={`mt-4 inline-flex w-fit rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(slip.status)].chip}`}>{slip.status}</span>
             </div>
           </div>
           {slip.isDailyRate ? (
-            <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl border border-cyan-200 bg-cyan-50 p-4 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="mt-4 grid grid-cols-2 gap-3 border border-cyan-200 bg-cyan-50 p-4 sm:grid-cols-3 lg:grid-cols-6">
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Daily Rate</p>
-                <p className="mt-1 text-sm font-black text-slate-950">{money(slip.ratePerDay, canViewMoney)}</p>
+                <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerDay, canViewMoney)}</p>
               </div>
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Hourly Rate</p>
-                <p className="mt-1 text-sm font-black text-slate-950">{money(slip.ratePerHour, canViewMoney)}</p>
+                <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerHour, canViewMoney)}</p>
               </div>
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Days Worked</p>
@@ -204,62 +281,24 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
           ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 px-6 pb-6 sm:px-8 lg:grid-cols-2">
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="border-b border-slate-100 bg-blue-50 px-5 py-3 text-sm font-black text-blue-950">Earnings</div>
-            <div className="divide-y divide-slate-100">
-              {tableRows(slip.earnings).map((item) => (
-                <div key={item.label} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
-                  <span className="font-semibold text-slate-600">{item.label}</span>
-                  <span className="font-black text-slate-950">{money(item.amount, canViewMoney)}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between gap-4 border-t border-blue-100 bg-blue-50 px-5 py-3 text-sm">
-              <span className="font-black text-blue-900">Gross Pay</span>
-              <span className="font-black text-blue-900">{money(slip.grossPay, canViewMoney)}</span>
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="border-b border-slate-100 bg-red-50 px-5 py-3 text-sm font-black text-red-950">Deductions</div>
-            <div className="divide-y divide-slate-100">
-              {tableRows(slip.deductions).map((item) => (
-                <div key={item.label} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
-                  <span className="font-semibold text-slate-600">{item.label}</span>
-                  <span className="font-black text-red-700">{money(item.amount, canViewMoney)}</span>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between gap-4 border-t border-red-100 bg-red-50 px-5 py-3 text-sm">
-              <span className="font-black text-red-900">Total Deductions</span>
-              <span className="font-black text-red-900">{money(slip.totalDeductions, canViewMoney)}</span>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 gap-4 px-5 pb-5 lg:grid-cols-2">
+          <PayslipLineTable title="Earnings" lines={slip.earnings} totalLabel="Total Earnings" total={slip.grossPay} canViewMoney={canViewMoney} />
+          <PayslipLineTable title="Deductions" lines={slip.deductions} totalLabel="Total Deductions" total={slip.totalDeductions} canViewMoney={canViewMoney} amountTone="text-red-700" />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 px-6 pb-6 sm:px-8 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 p-5">
+        <div className="grid grid-cols-1 gap-4 px-5 pb-5 lg:grid-cols-2">
+          <div className="border border-[#2f67b1] p-4">
             <p className="text-xs font-black uppercase tracking-normal text-slate-500">Year To Date</p>
             <div className="mt-4 grid grid-cols-3 gap-3">
-              <div className="rounded-xl bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">Gross</p><p className="mt-1 font-black text-slate-950">{money(slip.ytdGross, canViewMoney)}</p></div>
-              <div className="rounded-xl bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">PAYE</p><p className="mt-1 font-black text-red-700">{money(slip.ytdPaye, canViewMoney)}</p></div>
-              <div className="rounded-xl bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">Net</p><p className="mt-1 font-black text-emerald-700">{money(slip.ytdNet, canViewMoney)}</p></div>
+              <div className="bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">Gross</p><p className="mt-1 font-black text-slate-950">{money2(slip.ytdGross, canViewMoney)}</p></div>
+              <div className="bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">PAYE</p><p className="mt-1 font-black text-red-700">{money2(slip.ytdPaye, canViewMoney)}</p></div>
+              <div className="bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">Net</p><p className="mt-1 font-black text-emerald-700">{money2(slip.ytdNet, canViewMoney)}</p></div>
             </div>
           </div>
-          <div className="rounded-2xl border border-slate-200 p-5">
-            <p className="text-xs font-black uppercase tracking-normal text-slate-500">Employer Contributions</p>
-            <div className="mt-4 space-y-3">
-              {tableRows(slip.employerContributions).map((item) => (
-                <div key={item.label} className="flex items-center justify-between gap-4 text-sm">
-                  <span className="font-semibold text-slate-600">{item.label}</span>
-                  <span className="font-black text-slate-950">{money(item.amount, canViewMoney)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <PayslipLineTable title="Employer Contributions" lines={slip.employerContributions} totalLabel="Total Company Contributions" total={slip.employerContributions.reduce((sum, line) => sum + Number(line.amount || 0), 0)} canViewMoney={canViewMoney} />
         </div>
 
-        <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-center text-xs font-semibold leading-5 text-slate-500 sm:px-8">
+        <div className="border-t border-[#2f67b1] bg-slate-50 px-5 py-4 text-center text-xs font-semibold leading-5 text-slate-500">
           This is a computer-generated payslip. For questions, contact {payload.company.email}. Generated from DLE HRIS payroll records.
         </div>
       </div>
