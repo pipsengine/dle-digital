@@ -332,8 +332,6 @@ contractWeekdayRates AS (
   WHERE
     edef.DefCode IN ('JCWEEKDAY', 'JCWEEKDAY_NT')
     AND ISNULL(peu.EmployeeRate, 0) > 0
-    AND epp.LastCalcDate >= @PayrollPeriodStart
-    AND epp.LastCalcDate < @PayrollPeriodEnd
   GROUP BY ce.EmployeeID, epp.EmployeePayPeriodID, edef.DefCode
 ),
 contractRatePeriods AS (

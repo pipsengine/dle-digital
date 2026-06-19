@@ -37,6 +37,13 @@ const moneyOrNull = (value: unknown) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 };
+const moneyFrom = (...values: unknown[]) => {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+};
 const EMPLOYEE_SOURCE_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_CACHE_MS || 60000);
 const EMPLOYEE_SOURCE_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_STALE_MS || 900000);
 const EMPLOYEE_SOURCE_FALLBACK_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_CACHE_MS || 10000);
@@ -109,6 +116,12 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
       const earningLines = sageLineItems(sage.latestEarningLinesJson);
       const deductionLines = sageLineItems(sage.latestDeductionLinesJson);
       const contributionLines = sageLineItems(sage.latestContributionLinesJson);
+      const hoursPerDay = moneyFrom(employee.hoursPerDay, sage.hoursPerDay, 8) || 8;
+      const sageRatePerDay = moneyFrom(sage.ratePerDay, Number(sage.ratePerHour || 0) * hoursPerDay, sage.periodSalary);
+      const sageRatePerHour = moneyFrom(sage.ratePerHour, sageRatePerDay ? sageRatePerDay / hoursPerDay : null);
+      const ratePerDay = moneyFrom(employee.ratePerDay, sageRatePerDay);
+      const ratePerHour = moneyFrom(employee.ratePerHour, sageRatePerHour);
+      const periodSalary = moneyFrom(employee.periodSalary, sage.periodSalary, ratePerDay);
       return {
         ...employee,
         bankName: employee.bankName || sage.bankName || '',
@@ -120,6 +133,12 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
         payCurrency: employee.payCurrency || sage.companyCurrency || 'NGN',
         paymentRun: employee.paymentRun || sage.paymentRunLong || sage.paymentRunShort || '',
         paymentType: employee.paymentType || sage.paymentType || '',
+        periodSalary,
+        annualSalary: moneyFrom(employee.annualSalary, sage.annualSalary, periodSalary ? periodSalary * 12 : null),
+        ratePerDay,
+        ratePerHour,
+        hoursPerDay,
+        hoursPerPeriod: moneyFrom(employee.hoursPerPeriod, sage.hoursPerPeriod) || employee.hoursPerPeriod,
         sagePayrollEarnings: earningLines,
         sagePayrollDeductions: {
           paye: moneyOrNull(sage.latestPaye),
