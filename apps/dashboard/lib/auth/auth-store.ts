@@ -109,7 +109,11 @@ const ensure = async () => {
     try {
       await access(file);
     } catch {
-      await writeFile(file, JSON.stringify(fallback, null, 2), 'utf8');
+      try {
+        await writeFile(file, JSON.stringify(fallback, null, 2), 'utf8');
+      } catch (error) {
+        console.warn('[Auth] Local JSON store is not writable:', error instanceof Error ? error.message : error);
+      }
     }
   }
 };
@@ -136,8 +140,22 @@ const authMirrorPath = (file: string) => {
 const writeJson = async (file: string, value: unknown) => {
   await ensure();
   const content = JSON.stringify(value, null, 2);
-  await writeFile(file, content, 'utf8');
   const mirror = authMirrorPath(file);
+  try {
+    await writeFile(file, content, 'utf8');
+  } catch (error) {
+    if (mirror && path.normalize(mirror) !== path.normalize(file)) {
+      try {
+        await mkdir(path.dirname(mirror), { recursive: true });
+        await writeFile(mirror, content, 'utf8');
+        return;
+      } catch {
+        // Fall through to the non-blocking warning below.
+      }
+    }
+    console.warn('[Auth] Local JSON write skipped:', error instanceof Error ? error.message : error);
+    return;
+  }
   if (mirror && path.normalize(mirror) !== path.normalize(file)) {
     try {
       await mkdir(path.dirname(mirror), { recursive: true });

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
-import { calculatePermanentUnionDues, resolvePayrollEarningProfile, taxablePayrollInputFromEmployee, type PayrollEarningsOptions } from '@/lib/payroll-earnings-engine';
+import { calculatePayrollEarnings, calculatePermanentUnionDues, resolvePayrollEarningProfile, taxablePayrollInputFromEmployee, type PayrollEarningsOptions } from '@/lib/payroll-earnings-engine';
 
 export type TaxBand = { id: string; sequence: number; label: string; bandAmount: number | null; rate: number };
 export type ConfigStatus = 'Draft' | 'Active' | 'Retired';
@@ -45,6 +45,7 @@ export type PayrollTaxConfig = {
 };
 export type PayrollTaxInput = {
   employee?: DleEmployeeDirectoryRow;
+  monthlyBasicPay?: number;
   monthlyBasePay: number;
   monthlyAllowances: number;
   monthlyGrossPay?: number;
@@ -155,14 +156,17 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
   if (!appliesToEmployee(component, input)) return 0;
   if ((component.id === 'pension' || component.id === 'nhf') && String(profileId).startsWith('contract-')) return 0;
   if (component.id === 'union-dues' && input.employee) return calculatePermanentUnionDues(input.employee).amount * 12;
+  const monthlyBasic = Math.max(0, Number(input.monthlyBasicPay || 0));
   const monthlyBase = Math.max(0, Number(input.monthlyBasePay || 0));
+  const annualBase = monthlyBase * 12;
   const annualGross = Math.max(0, Number(input.monthlyTaxablePay ?? (Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0))) * 12);
-  if (component.id === 'pension') return roundMoney(capAnnual(annualGross * Number(component.rate || 0), component));
+  if (component.id === 'pension') return roundMoney(capAnnual(annualBase * Number(component.rate || 0), component));
   const annualRent = Math.max(0, Number(input.annualRent || 0));
   const minimumBase = Number(component.minimumMonthlyBase || 0);
   if (minimumBase > 0 && monthlyBase < minimumBase) return 0;
   const rate = Number(component.rate || 0);
   let amount = 0;
+  if (component.calculationBasis === 'percent_of_monthly_basic_annualized') amount = monthlyBasic * rate * 12;
   if (component.calculationBasis === 'percent_of_monthly_base_annualized') amount = monthlyBase * rate * 12;
   if (component.calculationBasis === 'percent_of_annual_gross') amount = annualGross * rate;
   if (component.calculationBasis === 'percent_of_annual_rent') amount = annualRent * rate;
@@ -172,7 +176,8 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
 };
 
 export const calculatePayrollTax = (input: PayrollTaxInput, version: PayrollTaxVersion) => {
-  const annualGrossIncome = roundMoney(Number(input.monthlyTaxablePay ?? (Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0))) * 12);
+  const bhtBasis = /\bBHT\b|BASIC,\s*HOUSING\s*AND\s*TRANSPORT/i.test(version.basis || '');
+  const annualGrossIncome = roundMoney((bhtBasis ? Number(input.monthlyBasePay || 0) : Number(input.monthlyTaxablePay ?? (Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0)))) * 12);
   const statutoryItems = [...version.statutoryDeductions].sort((a, b) => a.priority - b.priority).map((config) => ({
     id: config.id,
     label: config.label,
@@ -218,8 +223,11 @@ export const calculatePayrollTax = (input: PayrollTaxInput, version: PayrollTaxV
 };
 
 export const payrollInputFromEmployee = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions): PayrollTaxInput => {
+  const taxInput = taxablePayrollInputFromEmployee(employee, options);
+  const earnings = calculatePayrollEarnings(employee, options);
   return {
-    ...taxablePayrollInputFromEmployee(employee, options),
+    ...taxInput,
+    monthlyBasicPay: earnings.basicPay,
     annualRent: 0,
     courtGarnisheeMonthly: 0,
   };
