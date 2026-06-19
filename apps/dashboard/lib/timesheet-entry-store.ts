@@ -322,6 +322,28 @@ const resolveDashboardRoot = () => {
 
 const DATA_DIR = process.env.DLE_HRIS_DATA_DIR ? path.resolve(process.env.DLE_HRIS_DATA_DIR) : path.join(resolveDashboardRoot(), 'data', 'hris');
 const FILE_PATH = path.join(DATA_DIR, 'timesheet-entry.json');
+const uniquePaths = (paths: Array<string | null | undefined>) => Array.from(new Set(paths.reduce<string[]>((items, item) => {
+  if (item) items.push(path.normalize(item));
+  return items;
+}, [])));
+const repoMirrorPath = (file: string) => {
+  const normalizedFile = path.normalize(file);
+  const markers = [
+    path.normalize(path.join('deployment', 'iis', 'site', 'apps', 'dashboard', 'data', 'hris')),
+    path.normalize(path.join('deployment', 'iis', 'site-publish', 'apps', 'dashboard', 'data', 'hris')),
+  ];
+  const marker = markers.find((candidate) => normalizedFile.toLowerCase().lastIndexOf(candidate.toLowerCase()) !== -1);
+  if (!marker) return null;
+  const markerIndex = normalizedFile.toLowerCase().lastIndexOf(marker.toLowerCase());
+  const repoRoot = normalizedFile.slice(0, markerIndex);
+  return path.join(repoRoot, 'apps', 'dashboard', 'data', 'hris', path.basename(normalizedFile));
+};
+const TIMESHEET_FILE_PATHS = uniquePaths([
+  FILE_PATH,
+  repoMirrorPath(FILE_PATH),
+  path.join(resolveDashboardRoot(), 'data', 'hris', 'timesheet-entry.json'),
+  path.join(process.cwd(), 'apps', 'dashboard', 'data', 'hris', 'timesheet-entry.json'),
+]);
 const TIMESHEET_DATE = '2026-06-03';
 export const STANDARD_TIMESHEET_HOURS = 8;
 export const DAILY_BREAK_HOURS = 1;
@@ -543,25 +565,53 @@ const buildDefaultRecords = (): TimesheetRecord[] =>
     };
   });
 
-const ensureStore = async () => {
-  await mkdir(DATA_DIR, { recursive: true });
-  try {
-    await access(FILE_PATH);
-  } catch {
-    await writeFile(FILE_PATH, JSON.stringify(buildDefaultRecords(), null, 2), 'utf8');
+const parseTimesheetRecords = (raw: string): TimesheetRecord[] => {
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed as TimesheetRecord[] : [];
+};
+
+const readTimesheetFile = async (): Promise<TimesheetRecord[]> => {
+  for (const file of TIMESHEET_FILE_PATHS) {
+    try {
+      return parseTimesheetRecords(await readFile(file, 'utf8'));
+    } catch {
+      // Try the next candidate path.
+    }
   }
+  return [];
+};
+
+const writeTimesheetFile = async (records: TimesheetRecord[], required: boolean) => {
+  const content = JSON.stringify(records, null, 2);
+  let lastError: unknown = null;
+  for (const file of TIMESHEET_FILE_PATHS) {
+    try {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content, 'utf8');
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (required && lastError) throw lastError;
+  if (lastError) console.warn('[Timesheet] Local JSON write skipped:', lastError instanceof Error ? lastError.message : lastError);
+};
+
+const ensureStore = async () => {
+  for (const file of TIMESHEET_FILE_PATHS) {
+    try {
+      await access(file);
+      return;
+    } catch {
+      // Try the next candidate path.
+    }
+  }
+  await writeTimesheetFile(buildDefaultRecords(), false);
 };
 
 export const readTimesheetRecords = async (): Promise<TimesheetRecord[]> => {
   await ensureStore();
-  let stored: TimesheetRecord[] = [];
-  try {
-    const raw = await readFile(FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) stored = parsed as TimesheetRecord[];
-  } catch {
-    stored = [];
-  }
+  const stored = await readTimesheetFile();
 
   const defaults = buildDefaultRecords();
   const storedById = new Map(stored.map((record) => [record.id, record]));
@@ -584,13 +634,13 @@ export const readTimesheetRecords = async (): Promise<TimesheetRecord[]> => {
     };
   });
 
-  await writeFile(FILE_PATH, JSON.stringify(merged, null, 2), 'utf8');
+  await writeTimesheetFile(merged, false);
   return merged;
 };
 
 export const writeTimesheetRecords = async (records: TimesheetRecord[]) => {
   await ensureStore();
-  await writeFile(FILE_PATH, JSON.stringify(records, null, 2), 'utf8');
+  await writeTimesheetFile(records, true);
 };
 
 export const getTimesheetProjectCatalog = () => projectCatalog;
