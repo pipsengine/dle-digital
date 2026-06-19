@@ -6,6 +6,7 @@ import {
   saveEmployeeDraftToDb,
 } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { writePayrollEmployeeOption } from '@/lib/payroll-employee-options-store';
 
 type Role =
   | 'Super Admin'
@@ -331,6 +332,12 @@ export async function POST(request: Request) {
   const startOnboarding = mode === 'create-and-start-onboarding';
   try {
     await createEmployeeFromDraftInDb(draftId, employeeId, draftRec.draft, role, startOnboarding);
+    await writePayrollEmployeeOption({
+      employeeId,
+      employeeCode: employeeId,
+      nhfApplicable: draftRec.draft.payroll?.nhfApplicable !== false,
+      updatedBy: role,
+    });
   } catch (error) {
     return jsonErr(409, error instanceof Error ? error.message : 'Unable to create employee in DLE_Enterprise');
   }

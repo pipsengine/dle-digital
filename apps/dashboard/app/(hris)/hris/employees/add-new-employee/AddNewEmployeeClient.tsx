@@ -206,6 +206,7 @@ type PayrollDraft = {
   pensionProvider: string;
   pensionPin: string;
   taxId: string;
+  nhfApplicable: boolean;
   nhfNumber: string;
   healthInsurancePlan: string;
   benefitGroup: string;
@@ -556,6 +557,7 @@ const makeEmptyDraft = (countryDefault: string): EmployeeDraftPayload => ({
     pensionProvider: '',
     pensionPin: '',
     taxId: '',
+    nhfApplicable: true,
     nhfNumber: '',
     healthInsurancePlan: '',
     benefitGroup: '',
@@ -1490,6 +1492,7 @@ export default function AddNewEmployeeClient({ initialNow, initialDraftId }: { i
           <SelectField label="Pension Provider" value={draft.payroll.pensionProvider} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, pensionProvider: v } }))} options={options.data?.pensionProviders || []} />
           <Field label="Pension PIN" value={draft.payroll.pensionPin} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, pensionPin: v } }))} />
           <Field label="Tax ID" value={draft.payroll.taxId} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, taxId: v } }))} />
+          <Toggle label="Apply NHF deduction" value={draft.payroll.nhfApplicable} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, nhfApplicable: v } }))} />
           <Field label="NHF Number" value={draft.payroll.nhfNumber} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, nhfNumber: v } }))} />
           <Field label="Health Insurance Plan" value={draft.payroll.healthInsurancePlan} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, healthInsurancePlan: v } }))} />
           <SelectField label="Benefit Group" value={draft.payroll.benefitGroup} onChange={(v) => setDraft((d) => ({ ...d, payroll: { ...d.payroll, benefitGroup: v } }))} options={options.data?.benefitGroups || []} />

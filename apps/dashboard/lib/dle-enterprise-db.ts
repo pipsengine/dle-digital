@@ -88,6 +88,7 @@ export type DleEmployeeDirectoryRow = {
   pensionProvider?: string;
   pensionPin?: string;
   taxIdentificationNumber?: string;
+  nhfApplicable?: boolean;
   periodSalary: number | null;
   annualSalary: number | null;
   ratePerHour: number | null;

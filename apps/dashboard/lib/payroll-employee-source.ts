@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines } from '@/lib/sage-people-payroll-store';
 
 export type PayrollEmployeeSource = {
@@ -284,13 +285,13 @@ const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
   try {
     const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
     if (employees) {
-      return { employees: await enrichEmployeesFromSagePayroll(employees), source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
+      return { employees: await applyPayrollEmployeeOptions(await enrichEmployeesFromSagePayroll(employees)), source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
     }
   } catch {
     // Fall through to cache; payroll pages should stay operational while DB connectivity is restored.
   }
 
-  const cached = await readCachedPayrollEmployees();
+  const cached = await applyPayrollEmployeeOptions(await readCachedPayrollEmployees());
   return {
     employees: cached,
     source: 'Local HRIS payroll cache',
