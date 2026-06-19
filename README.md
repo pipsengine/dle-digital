@@ -1,20 +1,43 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# DLE Connect IIS Dashboard
 
-# Run and deploy your AI Studio app
+Next.js dashboard for Dorman Long Enterprise operations, packaged for IIS hosting on a Windows server.
 
-This contains everything you need to run your app locally.
+## Local Development
 
-View your app in AI Studio: https://ai.studio/apps/8ad4c5dc-7046-4383-ac03-8cdd57597a41
+```powershell
+npm install
+npm run dev
+```
 
-## Run Locally
+The app runs on:
 
-**Prerequisites:**  Node.js
+```text
+http://127.0.0.1:3010
+```
 
+The npm scripts are UNC-safe for this server share. They enter the repository through `scripts\Run-FromRepo.cmd` so Next.js and ESLint run from a temporary mapped drive instead of directly from `\\x3admin\...`.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Validation
+
+```powershell
+npm run lint
+npm run build
+```
+
+`npm run lint` may report React hook warnings, but it should exit without errors. `npm run build` creates a standalone Next.js build under `apps\dashboard\.next`.
+
+## IIS Package
+
+```powershell
+npm run publish:iis
+```
+
+The IIS package is written to:
+
+```text
+deployment\iis\site
+```
+
+The default package uses HttpPlatformHandler so IIS starts `apps\dashboard\server.js` directly. See `deployment\iis\README.md` for IIS roles, permissions, and the reverse-proxy option.
+
+If the publish folder is locked, stop the IIS site or any running dashboard service and close terminals/editors browsing `deployment\iis\site`, then rerun the publish command.

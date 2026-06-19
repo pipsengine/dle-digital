@@ -14,6 +14,31 @@ $StandalonePath = Join-Path $BuildPath "standalone"
 $ResolvedOutputPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $OutputPath))
 $RuntimeDataBackupPath = Join-Path $RepoRoot "deployment\iis\.runtime-data-backup"
 
+function Remove-PathWithRetry {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [int]$Attempts = 5,
+    [int]$DelaySeconds = 2
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+
+  for ($Attempt = 1; $Attempt -le $Attempts; $Attempt++) {
+    try {
+      Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($Attempt -eq $Attempts) {
+        throw "Could not remove '$Path'. Stop IIS/the running dashboard service and close editors or terminals that are browsing the publish folder, then rerun this command. Original error: $($_.Exception.Message)"
+      }
+
+      Start-Sleep -Seconds $DelaySeconds
+    }
+  }
+}
+
 function Copy-DirectoryContents {
   param(
     [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -25,7 +50,7 @@ function Copy-DirectoryContents {
   }
 
   if (Test-Path -LiteralPath $DestinationPath) {
-    Remove-Item -LiteralPath $DestinationPath -Recurse -Force
+    Remove-PathWithRetry -Path $DestinationPath
   }
 
   New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
@@ -75,11 +100,11 @@ try {
   if (Test-Path -LiteralPath $ExistingRuntimeData) {
     Copy-DirectoryContents -SourcePath $ExistingRuntimeData -DestinationPath $RuntimeDataBackupPath
   } elseif (Test-Path -LiteralPath $RuntimeDataBackupPath) {
-    Remove-Item -LiteralPath $RuntimeDataBackupPath -Recurse -Force
+    Remove-PathWithRetry -Path $RuntimeDataBackupPath
   }
 
   if (Test-Path -LiteralPath $ResolvedOutputPath) {
-    Remove-Item -LiteralPath $ResolvedOutputPath -Recurse -Force
+    Remove-PathWithRetry -Path $ResolvedOutputPath
   }
 
   New-Item -ItemType Directory -Path $ResolvedOutputPath | Out-Null
@@ -123,7 +148,7 @@ try {
   Test-NextTraceFiles -NextRootPath (Join-Path $ResolvedOutputPath "apps\dashboard\.next")
 
   if (Test-Path -LiteralPath $RuntimeDataBackupPath) {
-    Remove-Item -LiteralPath $RuntimeDataBackupPath -Recurse -Force
+    Remove-PathWithRetry -Path $RuntimeDataBackupPath
   }
 
   Write-Host "IIS deployment package created at $ResolvedOutputPath"
