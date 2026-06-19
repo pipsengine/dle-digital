@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { leaveAllowanceEventsForEmployeePeriod } from '@/lib/payroll-leave-allowance-store';
 
@@ -71,6 +73,17 @@ export type PayrollOvertimeRule = {
   divisor: number;
 };
 
+type PayrollPeriodEarningAdjustment = {
+  period: string;
+  employeeId?: string;
+  employeeCode?: string;
+  code: string;
+  name: string;
+  amount: number;
+  taxable: boolean;
+  source?: string;
+};
+
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
 const num = (value: unknown) => {
@@ -78,6 +91,30 @@ const num = (value: unknown) => {
   return Number.isFinite(n) ? n : 0;
 };
 const titleCase = (value: string) => value.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+const resolveDashboardRoot = () => {
+  const cwd = process.cwd();
+  const dashboardSuffix = path.join('apps', 'dashboard');
+  return cwd.endsWith(dashboardSuffix) ? cwd : path.join(cwd, dashboardSuffix);
+};
+const PERIOD_ADJUSTMENTS_PATH = process.env.DLE_PAYROLL_EARNING_ADJUSTMENTS_PATH
+  || (process.env.DLE_HRIS_DATA_DIR ? path.join(process.env.DLE_HRIS_DATA_DIR, 'payroll-period-earning-adjustments.json') : '')
+  || path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-period-earning-adjustments.json');
+let periodAdjustmentCache: { mtime: number; rows: PayrollPeriodEarningAdjustment[] } | null = null;
+const normalizedPeriod = (period?: string) => compact(period).replace(/\//g, '-').slice(0, 7);
+const normalizedEmployeeKey = (value: unknown) => compact(value).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^P(?=\d+$)/, '');
+const readPeriodEarningAdjustmentsSync = () => {
+  try {
+    if (!existsSync(PERIOD_ADJUSTMENTS_PATH)) return [];
+    const stat = statSync(PERIOD_ADJUSTMENTS_PATH) as { mtimeMs: number };
+    if (periodAdjustmentCache && periodAdjustmentCache.mtime === stat.mtimeMs) return periodAdjustmentCache.rows;
+    const parsed = JSON.parse(readFileSync(PERIOD_ADJUSTMENTS_PATH, 'utf8'));
+    const rows = Array.isArray(parsed) ? parsed as PayrollPeriodEarningAdjustment[] : [];
+    periodAdjustmentCache = { mtime: stat.mtimeMs, rows };
+    return rows;
+  } catch {
+    return [];
+  }
+};
 
 export const PAYROLL_EARNING_PROFILES: Record<Exclude<PayrollEarningProfileId, 'contract-day-rate' | 'stipend-non-taxable' | 'fallback'>, { name: string; definitions: PayrollEarningDefinition[] }> = {
   'junior-permanent': {
@@ -309,11 +346,24 @@ export const resolvePayrollEarningProfile = (employee: DleEmployeeDirectoryRow):
   return 'fallback';
 };
 
-const periodAdjustmentLines = (options?: PayrollEarningsOptions): PayrollEarningLine[] => {
+const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions): PayrollEarningLine[] => {
   if (!options?.includePeriodAdjustments) return [];
-  const adjustments: PayrollEarningLine[] = [];
-
-  return adjustments;
+  const period = normalizedPeriod(options.period);
+  const employeeKeys = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].map(normalizedEmployeeKey).filter(Boolean);
+  return readPeriodEarningAdjustmentsSync()
+    .filter((row) => normalizedPeriod(row.period) === period)
+    .filter((row) => [row.employeeId, row.employeeCode].map(normalizedEmployeeKey).some((key) => employeeKeys.includes(key)))
+    .map((row) => ({
+      code: compact(row.code),
+      name: compact(row.name || row.code),
+      taxable: Boolean(row.taxable),
+      percentOfGross: 0,
+      calculation: row.source || 'Payroll period earning adjustment',
+      runFrequency: 'formula' as const,
+      includeInMonthlyPayroll: true,
+      amount: roundMoney(num(row.amount)),
+    }))
+    .filter((line) => line.code && line.amount !== 0);
 };
 
 const leavePayrollEventLines = (employee: DleEmployeeDirectoryRow, periodGross: number, existingLines: PayrollEarningLine[], options?: PayrollEarningsOptions): PayrollEarningLine[] => {
@@ -470,7 +520,7 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
   const fixedMonthlyLines = [...seniorFixedMonthlyEarningLines(profileId), ...juniorFixedMonthlyEarningLines(profileId)];
   const lines = withCategoryFormulaLines(profileId, [...regularLines, ...fixedMonthlyLines]);
   const periodAdjustments = [
-    ...periodAdjustmentLines(options),
+    ...periodAdjustmentLines(employee, options),
     ...leavePayrollEventLines(employee, gross, lines, options),
   ];
   const monthlyLines = [...monthlyPayrollLines(lines), ...periodAdjustments];

@@ -1,0 +1,22 @@
+[
+  {
+    "period": "2026-05",
+    "employeeId": "0080",
+    "employeeCode": "0080",
+    "code": "STOCKCOUNT",
+    "name": "Stock Count",
+    "amount": 10500,
+    "taxable": true,
+    "source": "May 2026 payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "employeeId": "0080",
+    "employeeCode": "0080",
+    "code": "REFUND",
+    "name": "Refund",
+    "amount": 1732.5,
+    "taxable": false,
+    "source": "May 2026 payroll adjustment"
+  }
+]
