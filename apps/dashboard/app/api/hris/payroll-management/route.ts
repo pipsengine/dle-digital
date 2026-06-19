@@ -66,6 +66,12 @@ const nowIso = () => new Date().toISOString();
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
 const PAYROLL_SETUP_PREVIEW_PERIOD = activePayrollPeriod();
+const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirectoryRow => ({
+  ...employee,
+  sagePayrollEarnings: [],
+  sagePayrollDeductions: undefined,
+  sagePayrollContributions: undefined,
+});
 
 const getRole = (request: Request): Role => {
   const value = request.headers.get('x-hris-role');
@@ -120,10 +126,12 @@ const isDailyRateEmployee = (employee: DleEmployeeDirectoryRow, earningProfileId
 };
 
 const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxVersion, pensionVersion: PensionVersion) => {
-  const earnings = calculatePayrollEarnings(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true });
-  const tax = calculatePayrollTax(payrollInputFromEmployee(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true }), taxVersion);
+  const calculationEmployee = inputOnlyEmployee(employee);
+  const calculationOptions = { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true, ignoreSagePayslipLines: true };
+  const earnings = calculatePayrollEarnings(calculationEmployee, calculationOptions);
+  const tax = calculatePayrollTax(payrollInputFromEmployee(calculationEmployee, calculationOptions), taxVersion);
   const sageReconciliation = sageOpeningPayslipReconciliation(employee, PAYROLL_SETUP_PREVIEW_PERIOD);
-  const pension = sageReconciliation?.pensionEmployee ?? calculatePension(pensionInputFromEmployee(employee, { period: PAYROLL_SETUP_PREVIEW_PERIOD, includePeriodAdjustments: true }), pensionVersion).employeeContribution;
+  const pension = sageReconciliation?.pensionEmployee ?? calculatePension(pensionInputFromEmployee(calculationEmployee, calculationOptions), pensionVersion).employeeContribution;
   const paye = sageReconciliation?.paye ?? tax.monthlyPaye;
   const nhf = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'nhf')?.amount || 0) / 12;
   const unionDues = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'union-dues')?.amount || 0) / 12;

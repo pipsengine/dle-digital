@@ -54,6 +54,24 @@ type PayrollRecord = {
   netPay: number | null;
   employerCost: number | null;
   deductionRatio: number | null;
+  sageActual: null | {
+    employeeCode: string;
+    directoryEmployeeCode: string;
+    employeePayPeriodId: number;
+    lastCalcDate: string | null;
+    grossPay: number | null;
+    taxablePay: number | null;
+    paye: number | null;
+    pensionEmployee: number | null;
+    totalDeductions: number | null;
+    netPay: number | null;
+  };
+  discrepancies: {
+    status: 'Matched' | 'Variance' | 'Missing Sage';
+    grossVariance: number | null;
+    netVariance: number | null;
+    deductionVariance: number | null;
+  };
   status: RecordStatus;
   issues: string[];
 };
@@ -112,6 +130,11 @@ type Payload = {
     totalDeductions: number | null;
     netPay: number | null;
     employerCost: number | null;
+    sageGrossPay: number | null;
+    sageNetPay: number | null;
+    grossVariance: number | null;
+    netVariance: number | null;
+    discrepancyCount: number;
     ready: number;
     review: number;
     blocked: number;
@@ -331,6 +354,11 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
         <MetricCard label="Review Lines" value={number(payload?.summary.review)} detail="Require payroll or compliance review" icon={AlertTriangle} tone="amber" />
         <MetricCard label="Blocked Lines" value={number(payload?.summary.blocked)} detail={`${number(payload?.summary.exceptionCount)} total exception flags`} icon={ShieldCheck} tone={(payload?.summary.blocked || 0) > 0 ? 'red' : 'green'} />
       </div>
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <MetricCard label="Sage Gross" value={money(payload?.summary.sageGrossPay, canViewMoney)} detail="Actual Sage gross for selected period" icon={FileCheck2} tone="cyan" />
+        <MetricCard label="Gross Variance" value={money(payload?.summary.grossVariance, canViewMoney)} detail="Generated gross minus Sage gross" icon={AlertTriangle} tone={(payload?.summary.discrepancyCount || 0) > 0 ? 'amber' : 'green'} />
+        <MetricCard label="Discrepancies" value={number(payload?.summary.discrepancyCount)} detail="Generated payroll lines requiring review against Sage" icon={ShieldCheck} tone={(payload?.summary.discrepancyCount || 0) > 0 ? 'amber' : 'green'} />
+      </div>
 
       <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -406,9 +434,9 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="min-w-[1220px] w-full divide-y divide-slate-100">
+            <table className="min-w-[1480px] w-full divide-y divide-slate-100">
               <thead className="bg-slate-50">
-                <tr>{['Employee', 'Group', 'Gross', 'PAYE', 'Pension', 'Statutory', 'Loan', 'Deductions', 'Net Pay', 'Employer Cost', 'Status'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase tracking-normal text-slate-500">{header}</th>)}</tr>
+                <tr>{['Employee', 'Group', 'Generated Gross', 'Sage Gross', 'Gross Var.', 'PAYE', 'Pension', 'Deductions', 'Generated Net', 'Sage Net', 'Net Var.', 'Employer Cost', 'Status'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase tracking-normal text-slate-500">{header}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {filtered.map((record) => {
@@ -418,12 +446,14 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
                       <td className="px-4 py-3"><div className="font-black text-slate-950">{record.fullName}</div><div className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</div></td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{record.payrollGroup}</td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
+                      <td className="px-4 py-3 text-sm font-black text-cyan-800">{record.sageActual ? money(record.sageActual.grossPay, canViewMoney) : 'No Sage'}</td>
+                      <td className={`px-4 py-3 text-sm font-black ${Number(record.discrepancies.grossVariance || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{record.discrepancies.grossVariance === null ? 'N/A' : money(record.discrepancies.grossVariance, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{money(record.paye, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{money(record.pensionEmployee, canViewMoney)}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{money(record.statutoryEmployee, canViewMoney)}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{money(record.loanRecovery, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-red-700">{money(record.totalDeductions, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
+                      <td className="px-4 py-3 text-sm font-black text-cyan-800">{record.sageActual ? money(record.sageActual.netPay, canViewMoney) : 'No Sage'}</td>
+                      <td className={`px-4 py-3 text-sm font-black ${Number(record.discrepancies.netVariance || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{record.discrepancies.netVariance === null ? 'N/A' : money(record.discrepancies.netVariance, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.employerCost, canViewMoney)}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${styles.chip}`}>{record.status}</span>
@@ -433,7 +463,7 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={11} className="px-4 py-12 text-center text-sm font-bold text-slate-500">No payroll lines match the current filters.</td></tr>
+                  <tr><td colSpan={13} className="px-4 py-12 text-center text-sm font-bold text-slate-500">No payroll lines match the current filters.</td></tr>
                 )}
               </tbody>
             </table>

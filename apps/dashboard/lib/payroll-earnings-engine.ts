@@ -43,6 +43,7 @@ export type PayrollEarningsResult = {
 export type PayrollEarningsOptions = {
   period?: string;
   includePeriodAdjustments?: boolean;
+  ignoreSagePayslipLines?: boolean;
 };
 
 export type PayrollSupplementalEarningDefinition = {
@@ -393,7 +394,7 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
   const profileId = resolvePayrollEarningProfile(employee);
   const gross = monthlyGrossFromEmployee(employee);
   const profile = profileId === 'fallback' || profileId === 'contract-day-rate' || profileId === 'stipend-non-taxable' ? null : PAYROLL_EARNING_PROFILES[profileId];
-  const sageLines = sagePayslipEarningLines(employee);
+  const sageLines = options?.ignoreSagePayslipLines ? [] : sagePayslipEarningLines(employee);
   if (sageLines.length > 0) {
     const fallbackProfileName = profileId === 'contract-day-rate'
       ? 'Contract Staff on Day Rate'

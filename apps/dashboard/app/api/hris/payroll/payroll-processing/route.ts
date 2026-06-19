@@ -3,13 +3,14 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { calculatePayrollEarnings, sageOpeningPayslipReconciliation } from '@/lib/payroll-earnings-engine';
+import { calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
 import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
+import { normalizePayrollMatchKey, readSagePayrollPeriodTotals } from '@/lib/sage-people-payroll-store';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type RunStatus = 'Draft' | 'Calculated' | 'Submitted' | 'Finance Approved' | 'HR Approved' | 'Locked' | 'Posted' | 'Rejected';
@@ -39,6 +40,14 @@ const err = (status: number, error: string) => NextResponse.json({ status: 'erro
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
 const activeStatus = (value: unknown) => !compact(value).toLowerCase().match(/terminated|resigned|retired|inactive|deceased/);
+const moneyVariance = (actual: number | null | undefined, expected: number | null | undefined) => roundMoney(Number(expected || 0) - Number(actual || 0));
+const varianceStatus = (variance: number, threshold = 1) => (Math.abs(variance) <= threshold ? 'Matched' : 'Variance');
+const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirectoryRow => ({
+  ...employee,
+  sagePayrollEarnings: [],
+  sagePayrollDeductions: undefined,
+  sagePayrollContributions: undefined,
+});
 
 const resolveDashboardRoot = () => {
   const cwd = process.cwd();
@@ -110,7 +119,7 @@ const statusFromIssues = (issues: string[]): RecordStatus => {
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, runs] = await Promise.all([
+  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, runs, sagePeriodTotals] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
     readPayrollPensionConfig(),
@@ -118,6 +127,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     readPayrollLoansConfig(),
     readPayrollLoanApplications(),
     readRuns(),
+    readSagePayrollPeriodTotals(requestedPeriod).catch(() => []),
   ]);
 
   const taxVersion = activeTaxVersion(taxConfig);
@@ -126,6 +136,15 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   const loansVersion = activeLoansVersion(loansConfig);
   if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) throw new Error('One or more active payroll configuration versions are missing.');
   await syncSageLeaveAllowanceEvents();
+  const sageByKey = new Map<string, (typeof sagePeriodTotals)[number]>();
+  for (const total of sagePeriodTotals) {
+    [
+      total.directoryEmployeeCode,
+      total.employeeCode,
+      total.employeeId,
+      total.employeeName,
+    ].map(normalizePayrollMatchKey).filter(Boolean).forEach((key) => sageByKey.set(key, total));
+  }
 
   const loanInputs = loanInputsFromApplications(employeeSource.employees, loanApplications).reduce((map, input) => {
     const current = map.get(input.employee.employeeId) || [];
@@ -133,22 +152,31 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     map.set(input.employee.employeeId, current);
     return map;
   }, new Map<string, ReturnType<typeof loanInputsFromApplications>>());
-  const calculationOptions = { period: requestedPeriod, includePeriodAdjustments: true };
+  const calculationOptions = { period: requestedPeriod, includePeriodAdjustments: true, ignoreSagePayslipLines: true };
   const records = employeeSource.employees.map((employee, index) => {
-    const amounts = calculatePayrollEarnings(employee, { period: requestedPeriod, includePeriodAdjustments: true });
-    const tax = calculatePayrollTax(payrollInputFromEmployee(employee, calculationOptions), taxVersion);
-    const pension = calculatePension(pensionInputFromEmployee(employee, calculationOptions), pensionVersion);
-    const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(employee, employeeSource.employees.length, calculationOptions), fundsVersion);
+    const calculationEmployee = inputOnlyEmployee(employee);
+    const amounts = calculatePayrollEarnings(calculationEmployee, calculationOptions);
+    const tax = calculatePayrollTax(payrollInputFromEmployee(calculationEmployee, calculationOptions), taxVersion);
+    const pension = calculatePension(pensionInputFromEmployee(calculationEmployee, calculationOptions), pensionVersion);
+    const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(calculationEmployee, employeeSource.employees.length, calculationOptions), fundsVersion);
     const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
-    const sageReconciliation = sageOpeningPayslipReconciliation(employee, requestedPeriod);
-    const paye = sageReconciliation?.paye ?? tax.monthlyPaye;
-    const employeePension = sageReconciliation?.pensionEmployee ?? pension.employeeContribution;
+    const paye = tax.monthlyPaye;
+    const employeePension = pension.employeeContribution;
     const statutoryEmployee = funds.employeeDeductions;
     const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
     const taxComponentMonthly = (id: string) => (tax.statutoryItems.find((item) => item.id === id)?.amount || 0) / 12;
-    const otherDeductions = sageReconciliation ? 0 : roundMoney(taxComponentMonthly('union-dues') + taxComponentMonthly('other-statutory'));
+    const otherDeductions = roundMoney(taxComponentMonthly('union-dues') + taxComponentMonthly('other-statutory'));
     const totalDeductions = roundMoney(paye + employeePension + statutoryEmployee + loanRecovery + otherDeductions);
     const netPay = roundMoney(Math.max(0, amounts.grossPay - totalDeductions));
+    const sageActual = [
+      employee.employeeCode,
+      employee.employeeId,
+      employee.id,
+      employee.fullName,
+    ].map(normalizePayrollMatchKey).map((key) => sageByKey.get(key)).find(Boolean) || null;
+    const grossVariance = sageActual ? moneyVariance(sageActual.grossPay, amounts.grossPay) : null;
+    const netVariance = sageActual ? moneyVariance(sageActual.netPay, netPay) : null;
+    const deductionVariance = sageActual ? moneyVariance(sageActual.totalDeductions, totalDeductions) : null;
     const employerPension = pension.employerContribution;
     const employerStatutory = funds.employerCosts;
     const employerCost = roundMoney(amounts.grossPay + employerPension + employerStatutory);
@@ -164,6 +192,9 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       ...loans.flatMap((loan) => loan.issues.filter((issue) => issue !== 'Loan is not approved for payroll recovery').map((issue) => `Loan: ${issue}`)),
       ...deductionRatio > 45 ? ['Deduction ratio exceeds 45% control threshold'] : [],
       ...netPay <= 0 && amounts.grossPay > 0 ? ['Net pay is zero after deductions'] : [],
+      ...!sageActual ? ['Sage period comparison unavailable'] : [],
+      ...grossVariance !== null && Math.abs(grossVariance) > 1 ? [`Sage gross variance ${grossVariance}`] : [],
+      ...netVariance !== null && Math.abs(netVariance) > 1 ? [`Sage net variance ${netVariance}`] : [],
     ];
     return {
       recordKey: `${requestedPeriod}-${employee.employeeDbId || 'row'}-${employee.employeeId || employee.employeeCode || 'employee'}-${index}`,
@@ -197,6 +228,24 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       netPay,
       employerCost,
       deductionRatio,
+      sageActual: sageActual ? {
+        employeeCode: sageActual.employeeCode,
+        directoryEmployeeCode: sageActual.directoryEmployeeCode,
+        employeePayPeriodId: sageActual.employeePayPeriodId,
+        lastCalcDate: sageActual.lastCalcDate,
+        grossPay: roundMoney(Number(sageActual.grossPay || 0)),
+        taxablePay: roundMoney(Number(sageActual.taxablePay || 0)),
+        paye: roundMoney(Number(sageActual.paye || 0)),
+        pensionEmployee: roundMoney(Number(sageActual.pensionEmployee || 0)),
+        totalDeductions: roundMoney(Number(sageActual.totalDeductions || 0)),
+        netPay: roundMoney(Number(sageActual.netPay || 0)),
+      } : null,
+      discrepancies: {
+        status: grossVariance === null ? 'Missing Sage' : varianceStatus(grossVariance),
+        grossVariance,
+        netVariance,
+        deductionVariance,
+      },
       status: statusFromIssues(issues),
       issues,
     };
@@ -217,8 +266,13 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       netPay: sum.netPay + record.netPay,
       employerCost: sum.employerCost + record.employerCost,
       exceptionCount: sum.exceptionCount + record.issues.length,
+      sageGrossPay: sum.sageGrossPay + Number(record.sageActual?.grossPay || 0),
+      sageNetPay: sum.sageNetPay + Number(record.sageActual?.netPay || 0),
+      grossVariance: sum.grossVariance + Number(record.discrepancies.grossVariance || 0),
+      netVariance: sum.netVariance + Number(record.discrepancies.netVariance || 0),
+      discrepancyCount: sum.discrepancyCount + (record.discrepancies.status === 'Variance' || record.discrepancies.status === 'Missing Sage' ? 1 : 0),
     }),
-    { basePay: 0, allowances: 0, grossPay: 0, paye: 0, pensionEmployee: 0, pensionEmployer: 0, statutoryEmployee: 0, statutoryEmployer: 0, loanRecovery: 0, totalDeductions: 0, netPay: 0, employerCost: 0, exceptionCount: 0 }
+    { basePay: 0, allowances: 0, grossPay: 0, paye: 0, pensionEmployee: 0, pensionEmployer: 0, statutoryEmployee: 0, statutoryEmployer: 0, loanRecovery: 0, totalDeductions: 0, netPay: 0, employerCost: 0, exceptionCount: 0, sageGrossPay: 0, sageNetPay: 0, grossVariance: 0, netVariance: 0, discrepancyCount: 0 }
   );
 
   const latestRun = runs.find((run) => run.period === requestedPeriod) || null;
@@ -244,6 +298,11 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     totalDeductions: roundMoney(totals.totalDeductions),
     netPay: roundMoney(totals.netPay),
     employerCost: roundMoney(totals.employerCost),
+    sageGrossPay: roundMoney(totals.sageGrossPay),
+    sageNetPay: roundMoney(totals.sageNetPay),
+    grossVariance: roundMoney(totals.grossVariance),
+    netVariance: roundMoney(totals.netVariance),
+    discrepancyCount: totals.discrepancyCount,
     ready: records.filter((record) => record.status === 'Ready').length,
     review: records.filter((record) => record.status === 'Review').length,
     blocked: records.filter((record) => record.status === 'Blocked').length,
@@ -266,6 +325,8 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     netPay: null,
     employerCost: null,
     deductionRatio: null,
+    sageActual: null,
+    discrepancies: { status: record.discrepancies.status, grossVariance: null, netVariance: null, deductionVariance: null },
   }));
 
   return {
@@ -304,15 +365,16 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       { id: 'employees', label: 'Employee Source', status: employeeSource.databaseAvailable ? 'Passed' : 'Review', detail: `${employeeSource.employees.length} employees loaded from ${employeeSource.source}`, tone: employeeSource.databaseAvailable ? 'green' : 'amber' },
       { id: 'config', label: 'Configuration Versions', status: 'Passed', detail: 'PAYE, pension, statutory funds, and loan policies resolved by active effective versions.', tone: 'blue' },
       { id: 'exceptions', label: 'Exception Gate', status: summary.blocked > 0 ? 'Blocked' : summary.review > 0 ? 'Review' : 'Passed', detail: `${summary.blocked} blocked, ${summary.review} review, ${summary.exceptionCount} total flags.`, tone: summary.blocked > 0 ? 'red' : summary.review > 0 ? 'amber' : 'green' },
+      { id: 'sage-discrepancy', label: 'Sage May Discrepancy Check', status: summary.discrepancyCount > 0 ? 'Review' : 'Matched', detail: `${summary.discrepancyCount} generated-vs-Sage discrepancy records. Gross variance ${roundMoney(summary.grossVariance)}.`, tone: summary.discrepancyCount > 0 ? 'amber' : 'green' },
       { id: 'approval', label: 'Approval Workflow', status: latestRun?.status || 'Draft', detail: 'Submit, finance approve, HR approve, lock, and post payroll with full audit trace.', tone: latestRun?.status === 'Posted' || latestRun?.status === 'Locked' ? 'green' : 'violet' },
     ],
   };
 };
 
 const csv = (records: any[]) => {
-  const headers = ['Employee ID', 'Name', 'Department', 'Payroll Group', 'Gross Pay', 'PAYE', 'Pension Employee', 'Statutory Employee', 'Loan', 'Deductions', 'Net Pay', 'Employer Cost', 'Status', 'Issues'];
+  const headers = ['Employee ID', 'Name', 'Department', 'Payroll Group', 'Generated Gross', 'Sage Gross', 'Gross Variance', 'Generated PAYE', 'Generated Pension Employee', 'Generated Statutory Employee', 'Generated Loan', 'Generated Deductions', 'Sage Deductions', 'Deduction Variance', 'Generated Net Pay', 'Sage Net Pay', 'Net Variance', 'Employer Cost', 'Discrepancy Status', 'Payroll Status', 'Issues'];
   const lines = records.map((record) =>
-    [record.employeeId, record.fullName, record.department, record.payrollGroup, record.grossPay, record.paye, record.pensionEmployee, record.statutoryEmployee, record.loanRecovery, record.totalDeductions, record.netPay, record.employerCost, record.status, record.issues.join('; ')]
+    [record.employeeId, record.fullName, record.department, record.payrollGroup, record.grossPay, record.sageActual?.grossPay ?? '', record.discrepancies?.grossVariance ?? '', record.paye, record.pensionEmployee, record.statutoryEmployee, record.loanRecovery, record.totalDeductions, record.sageActual?.totalDeductions ?? '', record.discrepancies?.deductionVariance ?? '', record.netPay, record.sageActual?.netPay ?? '', record.discrepancies?.netVariance ?? '', record.employerCost, record.discrepancies?.status || '', record.status, record.issues.join('; ')]
       .map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
       .join(',')
   );
