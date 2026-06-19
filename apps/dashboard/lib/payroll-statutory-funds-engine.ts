@@ -64,6 +64,9 @@ const resolveDashboardRoot = () => {
 const CONFIG_PATH = path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-statutory-funds-config.json');
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
+const normalizedTextKey = (value: unknown) => compact(value).toUpperCase().replace(/\s+/g, '');
+const isMgt6Grade = (employee: DleEmployeeDirectoryRow) =>
+  [employee.salaryGrade, employee.jobGrade].map(normalizedTextKey).includes('MGT6');
 
 export const readStatutoryFundsConfig = async (): Promise<StatutoryFundsConfig> => JSON.parse(await readFile(CONFIG_PATH, 'utf8')) as StatutoryFundsConfig;
 
@@ -102,6 +105,7 @@ const eligible = (rule: StatutoryFundRule, input: StatutoryFundInput) => {
   const profileId = resolvePayrollEarningProfile(input.employee);
   if (rule.id === 'nhf' && String(profileId).startsWith('contract-')) return false;
   if (rule.id === 'nhf' && input.employee.nhfApplicable === false) return false;
+  if (rule.id === 'nhf' && input.employee.nhfApplicable !== true && isMgt6Grade(input.employee)) return false;
   if (rule.id === 'nhf' && input.employee.nhfApplicable !== true && profileId === 'senior-permanent') return false;
   const type = compact(input.employee.employmentType || input.employee.staffCategory || input.employee.employeeCategory).toLowerCase();
   if (rule.eligibleEmploymentTypes.length && !rule.eligibleEmploymentTypes.some((item) => type.includes(item.toLowerCase()))) return false;

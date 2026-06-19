@@ -77,6 +77,11 @@ const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value
 const round4 = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 10000) / 10000;
 const compact = (value: unknown) => String(value || '').trim();
 const employeeType = (input: PayrollTaxInput) => compact(input.employee?.employmentType || input.employee?.staffCategory || input.employee?.employeeCategory || 'Payroll');
+const normalizedTextKey = (value: unknown) => compact(value).toUpperCase().replace(/\s+/g, '');
+const isMgt6Grade = (employee?: DleEmployeeDirectoryRow) => {
+  if (!employee) return false;
+  return [employee.salaryGrade, employee.jobGrade].map(normalizedTextKey).includes('MGT6');
+};
 
 export const readPayrollTaxConfig = async (): Promise<PayrollTaxConfig> => {
   const raw = await readFile(CONFIG_PATH, 'utf8');
@@ -126,6 +131,7 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
   if (!appliesToEmployee(component, input)) return 0;
   if ((component.id === 'pension' || component.id === 'nhf') && String(profileId).startsWith('contract-')) return 0;
   if (component.id === 'nhf' && input.employee?.nhfApplicable === false) return 0;
+  if (component.id === 'nhf' && input.employee?.nhfApplicable !== true && isMgt6Grade(input.employee)) return 0;
   if (component.id === 'nhf' && input.employee?.nhfApplicable !== true && profileId === 'senior-permanent') return 0;
   if (component.id === 'union-dues' && input.employee) return calculatePermanentUnionDues(input.employee).amount * 12;
   const monthlyBasic = Math.max(0, Number(input.monthlyBasicPay || 0));
