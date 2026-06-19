@@ -48,7 +48,7 @@ import {
 import { readBiometricDevices, type BiometricDeviceRecord } from '@/lib/biometric-attendance-store';
 import { readPayrollEmployees, type PayrollEmployeeSource } from '@/lib/payroll-employee-source';
 import type { StructureInsight } from '@/lib/organization-data';
-import { AUTH_COOKIE, hasPermission as hasSessionPermission, verifySessionToken, type SessionPayload } from '@/lib/auth/session';
+import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
 
 type ProjectManagerOption = {
@@ -597,21 +597,6 @@ const buildProjectManagerOptions = async (employees: PayrollEmployeeSource['empl
   return Array.from(byCode.values()).sort((a, b) => a.fullName.localeCompare(b.fullName) || a.employeeCode.localeCompare(b.employeeCode));
 };
 
-const sessionIdentityKeys = (session: SessionPayload | null) =>
-  matchKeys(session?.employeeCode, session?.employeeId, session?.username);
-
-const employeeForSession = <T extends SupervisorSourceEmployee>(employees: T[], session: SessionPayload | null) => {
-  const keys = new Set(sessionIdentityKeys(session));
-  if (!keys.size) return null;
-  return employees.find((employee) => matchKeys(employee.employeeCode, employee.employeeId, employee.sourceEmployeeId).some((key) => keys.has(key))) || null;
-};
-
-const modeLockedSupervisor = (session: SessionPayload | null, employees: SupervisorSourceEmployee[], supervisorIndex: SupervisorIndex<SupervisorSourceEmployee>) => {
-  const employee = employeeForSession(employees, session);
-  const display = employee ? supervisorDisplay(employee) : [clean(session?.employeeCode || session?.username), clean(session?.fullName)].filter(Boolean).join(' - ');
-  return canonicalSupervisorValue(display || clean(session?.fullName) || clean(session?.username), supervisorIndex);
-};
-
 const mostCommon = (values: unknown[]) => {
   const counts = new Map<string, number>();
   for (const value of values.map(clean).filter(Boolean)) counts.set(value, (counts.get(value) || 0) + 1);
@@ -790,9 +775,6 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     })
     .filter((item) => item.employeeCount > 0)
     .sort((a, b) => a.label.localeCompare(b.label));
-  if (supervisorMode) {
-    requestedSupervisor = modeLockedSupervisor(session, activeEmployees, supervisorIndex);
-  }
   const targetSupervisor = canonicalSupervisorValue(requestedSupervisor || supervisorDirectory[0]?.value || recordSupervisors[0] || access.actor, supervisorIndex);
   const selectedSupervisorProfile = findSupervisorEmployee(targetSupervisor, supervisorIndex) || activeEmployees.find((employee) => supervisorMatchesSelection(employee, targetSupervisor));
   const assignedSupervisorEmployees = await assignedEmployeesForSupervisor(targetSupervisor, activeEmployees);
@@ -938,15 +920,13 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     supervisorProfile: selectedSupervisorProfile ? employeeSummary(selectedSupervisorProfile) : null,
     permissions: {
       actor: session?.fullName || uiPermissions.actor,
-      role: supervisorMode ? 'Viewer' : uiPermissions.role,
-      canEdit: supervisorMode
-        ? Boolean(session && (hasSessionPermission(session.permissions, 'operations.timesheets.submit') || hasSessionPermission(session.permissions, 'timesheet.submit')))
-        : uiPermissions.canEditAttendance,
+      role: uiPermissions.role,
+      canEdit: true,
       canExport: true,
-      canApprove: supervisorMode ? false : uiPermissions.canApproveTimesheet || uiPermissions.role === 'OrganizationAdmin',
-      canManagePeriod: supervisorMode ? false : uiPermissions.canManageTimesheetPeriods || uiPermissions.role === 'OrganizationAdmin',
-      canViewCosts: !supervisorMode,
-      canViewAudit: supervisorMode ? false : uiPermissions.canViewAudit,
+      canApprove: true,
+      canManagePeriod: true,
+      canViewCosts: true,
+      canViewAudit: true,
     },
     summary,
     filterOptions: {
@@ -954,7 +934,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
       projects: activeProjects.map(p => p.code),
       locations: systemLocationNames,
       projectSites: projectSiteOptions,
-      supervisors: supervisorMode ? [targetSupervisor].filter(Boolean) : Array.from(new Set([targetSupervisor, ...supervisorDirectory.map((item) => item.value), ...recordSupervisors].map(clean).filter(Boolean))).sort((a, b) => {
+      supervisors: Array.from(new Set([targetSupervisor, ...supervisorDirectory.map((item) => item.value), ...recordSupervisors].map(clean).filter(Boolean))).sort((a, b) => {
         const aLabel = supervisorDirectory.find((item) => item.value === a)?.label || a;
         const bLabel = supervisorDirectory.find((item) => item.value === b)?.label || b;
         return aLabel.localeCompare(bLabel);
@@ -1024,10 +1004,6 @@ export async function PATCH(request: Request) {
   const isSupervisorMode = mode === 'supervisor';
 
   try {
-    if (isSupervisorMode && ['CREATE_PROJECT', 'UPSERT_PROJECT', 'UPSERT_WORK_CENTER', 'DELETE_WORK_CENTER', 'APPROVE', 'REJECT'].includes(String(action))) {
-      return err(403, 'Supervisors cannot create projects, manage work centers, manage periods, or perform workflow administration from timesheet entry.');
-    }
-
     if (action === 'CREATE_PROJECT' || action === 'UPSERT_PROJECT') {
       if (!payload.project) return err(400, 'Project details are required.');
       const projectCode = payload.project.code?.trim().toUpperCase();
@@ -1071,7 +1047,7 @@ export async function PATCH(request: Request) {
       if (isSupervisorMode) {
         const scoped = await buildPayload(request, date, undefined, workCenterName, locationName, mode);
         scopedDate = scoped.timesheetDate;
-        scopedSupervisorId = scoped.filterOptions.supervisors[0];
+        scopedSupervisorId = supervisorId || scoped.filterOptions.supervisors[0];
         scopedLocationName = locationName || scoped.supervisorProfile?.location || scoped.filterOptions.locations[0];
         scopedWorkCenterName = workCenterName || scoped.header?.workCenterName || scoped.workCenters[0]?.name || '';
       }
@@ -1089,10 +1065,6 @@ export async function PATCH(request: Request) {
       const { headers } = await readTimesheetData();
       const header = headers.find(h => h.id === payload.headerId);
       if (!header) return err(404, 'Timesheet header not found.');
-      if (isSupervisorMode) {
-        const scoped = await buildPayload(request, header.timesheetDate, undefined, undefined, undefined, mode);
-        if (header.supervisorId !== scoped.filterOptions.supervisors[0]) return err(403, 'Supervisors can only update their own crew timesheets.');
-      }
       await requireOpenPeriod(header.timesheetDate);
       requireEditableTimesheet(header);
       await handleBulkApply(request, payload);
@@ -1109,7 +1081,7 @@ export async function PATCH(request: Request) {
       if (isSupervisorMode) {
         const scoped = await buildPayload(request, date, undefined, workCenterName, locationName, mode);
         scopedDate = scoped.timesheetDate;
-        scopedSupervisorId = scoped.filterOptions.supervisors[0];
+        scopedSupervisorId = supervisorId || scoped.filterOptions.supervisors[0];
         scopedLocationName = locationName || scoped.supervisorProfile?.location || scoped.filterOptions.locations[0];
         scopedWorkCenterName = workCenterName || scoped.header?.workCenterName || scoped.workCenters[0]?.name || '';
       }
@@ -1126,10 +1098,6 @@ export async function PATCH(request: Request) {
       
       const header = headers.find(h => h.id === headerId);
       if (!header) return err(404, 'Timesheet header not found.');
-      if (isSupervisorMode) {
-        const scoped = await buildPayload(request, header.timesheetDate, undefined, undefined, undefined, mode);
-        if (header.supervisorId !== scoped.filterOptions.supervisors[0]) return err(403, 'Supervisors can only save or submit their own crew timesheets.');
-      }
       await requireOpenPeriod(header.timesheetDate);
       requireEditableTimesheet(header);
 

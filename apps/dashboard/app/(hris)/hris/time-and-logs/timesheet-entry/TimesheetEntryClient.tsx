@@ -956,7 +956,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const reviewTotalHours = round1(localLines.reduce((sum, line) => sum + line.totalHours, 0));
   const reviewProjectCodes = Array.from(new Set(localLines.flatMap((line) => line.projectAllocations.map((item) => item.projectCode).filter(Boolean)))).sort();
   const canOpenSubmitReview = canEditTimesheet && reviewLineCount > 0 && reviewErrorCount === 0;
-  const canManageTimesheetSetup = !isWorkforceSupervisor && Boolean(payload?.permissions.canManagePeriod);
+  const canManageTimesheetSetup = Boolean(payload?.permissions.canManagePeriod);
   const pageTitle = isWorkforceSupervisor ? 'Workforce Timesheet Entry' : 'Timesheet Entry';
   const pageDescription = isWorkforceSupervisor
     ? 'Record daily crew work hours for your assigned employees.'
@@ -1012,29 +1012,25 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               ) : null}
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Supervisor</p>
-                {isWorkforceSupervisor ? (
-                  <div className="max-w-[260px] truncate text-sm font-black text-slate-900">{supervisorLabel}</div>
-                ) : (
-                  <select
-                    value={selectedSupervisor}
-                    onChange={(e) => {
-                      setSelectedSupervisor(e.target.value);
-                      setSelectedEmployees([]);
-                      setQuery('');
-                    }}
-                    className="max-w-[260px] bg-transparent text-sm font-black text-slate-900 focus:outline-none"
-                  >
-                    {!selectedSupervisor && <option value="">Select supervisor</option>}
-                    {payload?.filterOptions.supervisors.map((s) => {
-                      const item = supervisorDirectory.find((entry) => entry.value === s);
-                      return (
-                        <option key={s} value={s}>
-                          {item?.label || s}
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
+                <select
+                  value={selectedSupervisor}
+                  onChange={(e) => {
+                    setSelectedSupervisor(e.target.value);
+                    setSelectedEmployees([]);
+                    setQuery('');
+                  }}
+                  className="max-w-[260px] bg-transparent text-sm font-black text-slate-900 focus:outline-none"
+                >
+                  {!selectedSupervisor && <option value="">Select supervisor</option>}
+                  {payload?.filterOptions.supervisors.map((s) => {
+                    const item = supervisorDirectory.find((entry) => entry.value === s);
+                    return (
+                      <option key={s} value={s}>
+                        {item?.label || s}
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Location</p>
