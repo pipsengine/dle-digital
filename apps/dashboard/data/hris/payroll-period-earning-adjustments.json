@@ -62,5 +62,45 @@
     "amount": 9764.12,
     "taxable": false,
     "source": "May 2026 MGT7 payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "employeeId": "L1687",
+    "employeeCode": "L1687",
+    "code": "OVT",
+    "name": "Overtime",
+    "amount": 15000,
+    "taxable": true,
+    "source": "May 2026 lump-sum payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "employeeId": "L1687",
+    "employeeCode": "L1687",
+    "code": "REFUND",
+    "name": "Refund",
+    "amount": 2887.5,
+    "taxable": false,
+    "source": "May 2026 lump-sum payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "employeeId": "L1204",
+    "employeeCode": "L1204",
+    "code": "OVT",
+    "name": "Overtime",
+    "amount": 9000,
+    "taxable": true,
+    "source": "May 2026 lump-sum payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "employeeId": "L1204",
+    "employeeCode": "L1204",
+    "code": "REFUND",
+    "name": "Refund",
+    "amount": 1485,
+    "taxable": false,
+    "source": "May 2026 lump-sum payroll adjustment"
   }
 ]
