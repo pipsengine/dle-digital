@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
@@ -10,10 +10,12 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { navigationConfig, NavItem } from '../../lib/config/navigation';
+import { canAccessHrisPath, hrisRoutePermissionOptions, isHrPortalUser } from '@/lib/access/route-access';
 
 export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => void }) {
   const pathname = usePathname();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [sessionContext, setSessionContext] = useState({ roles: [] as string[], permissions: [] as string[], department: '', unit: '', isGlobalAdmin: false });
   const HRIS_BASE = '/hris';
   const currentPath = pathname.startsWith(HRIS_BASE) ? pathname.slice(HRIS_BASE.length) || '/' : pathname;
 
@@ -22,6 +24,41 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
     if (route.startsWith(HRIS_BASE)) return route;
     return `${HRIS_BASE}${route.startsWith('/') ? route : `/${route}`}`;
   };
+
+  useEffect(() => {
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        if (!json?.data) return;
+        setSessionContext({
+          roles: Array.isArray(json.data.roles) ? json.data.roles : [],
+          permissions: Array.isArray(json.data.permissions) ? json.data.permissions : [],
+          department: String(json.data.department || ''),
+          unit: String(json.data.unit || ''),
+          isGlobalAdmin: Boolean(json.data.isGlobalAdmin),
+        });
+      })
+      .catch(() => {
+        setSessionContext({ roles: [], permissions: [], department: '', unit: '', isGlobalAdmin: false });
+      });
+  }, []);
+
+  const visibleNavigation = useMemo(() => {
+    const canUseHrPortal = isHrPortalUser(sessionContext);
+    return navigationConfig
+      .map((item) => {
+        const subItems = item.subItems?.filter((sub) => {
+          const fullPath = toHref(sub.route);
+          const explicitOptions = hrisRoutePermissionOptions(fullPath);
+          if (!canUseHrPortal && !explicitOptions) return false;
+          return canAccessHrisPath(sessionContext, fullPath);
+        });
+        const itemPath = item.route ? toHref(item.route) : '';
+        const canSeeItem = subItems?.length || (itemPath && canAccessHrisPath(sessionContext, itemPath));
+        return canSeeItem ? { ...item, subItems } : null;
+      })
+      .filter(Boolean) as NavItem[];
+  }, [sessionContext]);
 
   const toggleGroup = (id: string) => {
     setExpandedGroups(prev => ({
@@ -139,9 +176,9 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
     );
   };
 
-  const mainItems = navigationConfig.filter(i => i.group === 'main');
-  const adminItems = navigationConfig.filter(i => i.group === 'administration');
-  const supportItems = navigationConfig.filter(i => i.group === 'support');
+  const mainItems = visibleNavigation.filter(i => i.group === 'main');
+  const adminItems = visibleNavigation.filter(i => i.group === 'administration');
+  const supportItems = visibleNavigation.filter(i => i.group === 'support');
 
   return (
     <motion.aside 

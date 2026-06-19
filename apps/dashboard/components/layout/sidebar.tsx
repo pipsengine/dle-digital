@@ -27,6 +27,10 @@ const requiredPermission = (route?: string) => {
   if (route.startsWith('/hris/administration/user-management')) return 'admin.users.view';
   if (route.startsWith('/hris/administration/roles-and-permissions')) return 'admin.roles.view';
   if (route.startsWith('/hris/administration/audit-trail')) return 'audit.view';
+  if (route.startsWith('/hris/workforce-management/timesheet-entry') || route.startsWith('/hris/time-and-logs/timesheet-entry')) return 'operations.timesheets.submit';
+  if (route.startsWith('/hris/workforce-management/timesheet-approval') || route.startsWith('/hris/time-and-logs/timesheet-approval')) return 'operations.timesheets.approve';
+  if (route.startsWith('/hris/workforce-management/timesheet-reports') || route.startsWith('/hris/time-and-logs/timesheet-reports')) return 'operations.timesheets.view';
+  if (route.startsWith('/hris/workforce-management/timesheet-period') || route.startsWith('/hris/time-and-logs/timesheet-period')) return 'timesheet.period.manage';
   if (route.startsWith('/hris/payroll')) return 'payroll.view';
   if (route.startsWith('/hris/employees')) return 'employees.view';
   if (route.startsWith('/hris/leave-management')) return 'leave.view';

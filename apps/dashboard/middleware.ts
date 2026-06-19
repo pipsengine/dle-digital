@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AUTH_COOKIE, isPublicPath, verifySessionToken } from '@/lib/auth/session';
+import { canAccessRoute } from '@/lib/access/route-access';
 
 const denied = (request: NextRequest, status = 403) => {
   if (request.nextUrl.pathname.startsWith('/api')) {
@@ -32,6 +33,10 @@ export async function middleware(request: NextRequest) {
     url.pathname = '/change-password';
     url.searchParams.set('next', pathname + request.nextUrl.search);
     return NextResponse.redirect(url);
+  }
+
+  if ((!pathname.startsWith('/api') || pathname.startsWith('/api/hris')) && !canAccessRoute(session, pathname)) {
+    return denied(request, 403);
   }
 
   const requestHeaders = new Headers(request.headers);
