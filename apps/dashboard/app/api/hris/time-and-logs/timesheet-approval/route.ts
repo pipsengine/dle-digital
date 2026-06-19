@@ -18,7 +18,9 @@ import {
 const ok = <T,>(data: T, status = 200) => NextResponse.json({ status: 'success', data }, { status });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 const round1 = (value: number) => Math.round(value * 10) / 10;
-const isSuperAdministrator = (role: string) => role === 'Super Administrator';
+const isSuperAdministrator = (role: string) => /\bsuper\b.*\badmin/i.test(role);
+const actorText = (value: string) => value.trim().toLowerCase();
+const textIncludesAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
 
 type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN';
 type ProjectApprovalStage = 'Project Manager' | 'Cost Control' | 'HR';
@@ -36,6 +38,51 @@ const nextActionLabel = (status: TimesheetStatus) => {
   if (status === 'Project_Manager_Reviewed') return 'Cost Control Approve';
   if (status === 'Cost_Control_Reviewed') return 'HR Acknowledge';
   return null;
+};
+
+const requireHeaderStageAccess = (
+  header: TimesheetHeader,
+  action: ApprovalAction,
+  actor: string,
+  role: string,
+) => {
+  if (isSuperAdministrator(role)) return;
+  const status = normalizeTimesheetStatus(header.status);
+  const combined = actorText(`${actor} ${role}`);
+  const supervisorText = actorText(header.supervisorName || header.supervisorId || '');
+
+  if (!['Submitted', 'Cost_Control_Reviewed'].includes(status)) {
+    throw new Error('This workflow stage requires project-level approval. Only the Super Administrator can approve all levels at once.');
+  }
+
+  if (status === 'Submitted') {
+    const isAssignedSupervisor = supervisorText && (supervisorText.includes(actorText(actor)) || actorText(actor).includes(supervisorText));
+    const isSupervisorRole = textIncludesAny(combined, ['supervisor', 'site lead', 'foreman']);
+    if (!isAssignedSupervisor && !isSupervisorRole) {
+      throw new Error('Only the assigned supervisor can complete supervisor review.');
+    }
+    return;
+  }
+
+  if (status === 'Cost_Control_Reviewed' && !textIncludesAny(combined, ['hr', 'human resources', 'payroll'])) {
+    throw new Error('Only HR or Payroll can acknowledge a fully approved timesheet for payroll.');
+  }
+
+  if ((action === 'REJECT' || action === 'RETURN') && status === 'Cost_Control_Reviewed' && !textIncludesAny(combined, ['hr', 'human resources', 'payroll'])) {
+    throw new Error('Only HR or Payroll can return or reject at HR acknowledgement stage.');
+  }
+};
+
+const requireProjectStageAccess = (
+  stage: ProjectApprovalStage,
+  actor: string,
+  role: string,
+) => {
+  if (isSuperAdministrator(role)) return;
+  const combined = actorText(`${actor} ${role}`);
+  if (stage === 'Cost Control' && !textIncludesAny(combined, ['cost control', 'cost controller', 'cost', 'finance'])) {
+    throw new Error('Only Cost Control can approve cost-control project allocations.');
+  }
 };
 
 const workflowSteps = (header: TimesheetHeader) => {
@@ -156,7 +203,12 @@ export async function PATCH(request: Request) {
       return err(400, 'Action must be APPROVE, REJECT, or RETURN.');
     }
 
+    const { headers } = await readTimesheetData();
+    const header = headers.find((item) => item.id === payload.headerId);
+    if (!header) return err(404, 'Timesheet header not found.');
+
     if (payload.projectCode && payload.stage && payload.stage !== 'HR') {
+      requireProjectStageAccess(payload.stage, access.actor, access.role);
       await advanceProjectTimesheetApproval(payload.headerId, payload.action, access.actor, {
         projectCode: payload.projectCode,
         stage: payload.stage,
@@ -164,6 +216,7 @@ export async function PATCH(request: Request) {
         bypassAssigneeCheck: isSuperAdministrator(access.role),
       });
     } else {
+      requireHeaderStageAccess(header, payload.action, access.actor, access.role);
       await advanceTimesheetWorkflow(payload.headerId, payload.action, access.actor, payload.comment);
     }
     return ok(await buildPayload(request));

@@ -245,6 +245,7 @@ export default function TimesheetApprovalClient() {
                 {filteredTimesheets.map((item) => {
                   const awaitingAction = ['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status);
                   const canHeaderApprove = item.status === 'Submitted' || item.status === 'Cost_Control_Reviewed' || Boolean(payload?.permissions.canApproveAllLevels);
+                  const entryHref = `/hris/time-and-logs/timesheet-entry?headerId=${encodeURIComponent(item.id)}&date=${encodeURIComponent(item.timesheetDate)}&supervisorId=${encodeURIComponent(item.supervisorName)}&workCenterName=${encodeURIComponent(item.workCenterName)}`;
                   const approveLabel = item.status === 'Submitted' ? 'Supervisor Review' : item.status === 'Cost_Control_Reviewed' ? 'Acknowledge' : 'Approve';
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/70">
@@ -315,8 +316,8 @@ export default function TimesheetApprovalClient() {
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex items-center justify-end gap-2">
-                          <Link href={`/hris/time-and-logs/timesheet-entry?date=${item.timesheetDate}&supervisorId=${item.supervisorName}&workCenterName=${item.workCenterName}`} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-slate-800">
-                            Review <ArrowRight className="h-3.5 w-3.5" />
+                          <Link href={entryHref} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-slate-800">
+                            {item.payrollReady ? 'View' : 'Review'} <ArrowRight className="h-3.5 w-3.5" />
                           </Link>
                           {awaitingAction && (
                             <>

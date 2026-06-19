@@ -292,6 +292,9 @@ const err = (status: number, error: string) => NextResponse.json({ status: 'erro
 const round1 = (value: number) => Math.round(value * 10) / 10;
 const GROSS_TIMESHEET_HOURS = STANDARD_TIMESHEET_HOURS + DAILY_BREAK_HOURS;
 const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const isSuperAdministrator = (role: string) => /\bsuper\b.*\badmin/i.test(role);
+const lowerText = (value: unknown) => String(value ?? '').trim().toLowerCase();
+const includesAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
 const tokenFrom = (request: Request) => request.headers.get('cookie')?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${AUTH_COOKIE}=`))?.split('=').slice(1).join('=');
 const sessionFrom = (request: Request) => verifySessionToken(tokenFrom(request) ? decodeURIComponent(tokenFrom(request) || '') : '');
 const matchKey = (value: unknown) => {
@@ -723,7 +726,7 @@ const todayDateInputValue = () => {
   return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 };
 
-const buildPayload = async (request: Request, date?: string, supervisorId?: string, workCenterName?: string, locationName?: string, mode?: 'supervisor'): Promise<TimesheetPayload> => {
+const buildPayload = async (request: Request, date?: string, supervisorId?: string, workCenterName?: string, locationName?: string, mode?: 'supervisor', requestedHeaderId?: string): Promise<TimesheetPayload> => {
   const access = resolveAccessContext(request);
   const uiPermissions = getUiPermissions(access);
   const session = await sessionFrom(request);
@@ -743,10 +746,11 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const supervisorIndex = buildSupervisorIndex(activeEmployees);
   const projectManagers = await buildProjectManagerOptions(activeEmployees);
 
-  const targetDate = date || todayDateInputValue();
+  const requestedHeader = requestedHeaderId ? headers.find((item) => item.id === requestedHeaderId) : null;
+  const targetDate = requestedHeader?.timesheetDate || date || todayDateInputValue();
   if (supervisorMode && !session) throw new Error('Authenticated supervisor session is required.');
-  let requestedSupervisor = clean(supervisorId);
-  let targetWorkCenter = clean(workCenterName);
+  let requestedSupervisor = clean(requestedHeader?.supervisorId || supervisorId);
+  let targetWorkCenter = clean(requestedHeader?.workCenterName || workCenterName);
   let targetLocation = clean(locationName);
   const period = await readTimesheetPeriod(new Date(targetDate));
   const recordSupervisors = Array.from(new Set(timesheetRecords.map((record) => record.supervisor).map(clean).filter(Boolean)));
@@ -834,6 +838,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   }));
 
   let header =
+    requestedHeader ||
     (targetWorkCenter
       ? headers.find((h) => h.timesheetDate === targetDate && canonicalSupervisorValue(h.supervisorId, supervisorIndex) === targetSupervisor && h.workCenterName === targetWorkCenter)
       : headers.find((h) => h.timesheetDate === targetDate && canonicalSupervisorValue(h.supervisorId, supervisorIndex) === targetSupervisor)) ||
@@ -843,10 +848,10 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     selectedEmployeeKeys.size > 0
       ? matchKeys(line.employeeNo, line.employeeId, line.employeeName).some((key) => selectedEmployeeKeys.has(key))
       : !supervisorMode;
-  const headerId = header?.id;
-  let lines = headerId
+  const selectedHeaderId = header?.id;
+  let lines = selectedHeaderId
     ? allLines
-        .filter((l) => l.headerId === headerId)
+        .filter((l) => l.headerId === selectedHeaderId)
         .map(normalizeLineForGrossDay)
         .filter(lineBelongsToSelectedCrew)
     : [];
@@ -984,14 +989,35 @@ const requireEditableTimesheet = (header: TimesheetHeader) => {
   }
 };
 
+const requireApprovalActionAccess = (header: TimesheetHeader, actor: string, role: string) => {
+  if (isSuperAdministrator(role)) return;
+  const status = normalizeTimesheetStatus(header.status);
+  const combined = lowerText(`${actor} ${role}`);
+  if (!['Submitted', 'Cost_Control_Reviewed'].includes(status)) {
+    throw new Error('This workflow stage requires project-level approval. Only the Super Administrator can approve all levels at once.');
+  }
+  if (status === 'Submitted') {
+    const supervisorText = lowerText(header.supervisorName || header.supervisorId);
+    const actorValue = lowerText(actor);
+    const isAssignedSupervisor = supervisorText && (supervisorText.includes(actorValue) || actorValue.includes(supervisorText));
+    if (!isAssignedSupervisor && !includesAny(combined, ['supervisor', 'site lead', 'foreman'])) {
+      throw new Error('Only the assigned supervisor can complete supervisor review.');
+    }
+  }
+  if (status === 'Cost_Control_Reviewed' && !includesAny(combined, ['hr', 'human resources', 'payroll'])) {
+    throw new Error('Only HR or Payroll can acknowledge a fully approved timesheet for payroll.');
+  }
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const headerId = searchParams.get('headerId') || undefined;
   const date = searchParams.get('date') || undefined;
   const supervisorId = searchParams.get('supervisorId') || undefined;
   const locationName = searchParams.get('locationName') || undefined;
   const workCenterName = searchParams.get('workCenterName') || undefined;
   const mode = searchParams.get('mode') === 'supervisor' ? 'supervisor' : undefined;
-  return ok(await buildPayload(request, date, supervisorId, workCenterName, locationName, mode));
+  return ok(await buildPayload(request, date, supervisorId, workCenterName, locationName, mode, headerId));
 }
 
 export async function PATCH(request: Request) {
@@ -1160,11 +1186,16 @@ export async function PATCH(request: Request) {
       if (!headerId) return err(400, 'Header ID is required.');
       const header = headers.find(h => h.id === headerId);
       if (!header) return err(404, 'Timesheet header not found.');
+      const uiPermissions = getUiPermissions(access);
+      if (!uiPermissions.canApproveTimesheet) {
+        return err(403, 'You do not have permission to approve timesheets.');
+      }
+      requireApprovalActionAccess(header, actor, uiPermissions.role);
 
       if (action === 'APPROVE') {
-        await advanceTimesheetWorkflow(header.id, 'APPROVE', access.actor, payload.reviewerNote);
+        await advanceTimesheetWorkflow(header.id, 'APPROVE', actor, payload.reviewerNote);
       } else {
-        await advanceTimesheetWorkflow(header.id, 'REJECT', access.actor, payload.reviewerNote);
+        await advanceTimesheetWorkflow(header.id, 'REJECT', actor, payload.reviewerNote);
       }
 
       return ok(await buildPayload(request, header.timesheetDate, header.supervisorId, header.workCenterName, locationName, mode));

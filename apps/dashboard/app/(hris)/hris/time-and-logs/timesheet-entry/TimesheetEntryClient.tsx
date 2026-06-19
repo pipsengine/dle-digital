@@ -1666,7 +1666,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               <p className="text-xs font-semibold text-slate-500">Submitting places this timesheet in supervisor review. You can keep correcting it until it is approved and released to the project manager.</p>
               <div className="flex items-center gap-3">
                 <button onClick={() => setShowSubmitReview(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50">Back to Edit</button>
-                <button onClick={() => handleSave(true)} disabled={submitting || reviewErrorCount > 0 || reviewLineCount === 0} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-700 disabled:opacity-50">
+                <button onClick={() => handleSave(true)} disabled={submitting || !canEditTimesheet || reviewErrorCount > 0 || reviewLineCount === 0} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-700 disabled:opacity-50">
                   {submitting ? 'Submitting...' : 'Submit Timesheet'}
                 </button>
               </div>

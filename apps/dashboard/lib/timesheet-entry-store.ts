@@ -2078,6 +2078,7 @@ export function buildProjectTimesheetApprovals(header: TimesheetHeader, lines: T
   }
 
   const history = header.workflowHistory || [];
+  const normalizedHeaderStatus = normalizeTimesheetStatus(header.status);
   for (const item of byProject.values()) {
     const pmRejected = history.some((event) => eventMatchesProject(event, 'Project Manager', item.projectCode, ['Rejected']));
     const pmReturned = history.some((event) => eventMatchesProject(event, 'Project Manager', item.projectCode, ['Returned']));
@@ -2085,8 +2086,10 @@ export function buildProjectTimesheetApprovals(header: TimesheetHeader, lines: T
     const ccRejected = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Rejected']));
     const ccReturned = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Returned']));
     const ccApproved = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Approved']));
-    item.projectManagerStatus = pmRejected ? 'Rejected' : pmReturned ? 'Returned' : pmApproved ? 'Approved' : 'Pending';
-    item.costControlStatus = ccRejected ? 'Rejected' : ccReturned ? 'Returned' : ccApproved ? 'Approved' : 'Pending';
+    const headerPmComplete = ['Project_Manager_Reviewed', 'Cost_Control_Reviewed', 'HR_Acknowledged', 'Locked'].includes(normalizedHeaderStatus);
+    const headerCostComplete = ['Cost_Control_Reviewed', 'HR_Acknowledged', 'Locked'].includes(normalizedHeaderStatus);
+    item.projectManagerStatus = pmRejected ? 'Rejected' : pmReturned ? 'Returned' : pmApproved || headerPmComplete ? 'Approved' : 'Pending';
+    item.costControlStatus = ccRejected ? 'Rejected' : ccReturned ? 'Returned' : ccApproved || headerCostComplete ? 'Approved' : 'Pending';
   }
 
   const actorText = String(actor || '').trim().toLowerCase();
@@ -2122,7 +2125,7 @@ export async function advanceProjectTimesheetApproval(
   const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
   const target = projectApprovals.find((item) => item.projectCode.toLowerCase() === options.projectCode.toLowerCase());
   if (!target) throw new Error(`Project ${options.projectCode} was not found on this timesheet.`);
-  if (!options.bypassAssigneeCheck && options.stage === 'Project Manager' && target.projectManager && target.projectManager !== 'Unassigned' && !target.projectManager.toLowerCase().includes(actor.toLowerCase()) && !['cost control', 'hr', 'payroll', 'system', 'admin'].some((term) => actor.toLowerCase().includes(term))) {
+  if (!options.bypassAssigneeCheck && options.stage === 'Project Manager' && target.projectManager && target.projectManager !== 'Unassigned' && !target.projectManager.toLowerCase().includes(actor.toLowerCase())) {
     throw new Error(`Only ${target.projectManager} can approve project ${target.projectCode}.`);
   }
 
