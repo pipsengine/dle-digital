@@ -545,7 +545,7 @@ export const calculatePermanentUnionDues = (employee: DleEmployeeDirectoryRow) =
       amount: roundMoney(earnings.basicPay * 0.03),
     };
   }
-  if (['senior-permanent', 'management-permanent', 'management-cola-permanent', 'senior-management-permanent'].includes(earnings.profileId)) {
+  if (earnings.profileId === 'senior-permanent') {
     const duesBasis = monthlyGrossFromEmployee(employee) || earnings.grossPay;
     return {
       code: 'SNR_UNION_DUES',

@@ -125,6 +125,7 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
   const profileId = input.employee ? resolvePayrollEarningProfile(input.employee) : 'fallback';
   if (!appliesToEmployee(component, input)) return 0;
   if ((component.id === 'pension' || component.id === 'nhf') && String(profileId).startsWith('contract-')) return 0;
+  if (component.id === 'nhf' && input.employee && calculatePermanentUnionDues(input.employee).amount > 0) return 0;
   if (component.id === 'union-dues' && input.employee) return calculatePermanentUnionDues(input.employee).amount * 12;
   const monthlyBasic = Math.max(0, Number(input.monthlyBasicPay || 0));
   const monthlyBase = Math.max(0, Number(input.monthlyBasePay || 0));

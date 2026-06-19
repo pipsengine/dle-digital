@@ -12,7 +12,7 @@
       "effectiveTo": null,
       "currency": "NGN",
       "basis": "Taxable earnings for PAYE; Basic, Housing and Transport (BHT) for pension",
-      "notes": "DLE Sage 300 payroll basis from FDD: PAYE is charged on taxable earnings using the Nigeria Tax Act 2025 bands after pension, NHF, and annual rent relief are removed; employee pension is 8% of BHT; NHF is 2.5% of Basic where applicable; annual rent relief is capped at NGN 500,000; other deductions must be configured per employee/payroll run.",
+      "notes": "DLE Sage 300 payroll basis from FDD: PAYE is charged on taxable earnings using the Nigeria Tax Act 2025 bands after pension, applicable NHF, and annual rent relief are removed; employee pension is 8% of BHT; NHF is 2.5% of Basic where applicable; senior union dues are deducted after tax and are not PAYE relief; annual rent relief is capped at NGN 500,000; other deductions must be configured per employee/payroll run.",
       "taxBands": [
         {
           "id": "band-001",
@@ -137,11 +137,11 @@
         {
           "id": "union-dues",
           "label": "Union Dues",
-          "enabled": false,
+          "enabled": true,
           "preTax": false,
           "calculationBasis": "percent_of_monthly_base_annualized",
           "rate": 0.005,
-          "monthlyCap": 5000,
+          "monthlyCap": null,
           "appliesTo": [
             "Permanent",
             "Contract",
