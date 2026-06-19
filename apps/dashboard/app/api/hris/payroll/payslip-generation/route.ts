@@ -12,7 +12,7 @@ import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-stor
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
-import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
+import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayslipStatus = 'Ready' | 'Review' | 'Blocked';
@@ -255,6 +255,7 @@ const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: Pay
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
+  await syncPayslipIdentitiesFromSage({ migratedBy: 'Payslip Generation' }).catch(() => undefined);
   const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches, dailyAttendanceByKey, identityByKey] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),

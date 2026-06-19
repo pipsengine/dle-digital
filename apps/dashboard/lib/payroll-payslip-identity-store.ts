@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { SagePayrollEmployee } from '@/lib/sage-people-payroll-store';
+import { readActiveSagePayrollEmployees } from '@/lib/sage-people-payroll-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 
 export type PayslipEmployeeIdentity = {
@@ -34,6 +35,19 @@ export type PayslipEmployeeIdentity = {
 };
 
 const compact = (value: unknown) => String(value || '').trim();
+const firstValue = (...values: unknown[]) => values.map(compact).find(Boolean) || '';
+const jsonObject = (raw: string | null | undefined) => {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+};
+const jsonValue = (raw: string | null | undefined, keys: string[]) => {
+  const data = jsonObject(raw);
+  return keys.map((key) => compact(data[key])).find(Boolean) || '';
+};
 
 const resolveDashboardRoot = () => {
   const cwd = process.cwd();
@@ -60,21 +74,11 @@ const IDENTITY_PATHS = [
 ].filter(Boolean);
 
 const pensionProviderFromSage = (employee: SagePayrollEmployee) => {
-  try {
-    const data = JSON.parse(employee.sageEmployeeDetailJson || '{}') as Record<string, unknown>;
-    return compact(data.PensionFundAdministrator || data.PensionFundAdmin || data.PensionProvider || data.PFA || data.PFADescription || data.RetirementFundName || data.PensionAdministrator);
-  } catch {
-    return '';
-  }
+  return jsonValue(employee.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName', 'PensionAdministrator']);
 };
 
 const pensionPinFromSage = (employee: SagePayrollEmployee) => {
-  try {
-    const data = JSON.parse(employee.sageEmployeeDetailJson || '{}') as Record<string, unknown>;
-    return compact(data.PensionNo || data.PensionNumber || data.PensionPIN || data.PFANumber || data.PfaNumber || data.RSAPIN || data.RsaPin || data.RetirementSavingsAccountNo);
-  } catch {
-    return '';
-  }
+  return jsonValue(employee.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'PfaNumber', 'RSAPIN', 'RsaPin', 'RetirementSavingsAccountNo']);
 };
 
 export const payslipIdentityFromSage = (employee: SagePayrollEmployee, options?: { employeeId?: string; migratedBy?: string }): PayslipEmployeeIdentity => ({
@@ -91,12 +95,12 @@ export const payslipIdentityFromSage = (employee: SagePayrollEmployee, options?:
   payCurrency: compact(employee.companyCurrency || 'NGN'),
   paymentRun: compact(employee.paymentRunLong || employee.paymentRunShort),
   paymentType: compact(employee.paymentType),
-  bankName: compact(employee.bankName),
-  bankCode: compact(employee.bankCode),
-  branchName: compact(employee.branchName),
-  branchCode: compact(employee.branchCode),
-  accountNo: compact(employee.accountNo),
-  accountName: compact(employee.accountName),
+  bankName: firstValue(employee.bankName, jsonValue(employee.sageEmployeeDetailJson, ['BankName', 'Bank', 'EmployeeBankName', 'PaymentBankName'])),
+  bankCode: firstValue(employee.bankCode, jsonValue(employee.sageEmployeeDetailJson, ['BankCode', 'EmployeeBankCode', 'PaymentBankCode'])),
+  branchName: firstValue(employee.branchName, jsonValue(employee.sageEmployeeDetailJson, ['BranchName', 'BankBranchName', 'EmployeeBranchName'])),
+  branchCode: firstValue(employee.branchCode, jsonValue(employee.sageEmployeeDetailJson, ['BranchCode', 'BankBranchCode', 'SortCode', 'SortCodeNo'])),
+  accountNo: firstValue(employee.accountNo, jsonValue(employee.sageEmployeeDetailJson, ['AccountNo', 'AccountNumber', 'BankAccountNo', 'BankAccountNumber', 'EmployeeAccountNo', 'PaymentAccountNo'])),
+  accountName: firstValue(employee.accountName, jsonValue(employee.sageEmployeeDetailJson, ['AccountName', 'BankAccountName', 'EmployeeAccountName', 'PaymentAccountName'])),
   accountTypeId: employee.accountTypeId ?? null,
   pensionProvider: pensionProviderFromSage(employee),
   pensionPin: pensionPinFromSage(employee),
@@ -105,6 +109,8 @@ export const payslipIdentityFromSage = (employee: SagePayrollEmployee, options?:
   migratedBy: compact(options?.migratedBy),
   sourceSystem: 'Sage Payroll',
 });
+
+export const hasPayslipBankIdentity = (identity: PayslipEmployeeIdentity) => Boolean(compact(identity.bankName) || compact(identity.accountNo) || compact(identity.accountName));
 
 export const readPayslipEmployeeIdentities = async (): Promise<PayslipEmployeeIdentity[]> => {
   for (const identityPath of IDENTITY_PATHS) {
@@ -128,6 +134,16 @@ export const payslipIdentityMap = async () => {
       .forEach((key) => map.set(key, identity));
   });
   return map;
+};
+
+export const syncPayslipIdentitiesFromSage = async (options?: { force?: boolean; migratedBy?: string }) => {
+  const current = await readPayslipEmployeeIdentities();
+  if (!options?.force && current.some(hasPayslipBankIdentity)) return { synced: 0, skipped: true };
+  const sageEmployees = await readActiveSagePayrollEmployees();
+  const identities = sageEmployees.map((employee) => payslipIdentityFromSage(employee, { migratedBy: options?.migratedBy || 'Payslip identity sync' }));
+  const bankIdentities = identities.filter(hasPayslipBankIdentity);
+  await writePayslipEmployeeIdentities(identities);
+  return { synced: identities.length, bankIdentities: bankIdentities.length, skipped: false };
 };
 
 export const writePayslipEmployeeIdentities = async (records: PayslipEmployeeIdentity[]) => {
