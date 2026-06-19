@@ -12,6 +12,7 @@ import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-stor
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
+import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayslipStatus = 'Ready' | 'Review' | 'Blocked';
@@ -179,6 +180,13 @@ const dailyAttendanceForEmployee = (employee: DleEmployeeDirectoryRow, byKey: Ma
     .map((key) => byKey.get(key))
     .find(Boolean) || emptyDailyAttendance();
 
+const maskAccount = (value: unknown) => {
+  const raw = compact(value);
+  if (!raw) return 'Not configured';
+  const visible = raw.slice(-4);
+  return `${'*'.repeat(Math.max(4, raw.length - 4))}${visible}`;
+};
+
 const contractDayRatePayrollResult = (input: {
   ratePerDay: number;
   daysWorked: number;
@@ -247,7 +255,7 @@ const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: Pay
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches, dailyAttendanceByKey] = await Promise.all([
+  const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches, dailyAttendanceByKey, identityByKey] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
     readPayrollPensionConfig(),
@@ -256,6 +264,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     readPayrollLoanApplications(),
     readBatches(),
     buildDailyAttendanceByKey(requestedPeriod),
+    payslipIdentityMap(),
   ]);
   const taxVersion = activeTaxVersion(taxConfig);
   const pensionVersion = activePensionVersion(pensionConfig);
@@ -272,6 +281,10 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     return map;
   }, new Map<string, ReturnType<typeof loanInputsFromApplications>>());
   const payslips = employeeSource.employees.map((employee) => {
+    const identity = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId]
+      .map(normalizePayrollMatchKey)
+      .map((key) => identityByKey.get(key))
+      .find(Boolean);
     const standardOptions = { period: requestedPeriod, includePeriodAdjustments: true };
     const standardAmounts = calculatePayrollEarnings(employee, standardOptions);
     const dailyRateEmployee = isDailyRateEmployee(employee, standardAmounts.profileId);
@@ -322,13 +335,13 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       payslipId: `PS-${requestedPeriod}-${employee.employeeId}`,
       employeeId: employee.employeeId,
       employeeCode: employee.employeeCode,
-      fullName: employee.fullName,
-      jobTitle: employee.jobTitle,
-      department: employee.department,
-      businessUnit: employee.businessUnit,
-      location: employee.location,
-      payrollGroup: employee.payrollGroup || 'Unassigned',
-      salaryGrade: dailyRateEmployee ? (ratePerDay > 0 ? 'Daily Rate' : 'Rate Missing') : employee.salaryGrade || employee.jobGrade || 'Unassigned',
+      fullName: employee.fullName || identity?.fullName || employee.employeeId,
+      jobTitle: employee.jobTitle || identity?.jobTitle || '',
+      department: employee.department || identity?.department || '',
+      businessUnit: employee.businessUnit || identity?.businessUnit || '',
+      location: employee.location || identity?.location || '',
+      payrollGroup: employee.payrollGroup || identity?.payrollGroup || 'Unassigned',
+      salaryGrade: dailyRateEmployee ? (ratePerDay > 0 ? 'Daily Rate' : 'Rate Missing') : employee.salaryGrade || employee.jobGrade || identity?.salaryGrade || 'Unassigned',
       isDailyRate: dailyRateEmployee,
       payBasis: dailyRateEmployee ? 'Daily Rate' : 'Monthly Salary',
       ratePerDay: ratePerDay || null,
@@ -338,10 +351,15 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       attendanceHours: dailyRateEmployee ? roundMoney(dailyAttendance.attendanceHours) : null,
       bookedHours: dailyRateEmployee ? roundMoney(dailyAttendance.bookedHours) : null,
       idleHours: dailyRateEmployee ? roundMoney(dailyAttendance.idleHours) : null,
-      payCurrency: employee.payCurrency || 'NGN',
-      paymentRun: employee.paymentRun || 'Monthly',
-      bankName: 'Configured in payroll bank setup',
-      maskedAccount: '**** ****',
+      payCurrency: identity?.payCurrency || employee.payCurrency || 'NGN',
+      paymentRun: identity?.paymentRun || employee.paymentRun || 'Monthly',
+      paymentType: identity?.paymentType || employee.paymentType || '',
+      bankName: identity?.bankName || employee.bankName || 'Not configured',
+      accountName: identity?.accountName || employee.accountName || '',
+      maskedAccount: maskAccount(identity?.accountNo || employee.accountNo),
+      taxIdentificationNumber: identity?.taxIdentificationNumber || employee.taxIdentificationNumber || '',
+      pensionProvider: identity?.pensionProvider || employee.pensionProvider || '',
+      pensionPinMasked: maskAccount(identity?.pensionPin || employee.pensionPin),
       period: requestedPeriod,
       periodLabel: periodLabel(requestedPeriod),
       payPeriodStart: periodStartDate(requestedPeriod),

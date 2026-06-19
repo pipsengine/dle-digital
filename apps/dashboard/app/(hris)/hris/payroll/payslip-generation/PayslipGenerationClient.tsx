@@ -32,8 +32,13 @@ type Payslip = {
   idleHours?: number | null;
   payCurrency: string;
   paymentRun: string;
+  paymentType?: string;
   bankName: string;
+  accountName?: string;
   maskedAccount: string;
+  taxIdentificationNumber?: string;
+  pensionProvider?: string;
+  pensionPinMasked?: string;
   period: string;
   periodLabel: string;
   payPeriodStart?: string;
@@ -142,7 +147,8 @@ function PayslipLineTable({
 }) {
   const visible = lines.filter((line) => Number(line.amount || 0) !== 0);
   const rows: Array<{ code?: string; label: string; units?: number; taxable?: boolean; amount: number | null }> =
-    visible.length ? visible : [{ label: 'No items', units: 0, amount: 0 }];
+    visible.length ? visible.slice(0, 12) : [{ label: 'No items', units: 0, amount: 0 }];
+  const hiddenRows = Math.max(0, visible.length - rows.length);
   return (
     <div className="overflow-hidden rounded-none border border-[#2f67b1] bg-white">
       <div className="border-b border-[#2f67b1] bg-slate-50 px-3 py-1 text-center text-[11px] font-black uppercase text-slate-500">{title}</div>
@@ -167,6 +173,11 @@ function PayslipLineTable({
               <td className={`px-2 py-1 text-right font-black ${amountTone}`}>{money2(line.amount, canViewMoney)}</td>
             </tr>
           ))}
+          {hiddenRows > 0 ? (
+            <tr className="border-b border-[#cbdcf2]">
+              <td colSpan={4} className="px-2 py-1 text-center text-[10px] font-bold text-slate-500">{hiddenRows} additional lines included in total.</td>
+            </tr>
+          ) : null}
         </tbody>
         <tfoot>
           <tr className="bg-blue-50">
@@ -184,11 +195,11 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6 lg:p-8 print:border-0 print:bg-white print:p-0">
       <div id="payslip-print-area" className="mx-auto w-full max-w-[980px] overflow-hidden rounded-none border border-[#2f67b1] bg-white shadow-sm print:max-w-none print:border-[#2f67b1] print:shadow-none">
-        <div className="border-b border-[#2f67b1] bg-white px-5 py-5">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="border-b border-[#2f67b1] bg-white px-5 py-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-4">
-              <div className="relative h-16 w-52 shrink-0 bg-white">
-                <Image src={payload.company.logoUrl} alt={payload.company.name} fill sizes="208px" className="object-contain" />
+              <div className="relative h-14 w-44 shrink-0 bg-white">
+                <Image src={payload.company.logoUrl} alt={payload.company.name} fill sizes="176px" className="object-contain" />
               </div>
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-slate-950">{payload.company.name}</h2>
@@ -196,9 +207,9 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
                 <p className="mt-1 text-xs font-bold text-slate-700">{payload.company.website} | {payload.company.email}</p>
               </div>
             </div>
-            <div className="border border-[#9bb9df] bg-blue-50 px-5 py-4 text-left sm:text-right">
+            <div className="border border-[#9bb9df] bg-blue-50 px-4 py-3 text-left sm:text-right">
               <p className="text-xs font-black uppercase tracking-normal text-blue-700">{payslipTitle}</p>
-              <p className="mt-1 text-2xl font-black text-slate-950">{slip.periodLabel}</p>
+              <p className="mt-1 text-xl font-black text-slate-950">{slip.periodLabel}</p>
               <p className="mt-1 text-xs font-semibold text-slate-500">{slip.payslipId}</p>
             </div>
           </div>
@@ -219,11 +230,11 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
           </div>
         </div>
 
-        <div className="px-5 py-4">
+        <div className="px-5 py-3">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
-            <div className="border border-[#2f67b1] bg-white p-4">
-              <p className="border-b border-[#9bb9df] pb-2 text-xs font-black uppercase tracking-normal text-[#123f82]">Employee Information</p>
-              <div className="mt-4 grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
+            <div className="border border-[#2f67b1] bg-white p-3">
+              <p className="border-b border-[#9bb9df] pb-1.5 text-xs font-black uppercase tracking-normal text-[#123f82]">Employee Information</p>
+              <div className="mt-3 grid grid-cols-1 gap-x-5 gap-y-2 sm:grid-cols-2">
                 {[
                   ['Employee', `${slip.fullName} (${slip.employeeId})`],
                   ['Job Title', slip.jobTitle || 'Not assigned'],
@@ -232,27 +243,30 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
                   ['Location', slip.location],
                   ['Grade / Group', `${slip.salaryGrade} / ${slip.payrollGroup}`],
                   ['Pay Basis', slip.payBasis || (slip.isDailyRate ? 'Daily Rate' : 'Monthly Salary')],
-                  ['Payment Run', slip.paymentRun],
+                  ['Payment', `${slip.paymentRun}${slip.paymentType ? ` / ${slip.paymentType}` : ''}`],
                   ['Bank', `${slip.bankName} ${slip.maskedAccount}`],
+                  ['Account Name', slip.accountName || 'Not configured'],
+                  ['Tax / PAYE No.', slip.taxIdentificationNumber || 'Not configured'],
+                  ['Pension', slip.pensionProvider ? `${slip.pensionProvider} ${slip.pensionPinMasked || ''}` : 'Not configured'],
                 ].map(([label, value]) => (
                   <div key={label}>
                     <p className="text-[11px] font-black uppercase text-slate-400">{label}</p>
-                    <p className="mt-1 text-sm font-bold leading-5 text-slate-900">{value}</p>
+                    <p className="mt-0.5 text-xs font-bold leading-4 text-slate-900">{value}</p>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="flex flex-col justify-between border border-emerald-200 bg-emerald-50 p-5">
+            <div className="flex flex-col justify-between border border-emerald-200 bg-emerald-50 p-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-normal text-emerald-700">Net Pay</p>
-                <p className="mt-4 text-3xl font-black text-emerald-950">{money2(slip.netPay, canViewMoney)}</p>
+                <p className="mt-3 text-2xl font-black text-emerald-950">{money2(slip.netPay, canViewMoney)}</p>
                 <p className="mt-2 text-xs font-semibold text-emerald-700">Delivery: {slip.deliveryStatus}</p>
               </div>
               <span className={`mt-4 inline-flex w-fit rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(slip.status)].chip}`}>{slip.status}</span>
             </div>
           </div>
           {slip.isDailyRate ? (
-            <div className="mt-4 grid grid-cols-2 gap-3 border border-cyan-200 bg-cyan-50 p-4 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="mt-3 grid grid-cols-2 gap-2 border border-cyan-200 bg-cyan-50 p-3 sm:grid-cols-3 lg:grid-cols-6">
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Daily Rate</p>
                 <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerDay, canViewMoney)}</p>
@@ -281,24 +295,24 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
           ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 px-5 pb-5 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 px-5 pb-3 lg:grid-cols-2">
           <PayslipLineTable title="Earnings" lines={slip.earnings} totalLabel="Total Earnings" total={slip.grossPay} canViewMoney={canViewMoney} />
           <PayslipLineTable title="Deductions" lines={slip.deductions} totalLabel="Total Deductions" total={slip.totalDeductions} canViewMoney={canViewMoney} amountTone="text-red-700" />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 px-5 pb-5 lg:grid-cols-2">
-          <div className="border border-[#2f67b1] p-4">
+        <div className="grid grid-cols-1 gap-3 px-5 pb-4 lg:grid-cols-2">
+          <div className="border border-[#2f67b1] p-3">
             <p className="text-xs font-black uppercase tracking-normal text-slate-500">Year To Date</p>
-            <div className="mt-4 grid grid-cols-3 gap-3">
-              <div className="bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">Gross</p><p className="mt-1 font-black text-slate-950">{money2(slip.ytdGross, canViewMoney)}</p></div>
-              <div className="bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">PAYE</p><p className="mt-1 font-black text-red-700">{money2(slip.ytdPaye, canViewMoney)}</p></div>
-              <div className="bg-slate-50 p-3"><p className="text-[10px] font-black uppercase text-slate-500">Net</p><p className="mt-1 font-black text-emerald-700">{money2(slip.ytdNet, canViewMoney)}</p></div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">Gross</p><p className="mt-1 text-xs font-black text-slate-950">{money2(slip.ytdGross, canViewMoney)}</p></div>
+              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">PAYE</p><p className="mt-1 text-xs font-black text-red-700">{money2(slip.ytdPaye, canViewMoney)}</p></div>
+              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">Net</p><p className="mt-1 text-xs font-black text-emerald-700">{money2(slip.ytdNet, canViewMoney)}</p></div>
             </div>
           </div>
           <PayslipLineTable title="Employer Contributions" lines={slip.employerContributions} totalLabel="Total Company Contributions" total={slip.employerContributions.reduce((sum, line) => sum + Number(line.amount || 0), 0)} canViewMoney={canViewMoney} />
         </div>
 
-        <div className="border-t border-[#2f67b1] bg-slate-50 px-5 py-4 text-center text-xs font-semibold leading-5 text-slate-500">
+        <div className="border-t border-[#2f67b1] bg-slate-50 px-5 py-3 text-center text-[11px] font-semibold leading-4 text-slate-500">
           This is a computer-generated payslip. For questions, contact {payload.company.email}. Generated from DLE HRIS payroll records.
         </div>
       </div>
@@ -381,12 +395,29 @@ export default function PayslipGenerationClient({ initialNow }: { initialNow: st
   return (
     <div className="min-h-screen bg-white">
       <style jsx global>{`
-        @page { size: A4; margin: 14mm; }
+        @page { size: A4 portrait; margin: 6mm; }
         @media print {
-          html, body { background: white !important; }
+          html, body { width: 210mm; min-height: 297mm; overflow: hidden; background: white !important; }
           body * { visibility: hidden; }
           #payslip-print-area, #payslip-print-area * { visibility: visible; }
-          #payslip-print-area { position: absolute; left: 0; right: 0; top: 0; width: 100%; margin: 0 auto; }
+          #payslip-print-area {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 198mm !important;
+            max-width: 198mm !important;
+            margin: 0 !important;
+            transform: scale(0.82);
+            transform-origin: top left;
+            page-break-after: avoid;
+            break-after: avoid;
+          }
+          #payslip-print-area * {
+            font-size-adjust: none;
+            line-height: 1.15 !important;
+          }
+          #payslip-print-area table { page-break-inside: avoid; break-inside: avoid; }
+          #payslip-print-area tr { page-break-inside: avoid; break-inside: avoid; }
         }
       `}</style>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between print:hidden">

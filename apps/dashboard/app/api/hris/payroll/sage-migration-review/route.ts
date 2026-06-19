@@ -6,6 +6,7 @@ import {
 } from '@/lib/dle-enterprise-db';
 import { calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployees, type SagePayrollEmployee } from '@/lib/sage-people-payroll-store';
+import { payslipIdentityFromSage, writePayslipEmployeeIdentities, type PayslipEmployeeIdentity } from '@/lib/payroll-payslip-identity-store';
 
 type MigrationStatus = 'Matched' | 'Mismatch' | 'Missing HRIS' | 'Missing Sage Gross' | 'Review';
 
@@ -242,11 +243,13 @@ export async function POST(request: Request) {
     const summary = {
       reviewed: 0,
       migrated: 0,
+      savedPayslipIdentities: 0,
       missingHris: 0,
       skippedNoIdentity: 0,
       failed: 0,
       failures: [] as { employeeCode: string; error: string }[],
     };
+    const payslipIdentities: PayslipEmployeeIdentity[] = [];
 
     for (const source of sageEmployees) {
       summary.reviewed += 1;
@@ -286,6 +289,7 @@ export async function POST(request: Request) {
           pensionPin: pensionPinFromSage(source),
           taxIdentificationNumber: source.taxNo,
         });
+        payslipIdentities.push(payslipIdentityFromSage(source, { employeeId: hrisEmployee.employeeId || hrisEmployee.employeeCode, migratedBy: 'Sage Migration Review' }));
         summary.migrated += 1;
       } catch (error) {
         summary.failed += 1;
@@ -294,6 +298,10 @@ export async function POST(request: Request) {
           error: error instanceof Error ? error.message : 'Unknown migration failure',
         });
       }
+    }
+    if (payslipIdentities.length) {
+      await writePayslipEmployeeIdentities(payslipIdentities);
+      summary.savedPayslipIdentities = payslipIdentities.length;
     }
 
     return ok({

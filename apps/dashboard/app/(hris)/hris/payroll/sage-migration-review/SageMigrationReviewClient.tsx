@@ -70,6 +70,7 @@ type Payload = {
 type MigrationSummary = {
   reviewed: number;
   migrated: number;
+  savedPayslipIdentities?: number;
   missingHris: number;
   skippedNoIdentity: number;
   failed: number;
@@ -190,7 +191,7 @@ export default function SageMigrationReviewClient({ initialNow }: { initialNow: 
       const json = (await res.json()) as ApiResponse<{ migratedAt: string; summary: MigrationSummary }>;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Migration request failed (${res.status})`);
       const summary = json.data.summary;
-      setMigrationMessage(`Migrated ${number(summary.migrated)} payroll identity records from Sage. Missing HRIS: ${number(summary.missingHris)}. No Sage identity: ${number(summary.skippedNoIdentity)}. Failed: ${number(summary.failed)}.`);
+      setMigrationMessage(`Migrated ${number(summary.migrated)} payroll identity records from Sage and saved ${number(summary.savedPayslipIdentities || 0)} payslip identity snapshots locally. Missing HRIS: ${number(summary.missingHris)}. No Sage identity: ${number(summary.skippedNoIdentity)}. Failed: ${number(summary.failed)}.`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to migrate Sage payroll identity records');
