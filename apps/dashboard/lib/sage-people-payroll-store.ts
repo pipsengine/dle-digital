@@ -109,6 +109,16 @@ export type SagePayrollEmployee = {
   sageEmployeeStatusJson: string | null;
 };
 
+export type SagePayrollBankDetail = {
+  employeeId: number;
+  bankName?: string | null;
+  bankCode?: string | null;
+  branchName?: string | null;
+  branchCode?: string | null;
+  accountNo?: string | null;
+  accountName?: string | null;
+};
+
 export const normalizePayrollMatchKey = (value: string | number | null | undefined) => {
   const raw = String(value ?? '').trim().toUpperCase();
   if (!raw) return '';
@@ -147,6 +157,39 @@ const payrollPeriodSql = () => {
   const end = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
   return { start, end };
 };
+
+const bracket = (value: string) => `[${value.replace(/]/g, ']]')}]`;
+const pickColumn = (columns: string[], patterns: RegExp[]) => columns.find((column) => patterns.some((pattern) => pattern.test(column)));
+
+const employeeBankCandidateQuery = `
+SELECT
+  s.name AS schemaName,
+  t.name AS tableName,
+  c.name AS columnName
+FROM sys.columns c
+JOIN sys.tables t ON t.object_id = c.object_id
+JOIN sys.schemas s ON s.schema_id = t.schema_id
+WHERE EXISTS (
+  SELECT 1 FROM sys.columns ec
+  WHERE ec.object_id = t.object_id AND ec.name = 'EmployeeID'
+)
+AND (
+  c.name LIKE '%Account%'
+  OR c.name LIKE '%Bank%'
+  OR c.name LIKE '%Branch%'
+  OR c.name LIKE '%Sort%'
+)
+ORDER BY
+  CASE
+    WHEN s.name = 'Employee' AND t.name LIKE '%Bank%' THEN 0
+    WHEN s.name = 'Payroll' AND t.name LIKE '%Bank%' THEN 1
+    WHEN s.name = 'Employee' THEN 2
+    ELSE 3
+  END,
+  s.name,
+  t.name,
+  c.column_id;
+`;
 
 const activeEmployeeQuery = () => {
   const { start, end } = payrollPeriodSql();
@@ -840,6 +883,61 @@ export async function readSagePayrollPeriodTotals(period = payrollPeriod()) {
   try {
     const result = await pool.request().query(periodTotalsQuery(period));
     return result.recordset as SagePayrollPeriodTotal[];
+  } finally {
+    await pool.close();
+  }
+}
+
+export async function readSagePayrollEmployeeBankDetails() {
+  const pool = new sql.ConnectionPool(config());
+  await pool.connect();
+  try {
+    const metadata = await pool.request().query(employeeBankCandidateQuery);
+    const byTable = new Map<string, { schemaName: string; tableName: string; columns: string[] }>();
+    for (const row of metadata.recordset as Array<{ schemaName: string; tableName: string; columnName: string }>) {
+      const key = `${row.schemaName}.${row.tableName}`;
+      const current = byTable.get(key) || { schemaName: row.schemaName, tableName: row.tableName, columns: [] };
+      current.columns.push(row.columnName);
+      byTable.set(key, current);
+    }
+
+    for (const table of byTable.values()) {
+      const accountNoColumn = pickColumn(table.columns, [/^AccountNo$/i, /^AccountNumber$/i, /BankAccount(No|Number)$/i, /Account.*No/i, /Account.*Number/i]);
+      if (!accountNoColumn) continue;
+      const accountNameColumn = pickColumn(table.columns, [/^AccountName$/i, /BankAccountName/i, /Account.*Name/i]);
+      const bankNameColumn = pickColumn(table.columns, [/^BankName$/i, /Bank.*Name/i]);
+      const bankCodeColumn = pickColumn(table.columns, [/^BankCode$/i, /Bank.*Code/i]);
+      const branchNameColumn = pickColumn(table.columns, [/^BranchName$/i, /Branch.*Name/i]);
+      const branchCodeColumn = pickColumn(table.columns, [/^BranchCode$/i, /^SortCode$/i, /Branch.*Code/i, /Sort.*Code/i]);
+      const modifiedColumn = pickColumn(table.columns, [/Modified/i, /Updated/i, /Change/i, /Created/i, /Date/i]);
+      const selectValue = (column: string | undefined, alias: string) => column ? `CAST(${bracket(column)} AS nvarchar(250)) AS ${bracket(alias)}` : `CAST(NULL AS nvarchar(250)) AS ${bracket(alias)}`;
+      const order = modifiedColumn ? `ORDER BY ${bracket(modifiedColumn)} DESC` : 'ORDER BY EmployeeID';
+      const query = `
+        SELECT EmployeeID AS employeeId, bankName, bankCode, branchName, branchCode, accountNo, accountName
+        FROM (
+          SELECT
+            EmployeeID,
+            ${selectValue(bankNameColumn, 'bankName')},
+            ${selectValue(bankCodeColumn, 'bankCode')},
+            ${selectValue(branchNameColumn, 'branchName')},
+            ${selectValue(branchCodeColumn, 'branchCode')},
+            ${selectValue(accountNoColumn, 'accountNo')},
+            ${selectValue(accountNameColumn, 'accountName')},
+            ROW_NUMBER() OVER (PARTITION BY EmployeeID ${order}) AS rn
+          FROM ${bracket(table.schemaName)}.${bracket(table.tableName)}
+          WHERE NULLIF(LTRIM(RTRIM(CAST(${bracket(accountNoColumn)} AS nvarchar(250)))), '') IS NOT NULL
+        ) x
+        WHERE rn = 1;
+      `;
+      try {
+        const result = await pool.request().query(query);
+        const rows = (result.recordset || []) as SagePayrollBankDetail[];
+        if (rows.length) return rows;
+      } catch {
+        // Some Sage columns are non-castable or inaccessible; try the next candidate table.
+      }
+    }
+    return [] as SagePayrollBankDetail[];
   } finally {
     await pool.close();
   }

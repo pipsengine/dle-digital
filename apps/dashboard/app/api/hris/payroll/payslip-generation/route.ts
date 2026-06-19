@@ -255,7 +255,7 @@ const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: Pay
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  await syncPayslipIdentitiesFromSage({ migratedBy: 'Payslip Generation' }).catch(() => undefined);
+  await syncPayslipIdentitiesFromSage({ force: true, migratedBy: 'Payslip Generation' }).catch(() => undefined);
   const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches, dailyAttendanceByKey, identityByKey] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
