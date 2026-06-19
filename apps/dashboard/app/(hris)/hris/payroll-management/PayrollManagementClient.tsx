@@ -173,6 +173,16 @@ type PayrollAction = {
   roles?: Role[];
 };
 
+const readApiResponse = async <T,>(res: Response): Promise<ApiResponse<T>> => {
+  const text = await res.text();
+  if (!text.trim()) return { status: 'error', error: `Empty response from payroll service (${res.status})` };
+  try {
+    return JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    return { status: 'error', error: text.slice(0, 240) || `Invalid response from payroll service (${res.status})` };
+  }
+};
+
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
 const numberFmt = new Intl.NumberFormat('en-GB');
 const pctFmt = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
@@ -884,7 +894,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     setError('');
     try {
       const res = await fetch('/api/hris/payroll-management', { headers: { 'x-hris-role': role }, cache: 'no-store' });
-      const json = (await res.json()) as ApiResponse<PayrollPayload>;
+      const json = await readApiResponse<PayrollPayload>(res);
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Payroll request failed (${res.status})`);
       setPayload(json.data);
     } catch (e) {
@@ -931,7 +941,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
         headers: { 'content-type': 'application/json', 'x-hris-role': role },
         body: JSON.stringify({ action, runId: currentRun?.id, reason, actor: role }),
       });
-      const json = (await res.json()) as ApiResponse<{ run: PayrollRun }>;
+      const json = await readApiResponse<{ run: PayrollRun }>(res);
       if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Payroll action failed');
       setToast(`${action.replace('-run', '').replace('-', ' ')} completed.`);
       await load();

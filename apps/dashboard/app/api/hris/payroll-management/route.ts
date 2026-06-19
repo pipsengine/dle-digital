@@ -218,6 +218,68 @@ const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollT
     };
   });
 
+const emptyPayload = (request: Request, error: unknown) => {
+  const role = getRole(request);
+  const message = error instanceof Error ? error.message : 'Payroll data is temporarily unavailable.';
+  const period = PAYROLL_SETUP_PREVIEW_PERIOD;
+  return {
+    generatedAt: nowIso(),
+    source: 'Payroll service fallback',
+    dataSource: {
+      source: 'Payroll service fallback',
+      databaseAvailable: false,
+      warning: message,
+      employeeCount: 0,
+    },
+    role,
+    permissions: permissions(role),
+    period,
+    periodLabel: periodLabel(period),
+    summary: {
+      totalEmployees: 0,
+      payrollEligible: 0,
+      readyEmployees: 0,
+      reviewEmployees: 0,
+      blockedEmployees: 0,
+      payrollCoveragePct: 0,
+      grossPay: 0,
+      deductions: 0,
+      netPay: 0,
+      basePay: 0,
+      allowances: 0,
+      exceptionCount: 1,
+    },
+    runs: Array.from(runStore.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    records: [],
+    exceptions: [{
+      id: 'payroll-service-error',
+      employeeId: 'SYSTEM',
+      employeeName: 'Payroll Management',
+      issue: message,
+      severity: 'High' as const,
+      owner: 'System Administrator',
+    }],
+    breakdowns: {
+      byPayrollGroup: [],
+      byDepartment: [],
+      byEmploymentType: [],
+    },
+    controls: [
+      { id: 'master-data', label: 'Master Data Validation', status: 'Unavailable', tone: 'red' },
+      { id: 'statutory', label: 'PAYE and Pension Estimate', status: 'Unavailable', tone: 'red' },
+      { id: 'approval', label: 'Segregated Approval', status: 'Paused', tone: 'amber' },
+      { id: 'audit', label: 'Payroll Audit Trail', status: 'Enabled', tone: 'cyan' },
+    ],
+    workflow: {
+      currentStatus: 'Validation',
+      nextOwner: 'System Administrator',
+      blockedActions: [`Payroll data could not be loaded: ${message}`],
+      approvalStage: 'Data unavailable',
+    },
+    auditTrail: auditStore.slice(0, 50),
+  };
+};
+
 const maskMoney = (record: any) => ({
   ...record,
   basePay: null,
@@ -266,7 +328,11 @@ const buildPayload = async (request: Request) => {
   const taxVersion = activeTaxVersion(taxConfig);
   const pensionVersion = activePensionVersion(pensionConfig);
   if (!taxVersion || !pensionVersion) throw new Error('No active payroll tax or pension configuration is available.');
-  await syncSageLeaveAllowanceEvents();
+  try {
+    await syncSageLeaveAllowanceEvents();
+  } catch (error) {
+    console.warn('Payroll leave allowance sync skipped:', error);
+  }
   const records = buildRecords(employeeRows, taxVersion, pensionVersion);
   const eligible = records.filter((record) => !['Terminated', 'Resigned', 'Retired', 'Inactive'].includes(record.employmentStatus));
   const ready = records.filter((record) => record.payrollStatus === 'Ready');
@@ -392,19 +458,36 @@ const csv = (records: any[]) => {
 };
 
 export async function GET(request: Request) {
-  const payload = await buildPayload(request);
-  const url = new URL(request.url);
-  if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: auditStore.slice(0, 200) });
-  if (url.searchParams.get('format') === 'csv') {
-    if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
-    return new Response(csv(payload.records), {
-      headers: {
-        'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
-      },
-    });
+  try {
+    const payload = await buildPayload(request);
+    const url = new URL(request.url);
+    if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: auditStore.slice(0, 200) });
+    if (url.searchParams.get('format') === 'csv') {
+      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      return new Response(csv(payload.records), {
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
+        },
+      });
+    }
+    return jsonOk(payload);
+  } catch (error) {
+    console.error('Payroll Management API Error:', error);
+    const url = new URL(request.url);
+    const payload = emptyPayload(request, error);
+    if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: auditStore.slice(0, 200), warning: payload.dataSource.warning });
+    if (url.searchParams.get('format') === 'csv') {
+      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      return new Response(csv(payload.records), {
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
+        },
+      });
+    }
+    return jsonOk(payload);
   }
-  return jsonOk(payload);
 }
 
 export async function POST(request: Request) {
