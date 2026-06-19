@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -35,6 +35,7 @@ type UserAccount = { id: string; username: string; fullName: string; roles: stri
 type Assignment = { subjectType: 'role' | 'user'; subjectId: string; permissions: string[]; dataScope: string; approvalLevel: string; status: string; reason: string; updatedAt: string; updatedBy: string };
 type Template = { id: string; name: string; description: string; permissions: string[]; dataScope: string; approvalLevel: string };
 type AuditRecord = { id: string; modifiedBy: string; modifiedAt: string; roleOrUserAffected: string; permissionChanged: string; oldValue: string; newValue: string; reason: string; ipAddress: string; device: string };
+type SubjectOption = { id: string; label: string; permissions: string[]; meta: string };
 
 const dataScopes = ['Own', 'Team', 'Department', 'Location', 'Company', 'Global'];
 const approvalLevels = ['L1 - User', 'L2 - Manager', 'L2 - HR Admin', 'L2 - Project Manager', 'L3 - Approver', 'L3 - Payroll Approver', 'L3 - Finance Approver', 'L3 - Super Admin'];
@@ -67,6 +68,9 @@ export default function RolesPermissionsClient() {
   const [subjectType, setSubjectType] = useState<'role' | 'user'>('role');
   const [subjectId, setSubjectId] = useState('Super Administrator');
   const [query, setQuery] = useState('');
+  const [subjectSearch, setSubjectSearch] = useState('');
+  const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
+  const subjectPickerRef = useRef<HTMLDivElement | null>(null);
   const [moduleFilter, setModuleFilter] = useState('All');
   const [permissionFilter, setPermissionFilter] = useState('All');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -110,13 +114,28 @@ export default function RolesPermissionsClient() {
     void load();
   }, []);
 
-  const subjects = subjectType === 'role'
+  const subjects: SubjectOption[] = subjectType === 'role'
     ? roles.map((role) => ({ id: role.name, label: role.name, permissions: role.permissions, meta: role.category }))
     : users.map((user) => ({ id: user.id, label: `${user.fullName} (${user.username})`, permissions: user.permissions, meta: `${user.department || 'No department'} - ${user.status}` }));
 
   const subject = subjects.find((item) => item.id === subjectId);
+  const filteredSubjects = useMemo(() => {
+    const q = subjectSearch.trim().toLowerCase();
+    if (!q) return subjects;
+    return subjects.filter((item) => [item.label, item.meta, item.id].some((value) => value.toLowerCase().includes(q)));
+  }, [subjectSearch, subjects]);
   const activeAssignment = [...drafts, ...published].find((item) => item.subjectType === subjectType && item.subjectId === subjectId);
   const baselinePermissions = subject?.permissions || [];
+
+  useEffect(() => {
+    if (!subjectPickerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (subjectPickerRef.current?.contains(event.target as Node)) return;
+      setSubjectPickerOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [subjectPickerOpen]);
 
   const modules = useMemo(() => ['All', ...Array.from(new Set(catalog.map((item) => item.module))).sort()], [catalog]);
   const filteredCatalog = useMemo(() => {
@@ -165,6 +184,8 @@ export default function RolesPermissionsClient() {
     const nextSubject = nextSubjects.find((item) => item.id === resolvedId);
     setSubjectType(nextType);
     setSubjectId(resolvedId);
+    setSubjectSearch('');
+    setSubjectPickerOpen(false);
     setSelected(new Set(assignment?.permissions || nextSubject?.permissions || []));
     setDataScope(assignment?.dataScope || 'Company');
     setApprovalLevel(assignment?.approvalLevel || 'L1 - User');
@@ -281,9 +302,49 @@ export default function RolesPermissionsClient() {
                 <button key={type} onClick={() => hydrateSubject(type, '')} className={`h-9 rounded-md text-sm font-black capitalize ${subjectType === type ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{type}</button>
               ))}
             </div>
-            <select value={subjectId} onChange={(event) => hydrateSubject(subjectType, event.target.value)} className="mt-3 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-blue-500">
-              {subjects.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
+            <div ref={subjectPickerRef} className="relative mt-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setSubjectSearch('');
+                  setSubjectPickerOpen((open) => !open);
+                }}
+                className="flex h-11 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm font-bold outline-none ring-blue-100 hover:border-blue-300 focus:border-blue-500 focus:ring-4"
+              >
+                <span className="min-w-0 truncate">{subject?.label || `Select ${subjectType}`}</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-slate-500" />
+              </button>
+              {subjectPickerOpen ? (
+                <div className="absolute left-0 right-0 z-40 mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+                  <div className="relative border-b border-slate-100 p-2">
+                    <Search className="absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={subjectSearch}
+                      onChange={(event) => setSubjectSearch(event.target.value)}
+                      autoFocus
+                      placeholder={`Search ${subjectType}s...`}
+                      className="h-10 w-full rounded-md border border-slate-200 pl-9 pr-3 text-sm font-semibold outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="max-h-72 overflow-y-auto py-1">
+                    {filteredSubjects.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => hydrateSubject(subjectType, item.id)}
+                        className={`block w-full px-3 py-2 text-left text-sm hover:bg-blue-50 ${item.id === subjectId ? 'bg-blue-600 text-white hover:bg-blue-600' : 'text-slate-800'}`}
+                      >
+                        <span className="block truncate font-black">{item.label}</span>
+                        <span className={`block truncate text-xs font-semibold ${item.id === subjectId ? 'text-blue-100' : 'text-slate-500'}`}>{item.meta}</span>
+                      </button>
+                    ))}
+                    {filteredSubjects.length === 0 ? (
+                      <div className="px-3 py-6 text-center text-sm font-bold text-slate-400">No matching {subjectType}s found.</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
             <p className="mt-2 text-xs font-semibold text-slate-500">{subject?.meta}</p>
             <div className="mt-4 grid grid-cols-2 gap-2 text-center">
               <div className="rounded-lg bg-slate-50 p-3"><p className="text-lg font-black">{selectedCount}</p><p className="text-[11px] font-bold text-slate-500">Effective permissions</p></div>
