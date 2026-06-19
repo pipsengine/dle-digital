@@ -65,6 +65,10 @@ const jsonErr = (status: number, error: string) => NextResponse.json({ status: '
 const nowIso = () => new Date().toISOString();
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
+const moneyOrNull = (value: unknown) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
 const PAYROLL_SETUP_PREVIEW_PERIOD = activePayrollPeriod();
 const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirectoryRow => ({
   ...employee,
@@ -131,11 +135,14 @@ const employeeCost = (employee: DleEmployeeDirectoryRow, taxVersion: PayrollTaxV
   const earnings = calculatePayrollEarnings(calculationEmployee, calculationOptions);
   const tax = calculatePayrollTax(payrollInputFromEmployee(calculationEmployee, calculationOptions), taxVersion);
   const sageReconciliation = sageOpeningPayslipReconciliation(employee, PAYROLL_SETUP_PREVIEW_PERIOD);
-  const pension = sageReconciliation?.pensionEmployee ?? calculatePension(pensionInputFromEmployee(calculationEmployee, calculationOptions), pensionVersion).employeeContribution;
-  const paye = sageReconciliation?.paye ?? tax.monthlyPaye;
+  const sagePaye = moneyOrNull(employee.sagePayrollDeductions?.paye);
+  const sagePension = moneyOrNull(employee.sagePayrollDeductions?.pensionEmployee);
+  const sageNhf = moneyOrNull(employee.sagePayrollDeductions?.nhf);
+  const pension = sageReconciliation?.pensionEmployee ?? sagePension ?? calculatePension(pensionInputFromEmployee(calculationEmployee, calculationOptions), pensionVersion).employeeContribution;
+  const paye = sageReconciliation?.paye ?? sagePaye ?? tax.monthlyPaye;
   const nhf = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'nhf')?.amount || 0) / 12;
   const unionDues = sageReconciliation ? 0 : (tax.statutoryItems.find((item) => item.id === 'union-dues')?.amount || 0) / 12;
-  const otherDeductions = sageReconciliation ? 0 : ((tax.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12) + nhf + unionDues;
+  const otherDeductions = sageReconciliation ? 0 : ((tax.statutoryItems.find((item) => item.id === 'other-statutory')?.amount || 0) / 12) + (sageNhf ?? nhf) + unionDues;
   const grossPay = earnings.grossPay;
   const deductions = pension + paye + otherDeductions;
   return {

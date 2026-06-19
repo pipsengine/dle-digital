@@ -160,7 +160,13 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     const pension = calculatePension(pensionInputFromEmployee(calculationEmployee, calculationOptions), pensionVersion);
     const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(calculationEmployee, employeeSource.employees.length, calculationOptions), fundsVersion);
     const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
-    const paye = tax.monthlyPaye;
+    const sageActual = [
+      employee.employeeCode,
+      employee.employeeId,
+      employee.id,
+      employee.fullName,
+    ].map(normalizePayrollMatchKey).map((key) => sageByKey.get(key)).find(Boolean) || null;
+    const paye = sageActual?.paye !== null && sageActual?.paye !== undefined ? Number(sageActual.paye) : tax.monthlyPaye;
     const employeePension = pension.employeeContribution;
     const statutoryEmployee = funds.employeeDeductions;
     const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
@@ -168,12 +174,6 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     const otherDeductions = roundMoney(taxComponentMonthly('union-dues') + taxComponentMonthly('other-statutory'));
     const totalDeductions = roundMoney(paye + employeePension + statutoryEmployee + loanRecovery + otherDeductions);
     const netPay = roundMoney(Math.max(0, amounts.grossPay - totalDeductions));
-    const sageActual = [
-      employee.employeeCode,
-      employee.employeeId,
-      employee.id,
-      employee.fullName,
-    ].map(normalizePayrollMatchKey).map((key) => sageByKey.get(key)).find(Boolean) || null;
     const grossVariance = sageActual ? moneyVariance(sageActual.grossPay, amounts.grossPay) : null;
     const netVariance = sageActual ? moneyVariance(sageActual.netPay, netPay) : null;
     const deductionVariance = sageActual ? moneyVariance(sageActual.totalDeductions, totalDeductions) : null;

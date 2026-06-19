@@ -40,6 +40,16 @@ const payrollReadyStatuses: TimesheetStatus[] = ['HR_Acknowledged', 'Approved', 
 const EMPLOYEE_CARD_PAGE_SIZE = 12;
 type TimesheetEntryMode = 'Supervisor Entry';
 
+const readApiJson = async (response: Response) => {
+  const text = await response.text();
+  if (!text.trim()) throw new Error(`Empty response from server (${response.status})`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(text.slice(0, 240) || `Invalid response from server (${response.status})`);
+  }
+};
+
 type WorkflowStage = {
   id: TimesheetStatus;
   label: string;
@@ -392,7 +402,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
       if (workCenter) url.searchParams.set('workCenterName', workCenter);
       
       const res = await fetch(url.toString(), { cache: 'no-store' });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to load timesheet entry');
       
       const data = json.data as Payload;
@@ -428,7 +438,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     setProjectSiteError(null);
     try {
       const res = await fetch('/api/hris/time-and-logs/project-sites', { cache: 'no-store' });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to load project sites');
       const sites = Array.from(new Set((json.data?.projectSites ?? []).map((site: unknown) => String(site ?? '').trim()).filter(Boolean))) as string[];
       setDatabaseProjectSites(sites.sort((a, b) => a.localeCompare(b)));
@@ -473,7 +483,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           workCenterName: selectedWorkCenter,
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Sync failed');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -532,7 +542,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           },
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to save work center');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -567,7 +577,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           workCenter: { id: workCenter.id, name: workCenter.name },
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to delete work center');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -639,7 +649,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           workCenterName: selectedWorkCenter,
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Copy failed');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -676,7 +686,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           lines: localLines,
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Save failed');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -718,7 +728,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           },
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Bulk apply failed');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -746,7 +756,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           headerId: payload.header.id,
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Action failed');
       setPayload(json.data);
       setLocalLines(json.data.lines);
@@ -820,7 +830,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           },
         }),
       });
-      const json = await res.json();
+      const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Failed to save project');
       setPayload(json.data);
       closeProjectModal();
@@ -1845,3 +1855,4 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     </PageTemplate>
   );
 }
+

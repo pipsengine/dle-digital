@@ -1010,14 +1010,19 @@ const requireApprovalActionAccess = (header: TimesheetHeader, actor: string, rol
 };
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const headerId = searchParams.get('headerId') || undefined;
-  const date = searchParams.get('date') || undefined;
-  const supervisorId = searchParams.get('supervisorId') || undefined;
-  const locationName = searchParams.get('locationName') || undefined;
-  const workCenterName = searchParams.get('workCenterName') || undefined;
-  const mode = searchParams.get('mode') === 'supervisor' ? 'supervisor' : undefined;
-  return ok(await buildPayload(request, date, supervisorId, workCenterName, locationName, mode, headerId));
+  try {
+    const { searchParams } = new URL(request.url);
+    const headerId = searchParams.get('headerId') || undefined;
+    const date = searchParams.get('date') || undefined;
+    const supervisorId = searchParams.get('supervisorId') || undefined;
+    const locationName = searchParams.get('locationName') || undefined;
+    const workCenterName = searchParams.get('workCenterName') || undefined;
+    const mode = searchParams.get('mode') === 'supervisor' ? 'supervisor' : undefined;
+    return ok(await buildPayload(request, date, supervisorId, workCenterName, locationName, mode, headerId));
+  } catch (error) {
+    console.error('Timesheet entry API Error:', error);
+    return err(500, error instanceof Error ? error.message : 'Unable to load timesheet entry.');
+  }
 }
 
 export async function PATCH(request: Request) {
