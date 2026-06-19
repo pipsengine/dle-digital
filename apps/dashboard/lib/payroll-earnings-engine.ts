@@ -281,7 +281,7 @@ export const resolvePayrollEarningProfile = (employee: DleEmployeeDirectoryRow):
     employee.employmentType,
   ].map(compact).join(' ').toUpperCase();
   const employeeCode = compact(employee.employeeCode || employee.employeeId).toUpperCase();
-  if (/^(IT|I|NYSC|N)\d+/.test(employeeCode) || /\b(INDUSTRIAL TRAINING|INTERN|NYSC|NATIONAL YOUTH SERVICE)\b/.test(stipendGroupText)) return 'stipend-non-taxable';
+  if (/^(P?IT|IT|I|P?NYSC|NYSC|N)\d+/.test(employeeCode) || /\b(INDUSTRIAL TRAINING|INDUSTRIAL TRAINEE|INTERN|NYSC|NATIONAL YOUTH SERVICE)\b/.test(stipendGroupText)) return 'stipend-non-taxable';
   if (/^L\d+/.test(employeeCode) || /LUMPSUM|LUMP SUM/.test(groupText)) return 'contract-lumpsum';
   if (/^C\d+/.test(employeeCode) || /DAILY RATE|DAY RATE/.test(groupText)) return 'contract-day-rate';
   const isOtherContract = /CONTRACT|TEMPORARY|CASUAL/.test(groupText);
