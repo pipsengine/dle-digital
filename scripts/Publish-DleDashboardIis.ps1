@@ -57,6 +57,18 @@ function Copy-DirectoryContents {
   Copy-Item -Path (Join-Path $SourcePath "*") -Destination $DestinationPath -Recurse -Force
 }
 
+function Invoke-CheckedCommand {
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [string[]]$ArgumentList = @()
+  )
+
+  & $FilePath @ArgumentList
+  if ($LASTEXITCODE -ne 0) {
+    throw "Command failed with exit code $LASTEXITCODE`: $FilePath $($ArgumentList -join ' ')"
+  }
+}
+
 function Test-NextTraceFiles {
   param(
     [Parameter(Mandatory = $true)][string]$NextRootPath
@@ -87,10 +99,10 @@ function Test-NextTraceFiles {
 Push-Location $RepoRoot
 try {
   if (-not $SkipInstall) {
-    npm ci
+    Invoke-CheckedCommand -FilePath "npm" -ArgumentList @("ci")
   }
 
-  npm run build
+  Invoke-CheckedCommand -FilePath "npm" -ArgumentList @("run", "build")
 
   if (-not (Test-Path -LiteralPath $StandalonePath)) {
     throw "Standalone build output was not found at $StandalonePath."
