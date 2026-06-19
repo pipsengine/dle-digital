@@ -30,8 +30,30 @@ const resolveDashboardRoot = () => {
   return cwd.endsWith(dashboardSuffix) ? cwd : path.join(cwd, dashboardSuffix);
 };
 
-const DATA_DIR = path.join(resolveDashboardRoot(), 'data', 'hris');
+const DATA_DIR = process.env.DLE_HRIS_DATA_DIR ? path.resolve(process.env.DLE_HRIS_DATA_DIR) : path.join(resolveDashboardRoot(), 'data', 'hris');
 const FILE_PATH = path.join(DATA_DIR, 'biometric-attendance.json');
+const uniquePaths = (paths: Array<string | null | undefined>) => Array.from(new Set(paths.reduce<string[]>((items, item) => {
+  if (item) items.push(path.normalize(item));
+  return items;
+}, [])));
+const repoMirrorPath = (file: string) => {
+  const normalizedFile = path.normalize(file);
+  const markers = [
+    path.normalize(path.join('deployment', 'iis', 'site', 'apps', 'dashboard', 'data', 'hris')),
+    path.normalize(path.join('deployment', 'iis', 'site-publish', 'apps', 'dashboard', 'data', 'hris')),
+  ];
+  const marker = markers.find((candidate) => normalizedFile.toLowerCase().lastIndexOf(candidate.toLowerCase()) !== -1);
+  if (!marker) return null;
+  const markerIndex = normalizedFile.toLowerCase().lastIndexOf(marker.toLowerCase());
+  const repoRoot = normalizedFile.slice(0, markerIndex);
+  return path.join(repoRoot, 'apps', 'dashboard', 'data', 'hris', path.basename(normalizedFile));
+};
+const BIOMETRIC_FILE_PATHS = uniquePaths([
+  FILE_PATH,
+  repoMirrorPath(FILE_PATH),
+  path.join(resolveDashboardRoot(), 'data', 'hris', 'biometric-attendance.json'),
+  path.join(process.cwd(), 'apps', 'dashboard', 'data', 'hris', 'biometric-attendance.json'),
+]);
 
 const defaultDevices: BiometricDeviceRecord[] = [
   {
@@ -131,25 +153,53 @@ const defaultDevices: BiometricDeviceRecord[] = [
   },
 ];
 
-const ensureStore = async () => {
-  await mkdir(DATA_DIR, { recursive: true });
-  try {
-    await access(FILE_PATH);
-  } catch {
-    await writeFile(FILE_PATH, JSON.stringify(defaultDevices, null, 2), 'utf8');
+const parseDevices = (raw: string): BiometricDeviceRecord[] => {
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed as BiometricDeviceRecord[] : [];
+};
+
+const readDeviceFile = async (): Promise<BiometricDeviceRecord[]> => {
+  for (const file of BIOMETRIC_FILE_PATHS) {
+    try {
+      return parseDevices(await readFile(file, 'utf8'));
+    } catch {
+      // Try the next candidate path.
+    }
   }
+  return [];
+};
+
+const writeDeviceFile = async (devices: BiometricDeviceRecord[], required: boolean) => {
+  const content = JSON.stringify(devices, null, 2);
+  let lastError: unknown = null;
+  for (const file of BIOMETRIC_FILE_PATHS) {
+    try {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content, 'utf8');
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  if (required && lastError) throw lastError;
+  if (lastError) console.warn('[Biometric Attendance] Local JSON write skipped:', lastError instanceof Error ? lastError.message : lastError);
+};
+
+const ensureStore = async () => {
+  for (const file of BIOMETRIC_FILE_PATHS) {
+    try {
+      await access(file);
+      return;
+    } catch {
+      // Try the next candidate path.
+    }
+  }
+  await writeDeviceFile(defaultDevices, false);
 };
 
 export const readBiometricDevices = async (): Promise<BiometricDeviceRecord[]> => {
   await ensureStore();
-  let stored: BiometricDeviceRecord[] = [];
-  try {
-    const raw = await readFile(FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) stored = parsed as BiometricDeviceRecord[];
-  } catch {
-    stored = [];
-  }
+  const stored = await readDeviceFile();
 
   const storedById = new Map(stored.map((device) => [device.id, device]));
   const merged = defaultDevices.map((device) => ({
@@ -163,11 +213,11 @@ export const readBiometricDevices = async (): Promise<BiometricDeviceRecord[]> =
     deviceType: device.deviceType,
   }));
 
-  await writeFile(FILE_PATH, JSON.stringify(merged, null, 2), 'utf8');
+  await writeDeviceFile(merged, false);
   return merged;
 };
 
 export const writeBiometricDevices = async (devices: BiometricDeviceRecord[]) => {
   await ensureStore();
-  await writeFile(FILE_PATH, JSON.stringify(devices, null, 2), 'utf8');
+  await writeDeviceFile(devices, true);
 };
