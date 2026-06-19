@@ -792,8 +792,6 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     .sort((a, b) => a.label.localeCompare(b.label));
   if (supervisorMode) {
     requestedSupervisor = modeLockedSupervisor(session, activeEmployees, supervisorIndex);
-    targetLocation = '';
-    targetWorkCenter = '';
   }
   const targetSupervisor = canonicalSupervisorValue(requestedSupervisor || supervisorDirectory[0]?.value || recordSupervisors[0] || access.actor, supervisorIndex);
   const selectedSupervisorProfile = findSupervisorEmployee(targetSupervisor, supervisorIndex) || activeEmployees.find((employee) => supervisorMatchesSelection(employee, targetSupervisor));
@@ -805,10 +803,10 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const selectedSupervisorAllDirectReports = assignedSupervisorEmployees.length ? assignedSupervisorEmployees : reportingManagerEmployees;
   if (supervisorMode) {
     const supervisorRecordsForDefault = timesheetRecords.filter((record) => managerMatches({ managerName: record.supervisor }, targetSupervisor));
-    targetLocation =
+    targetLocation = targetLocation ||
       preferredLocationFromDirectory(selectedSupervisorAllDirectReports, locations, workCenters) ||
       mostCommon(supervisorRecordsForDefault.flatMap((record) => [record.location, record.site]));
-    targetWorkCenter =
+    targetWorkCenter = targetWorkCenter ||
       workCenterFromSupervisorProfile(selectedSupervisorProfile, workCenters) ||
       defaultWorkCenterForEmployees(selectedSupervisorAllDirectReports, workCenters, targetLocation) ||
       mostCommon(supervisorRecordsForDefault.flatMap((record) => [record.department, record.businessUnit, record.site, record.location]));
@@ -818,10 +816,10 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
       clean(workCenters.find((workCenter) => workCenter.name === targetWorkCenter)?.site || workCenters.find((workCenter) => workCenter.name === targetWorkCenter)?.location) ||
       mostCommon(locations.flatMap((location) => [location.name, location.site]));
   }
-  const selectedSupervisorDirectReports = supervisorMode
-    ? selectedSupervisorAllDirectReports
-    : selectedSupervisorAllDirectReports.filter((employee) => employeeMatchesLocation(employee, targetLocation));
-  const selectedSupervisorWorkCenterReports = !supervisorMode && targetWorkCenter
+  const selectedSupervisorDirectReports = targetLocation
+    ? selectedSupervisorAllDirectReports.filter((employee) => employeeMatchesLocation(employee, targetLocation))
+    : selectedSupervisorAllDirectReports;
+  const selectedSupervisorWorkCenterReports = targetWorkCenter
     ? selectedSupervisorDirectReports.filter((employee) => employeeMatchesWorkCenter(employee, targetWorkCenter))
     : [];
   const selectedSupervisorEmployeesFromDirectory = (selectedSupervisorWorkCenterReports.length ? selectedSupervisorWorkCenterReports : selectedSupervisorDirectReports)
@@ -932,7 +930,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     workflowStages,
     biometricDevices,
     attendanceWorkCenters,
-    workCenters: supervisorMode && targetWorkCenter ? workCenters.filter((workCenter) => workCenter.name === targetWorkCenter) : workCenters,
+    workCenters,
     departments,
     locations,
     projectManagers,
@@ -954,7 +952,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     filterOptions: {
       departments: departments.map((department) => department.name),
       projects: activeProjects.map(p => p.code),
-      locations: supervisorMode ? [targetLocation].filter(Boolean) : systemLocationNames,
+      locations: systemLocationNames,
       projectSites: projectSiteOptions,
       supervisors: supervisorMode ? [targetSupervisor].filter(Boolean) : Array.from(new Set([targetSupervisor, ...supervisorDirectory.map((item) => item.value), ...recordSupervisors].map(clean).filter(Boolean))).sort((a, b) => {
         const aLabel = supervisorDirectory.find((item) => item.value === a)?.label || a;
@@ -1071,11 +1069,11 @@ export async function PATCH(request: Request) {
       let scopedWorkCenterName = workCenterName;
       let scopedLocationName = locationName;
       if (isSupervisorMode) {
-        const scoped = await buildPayload(request, date, undefined, undefined, undefined, mode);
+        const scoped = await buildPayload(request, date, undefined, workCenterName, locationName, mode);
         scopedDate = scoped.timesheetDate;
         scopedSupervisorId = scoped.filterOptions.supervisors[0];
-        scopedLocationName = scoped.filterOptions.locations[0];
-        scopedWorkCenterName = scoped.workCenters[0]?.name || scoped.header?.workCenterName || '';
+        scopedLocationName = locationName || scoped.supervisorProfile?.location || scoped.filterOptions.locations[0];
+        scopedWorkCenterName = workCenterName || scoped.header?.workCenterName || scoped.workCenters[0]?.name || '';
       }
       if (!scopedDate || !scopedSupervisorId || !scopedWorkCenterName) return err(400, 'Date, supervisor, and work center are required for copy.');
       await requireOpenPeriod(scopedDate);
@@ -1109,11 +1107,11 @@ export async function PATCH(request: Request) {
       let scopedWorkCenterName = workCenterName;
       let scopedLocationName = locationName;
       if (isSupervisorMode) {
-        const scoped = await buildPayload(request, date, undefined, undefined, undefined, mode);
+        const scoped = await buildPayload(request, date, undefined, workCenterName, locationName, mode);
         scopedDate = scoped.timesheetDate;
         scopedSupervisorId = scoped.filterOptions.supervisors[0];
-        scopedLocationName = scoped.filterOptions.locations[0];
-        scopedWorkCenterName = scoped.workCenters[0]?.name || scoped.header?.workCenterName || '';
+        scopedLocationName = locationName || scoped.supervisorProfile?.location || scoped.filterOptions.locations[0];
+        scopedWorkCenterName = workCenterName || scoped.header?.workCenterName || scoped.workCenters[0]?.name || '';
       }
       if (!scopedDate || !scopedSupervisorId || !scopedWorkCenterName) return err(400, 'Date, Supervisor ID, and Work Center Name are required.');
       await requireOpenPeriod(scopedDate);

@@ -1038,35 +1038,27 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Location</p>
-                {isWorkforceSupervisor ? (
-                  <div className="text-sm font-black text-slate-900">{selectedLocation || 'No location'}</div>
-                ) : (
-                  <select
-                    value={selectedLocation}
-                    onChange={(e) => {
-                      setSelectedLocation(e.target.value);
-                      setSelectedEmployees([]);
-                      setQuery('');
-                    }}
-                    className="bg-transparent text-sm font-black text-slate-900 focus:outline-none"
-                  >
-                    {locationOptions.length === 0 && <option value="">No location</option>}
-                    {locationOptions.map((location) => (
-                      <option key={location} value={location}>
-                        {location}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <select
+                  value={selectedLocation}
+                  onChange={(e) => {
+                    setSelectedLocation(e.target.value);
+                    setSelectedEmployees([]);
+                    setQuery('');
+                  }}
+                  className="bg-transparent text-sm font-black text-slate-900 focus:outline-none"
+                >
+                  {locationOptions.length === 0 && <option value="">No location</option>}
+                  {locationOptions.map((location) => (
+                    <option key={location} value={location}>
+                      {location}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Work Center</p>
                 <div className="flex items-center justify-end gap-2">
-                  {isWorkforceSupervisor ? (
-                    <span className="block max-w-[180px] truncate text-sm font-black text-slate-900">
-                      {selectedWorkCenter || 'No work center'}
-                    </span>
-                  ) : workCenterOptions.length > 0 ? (
+                  {workCenterOptions.length > 0 ? (
                     <select
                       value={selectedWorkCenter}
                       onChange={(e) => {
