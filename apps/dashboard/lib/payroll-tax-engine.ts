@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
@@ -60,7 +61,17 @@ const resolveDashboardRoot = () => {
   return cwd.endsWith(dashboardSuffix) ? cwd : path.join(cwd, dashboardSuffix);
 };
 
-const CONFIG_PATH = path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-tax-config.json');
+const resolveConfigPath = () => {
+  const candidates = [
+    process.env.DLE_PAYROLL_TAX_CONFIG_PATH,
+    process.env.DLE_HRIS_DATA_DIR ? path.join(process.env.DLE_HRIS_DATA_DIR, 'payroll-tax-config.json') : null,
+    path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-tax-config.json'),
+    path.join(process.cwd(), 'apps', 'dashboard', 'data', 'hris', 'payroll-tax-config.json'),
+    path.join(process.cwd(), 'data', 'hris', 'payroll-tax-config.json'),
+  ].filter(Boolean) as string[];
+  return candidates.find((candidate) => existsSync(candidate)) || candidates[0];
+};
+const CONFIG_PATH = resolveConfigPath();
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const round4 = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 10000) / 10000;
 const compact = (value: unknown) => String(value || '').trim();

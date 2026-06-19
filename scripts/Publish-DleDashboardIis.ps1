@@ -88,6 +88,12 @@ try {
   $PublicTarget = Join-Path $ResolvedOutputPath "apps\dashboard\public"
   Copy-DirectoryContents -SourcePath (Join-Path $AppPath "public") -DestinationPath $PublicTarget
 
+  $DataSource = Join-Path $AppPath "data"
+  if (Test-Path -LiteralPath $DataSource) {
+    $DataTarget = Join-Path $ResolvedOutputPath "apps\dashboard\data"
+    Copy-DirectoryContents -SourcePath $DataSource -DestinationPath $DataTarget
+  }
+
   $WebConfigSource = if ($HostingMode -eq "HttpPlatform") {
     Join-Path $RepoRoot "deployment\iis\web.httpplatform.config"
   } else {
