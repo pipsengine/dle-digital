@@ -210,11 +210,24 @@ export const SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS: PayrollEarningDefinition[
   { code: 'SNR_NJIC', name: 'SNR NJIC', taxable: true, percentOfGross: 0, calculation: 'Fixed monthly senior earning' },
 ];
 
+export const JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS: PayrollEarningDefinition[] = [
+  { code: 'PER_MEAL_JNR', name: 'Meal Allowance', taxable: true, percentOfGross: 0, calculation: 'Fixed monthly junior earning' },
+  { code: 'JNR_NJIC', name: 'JNR NJIC', taxable: true, percentOfGross: 0, calculation: 'Fixed monthly junior earning' },
+];
+
 const seniorFixedMonthlyEarningLines = (profileId: PayrollEarningProfileId): PayrollEarningLine[] => {
   if (profileId !== 'senior-permanent') return [];
   return [
     { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 22000 },
     { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 15000 },
+  ];
+};
+
+const juniorFixedMonthlyEarningLines = (profileId: PayrollEarningProfileId): PayrollEarningLine[] => {
+  if (profileId !== 'junior-permanent') return [];
+  return [
+    { ...JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 8800 },
+    { ...JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 10000 },
   ];
 };
 
@@ -454,7 +467,7 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
     ...definition,
     amount: roundMoney(gross * definition.percentOfGross),
   }));
-  const fixedMonthlyLines = seniorFixedMonthlyEarningLines(profileId);
+  const fixedMonthlyLines = [...seniorFixedMonthlyEarningLines(profileId), ...juniorFixedMonthlyEarningLines(profileId)];
   const lines = withCategoryFormulaLines(profileId, [...regularLines, ...fixedMonthlyLines]);
   const periodAdjustments = [
     ...periodAdjustmentLines(options),
