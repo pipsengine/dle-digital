@@ -77,6 +77,8 @@ type PayrollPeriodEarningAdjustment = {
   period: string;
   employeeId?: string;
   employeeCode?: string;
+  salaryGrades?: string[];
+  profileIds?: PayrollEarningProfileId[];
   code: string;
   name: string;
   amount: number;
@@ -102,6 +104,7 @@ const PERIOD_ADJUSTMENTS_PATH = process.env.DLE_PAYROLL_EARNING_ADJUSTMENTS_PATH
 let periodAdjustmentCache: { mtime: number; rows: PayrollPeriodEarningAdjustment[] } | null = null;
 const normalizedPeriod = (period?: string) => compact(period).replace(/\//g, '-').slice(0, 7);
 const normalizedEmployeeKey = (value: unknown) => compact(value).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^P(?=\d+$)/, '');
+const normalizedTextKey = (value: unknown) => compact(value).toUpperCase().replace(/\s+/g, '');
 const readPeriodEarningAdjustmentsSync = () => {
   try {
     if (!existsSync(PERIOD_ADJUSTMENTS_PATH)) return [];
@@ -350,9 +353,16 @@ const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, options?: Payr
   if (!options?.includePeriodAdjustments) return [];
   const period = normalizedPeriod(options.period);
   const employeeKeys = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].map(normalizedEmployeeKey).filter(Boolean);
+  const salaryGrade = normalizedTextKey(employee.salaryGrade || employee.jobGrade);
+  const profileId = resolvePayrollEarningProfile(employee);
   return readPeriodEarningAdjustmentsSync()
     .filter((row) => normalizedPeriod(row.period) === period)
-    .filter((row) => [row.employeeId, row.employeeCode].map(normalizedEmployeeKey).some((key) => employeeKeys.includes(key)))
+    .filter((row) => {
+      const employeeMatched = [row.employeeId, row.employeeCode].map(normalizedEmployeeKey).some((key) => key && employeeKeys.includes(key));
+      const gradeMatched = Array.isArray(row.salaryGrades) && row.salaryGrades.map(normalizedTextKey).includes(salaryGrade);
+      const profileMatched = Array.isArray(row.profileIds) && row.profileIds.includes(profileId);
+      return employeeMatched || gradeMatched || profileMatched;
+    })
     .map((row) => ({
       code: compact(row.code),
       name: compact(row.name || row.code),

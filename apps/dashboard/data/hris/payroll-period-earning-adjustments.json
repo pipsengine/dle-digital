@@ -18,5 +18,27 @@
     "amount": 1732.5,
     "taxable": false,
     "source": "May 2026 payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "salaryGrades": [
+      "JS1"
+    ],
+    "code": "OVT",
+    "name": "Overtime",
+    "amount": 10000,
+    "taxable": true,
+    "source": "May 2026 JS1 payroll adjustment"
+  },
+  {
+    "period": "2026-05",
+    "salaryGrades": [
+      "JS1"
+    ],
+    "code": "REFUND",
+    "name": "Refund",
+    "amount": 1375,
+    "taxable": false,
+    "source": "May 2026 JS1 payroll adjustment"
   }
 ]

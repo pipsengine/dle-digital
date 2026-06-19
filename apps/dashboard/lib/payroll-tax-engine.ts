@@ -142,7 +142,8 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
   if (component.calculationBasis === 'percent_of_monthly_base_annualized') amount = monthlyBase * rate * 12;
   if (component.calculationBasis === 'percent_of_annual_gross') amount = annualGross * rate;
   if (component.calculationBasis === 'percent_of_annual_rent') {
-    amount = annualRent > 0 ? annualRent * rate : Number(component.annualCap || 0);
+    const employeeRelief = Number(input.employee?.annualRentRelief);
+    amount = Number.isFinite(employeeRelief) && employeeRelief > 0 ? employeeRelief : annualRent > 0 ? annualRent * rate : Number(component.annualCap || 0);
   }
   if (component.calculationBasis === 'configured_employee_amount') amount = Number(input.courtGarnisheeMonthly || 0) * 12;
   if (component.calculationBasis === 'employer_statutory_tracking_only') amount = annualGross * rate;

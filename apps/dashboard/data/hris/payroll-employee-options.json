@@ -1,0 +1,25 @@
+[
+  {
+    "employeeId": "0080",
+    "employeeCode": "0080",
+    "nhfApplicable": false,
+    "updatedAt": "2026-06-19T00:00:00.000Z",
+    "updatedBy": "Payroll Officer"
+  },
+  {
+    "employeeId": "0309",
+    "employeeCode": "0309",
+    "nhfApplicable": true,
+    "annualRentRelief": 500000,
+    "updatedAt": "2026-06-19T00:00:00.000Z",
+    "updatedBy": "Payroll Officer"
+  },
+  {
+    "employeeId": "0366",
+    "employeeCode": "0366",
+    "nhfApplicable": true,
+    "annualRentRelief": 500000,
+    "updatedAt": "2026-06-19T00:00:00.000Z",
+    "updatedBy": "Payroll Officer"
+  }
+]

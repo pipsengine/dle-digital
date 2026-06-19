@@ -7,6 +7,7 @@ export type PayrollEmployeeOption = {
   employeeId: string;
   employeeCode?: string;
   nhfApplicable?: boolean;
+  annualRentRelief?: number | null;
   updatedAt: string;
   updatedBy?: string;
 };
@@ -65,6 +66,7 @@ export const applyPayrollEmployeeOptions = async (employees: DleEmployeeDirector
     return {
       ...employee,
       nhfApplicable: typeof option.nhfApplicable === 'boolean' ? option.nhfApplicable : employee.nhfApplicable,
+      annualRentRelief: Number.isFinite(Number(option.annualRentRelief)) ? Number(option.annualRentRelief) : employee.annualRentRelief,
     };
   });
 };
