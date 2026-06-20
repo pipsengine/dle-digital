@@ -228,9 +228,9 @@ const sections: SectionConfig[] = [
   },
   {
     id: 'salary-management',
-    label: 'Salary Management',
-    title: 'Salary Management',
-    description: 'Salary structures, grades, employee compensation setup, compensation planning, and governance.',
+    label: 'Payroll Admin',
+    title: 'Payroll Administration & Compensation Control Center',
+    description: 'Lifecycle-driven payroll administration, compensation setup, approval workflow, exceptions, statutory outputs, and enterprise controls.',
     icon: Coins,
     tone: 'green',
     tabs: [
@@ -867,6 +867,285 @@ function SalaryManagementWorkspace({ activeTab, payload, canViewMoney }: { activ
   );
 }
 
+function PayrollAdministrationControlCenter({
+  activeTab,
+  payload,
+  canViewMoney,
+  role,
+  runAction,
+  busyAction,
+}: {
+  activeTab: TabConfig;
+  payload: PayrollPayload | null;
+  canViewMoney: boolean;
+  role: Role;
+  runAction: (action: string, reason?: string) => void;
+  busyAction: string;
+}) {
+  const records = payload?.records || [];
+  const currentRun = payload?.runs[0] || null;
+  const runStatus = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+  const taxPensionLiability = (payload?.summary.deductions || 0);
+  const pendingApprovals = ['Submitted', 'Under Review', 'Ready for Approval'].includes(runStatus) ? 1 : 0;
+  const permanent = records.filter((record) => /permanent/i.test(`${record.employmentType} ${record.payrollGroup}`));
+  const lumpSum = records.filter((record) => /lump|gross/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`));
+  const dailyRate = records.filter((record) => record.isDailyRate || /daily|day/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`));
+  const contract = records.filter((record) => /contract/i.test(`${record.employmentType} ${record.payrollGroup}`) && !dailyRate.includes(record));
+  const readyPct = (rows: PayrollRecord[]) => rows.length ? (rows.filter((record) => record.payrollStatus === 'Ready').length / rows.length) * 100 : 0;
+  const commandActions = [
+    { id: 'validate-payroll', label: 'Validate Payroll', icon: ClipboardCheck, tone: 'blue' as Tone, disabled: !payload?.permissions.canManageRun },
+    { id: 'view-exceptions', label: 'View Exceptions', icon: AlertTriangle, tone: 'red' as Tone, disabled: false },
+    { id: 'create-run', label: 'Run Payroll', icon: PlayCircle, tone: 'green' as Tone, disabled: !payload?.permissions.canManageRun },
+    { id: 'submit-run', label: 'Submit for Approval', icon: Send, tone: 'violet' as Tone, disabled: !payload?.permissions.canManageRun },
+    { id: 'approve-run', label: 'Release Payroll', icon: BadgeCheck, tone: 'green' as Tone, disabled: !payload?.permissions.canApprove },
+    { id: 'generate-payslips', label: 'Publish Payslips', icon: ReceiptText, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun },
+    { id: 'generate-report', label: 'Generate Reports', icon: FileBarChart, tone: 'slate' as Tone, disabled: !payload?.permissions.canExport },
+  ];
+  const workflow = [
+    { label: 'Draft', owner: 'Payroll Officer', done: ['Draft', 'Validation', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Validated', owner: 'Payroll Supervisor', done: ['Validation', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Computed', owner: 'Payroll Officer', done: ['Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'HR Review', owner: 'HR Manager', done: ['Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Finance Review', owner: 'Finance Manager', done: ['Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'CFO Approval', owner: 'CFO', done: ['Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Released', owner: 'Payroll / Finance', done: ['Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Payslips Published', owner: 'Payroll Officer', done: ['Published', 'Closed'].includes(runStatus) },
+  ];
+  const periodBase = new Date();
+  const calendarRows = [
+    { label: 'Payroll Period', date: payload?.periodLabel || 'Current period', owner: 'Payroll Officer', status: runStatus },
+    { label: 'Data Cut-Off', date: new Date(periodBase.getFullYear(), periodBase.getMonth(), 20).toLocaleDateString('en-GB'), owner: 'HR / Payroll', status: 'Open' },
+    { label: 'Approval Deadline', date: new Date(periodBase.getFullYear(), periodBase.getMonth(), 24).toLocaleDateString('en-GB'), owner: 'HR, Finance, CFO', status: pendingApprovals ? 'Pending' : 'On Track' },
+    { label: 'Payment Date', date: new Date(periodBase.getFullYear(), periodBase.getMonth(), 28).toLocaleDateString('en-GB'), owner: 'Finance', status: ['Approved', 'Locked', 'Posted', 'Published'].includes(runStatus) ? 'Ready' : 'Waiting' },
+    { label: 'Payslip Publication', date: new Date(periodBase.getFullYear(), periodBase.getMonth(), 29).toLocaleDateString('en-GB'), owner: 'Payroll Officer', status: ['Published', 'Closed'].includes(runStatus) ? 'Published' : 'Scheduled' },
+  ];
+  const categoryRows = [
+    { label: 'Permanent', rows: permanent, tone: 'blue' as Tone, detail: 'Monthly salary, statutory deductions, pension and PAYE controls' },
+    { label: 'Lumpsum', rows: lumpSum, tone: 'violet' as Tone, detail: 'Taxable and non-taxable lump-sum compensation setup' },
+    { label: 'Daily Rate', rows: dailyRate, tone: 'amber' as Tone, detail: 'Attendance-driven day-rate payroll and project allocation' },
+    { label: 'Contract', rows: contract, tone: 'cyan' as Tone, detail: 'Contract payroll profiles, fixed-term controls, and ESS output' },
+  ];
+  const analysisGroups = [
+    { title: 'Department Payroll', icon: Building2, rows: payload?.breakdowns.byDepartment || [], tone: 'blue' as Tone },
+    { title: 'Cost Centre Payroll', icon: Landmark, rows: payload?.breakdowns.byDepartment || [], tone: 'violet' as Tone },
+    { title: 'Location Payroll', icon: Network, rows: groupPayrollRows(records, 'location'), tone: 'green' as Tone },
+    { title: 'Project / Category Payroll', icon: BriefcaseBusiness, rows: payload?.breakdowns.byPayrollGroup || [], tone: 'amber' as Tone },
+  ];
+  const approvalLevels = [
+    { level: 'Payroll Officer', control: 'Prepare, validate, compute, resolve exceptions', status: 'Configured' },
+    { level: 'HR Manager', control: 'Employee changes, eligibility, ESS readiness, comments', status: 'Configured' },
+    { level: 'Finance Manager', control: 'Cost centre, budget, bank schedule and journal review', status: 'Configured' },
+    { level: 'CFO', control: 'Final approval, rejection, reopening and release authority', status: 'Configured' },
+    { level: 'Delegation & Escalation', control: 'Delegated approvals, SLA reminders, audit capture', status: 'Ready' },
+  ];
+  const outputs = ['PAYE Schedule', 'Pension Schedule', 'NHF Schedule', 'NSITF Schedule', 'ITF Schedule', 'Bank Schedule', 'Payroll Register', 'Payslips', 'Compliance Reports'];
+  const enterpriseCapabilities = ['RBAC', 'Multi-Company', 'Multi-Location', 'ESS Integration', 'Document Management', 'Sage Integration', 'API Readiness', 'Notifications', 'Version Control', 'Enterprise Audit Compliance'];
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-blue-700">Payroll Administration & Compensation Control Center</p>
+            <h3 className="mt-1 text-xl font-black text-slate-950">Exception-focused payroll lifecycle workspace</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Salary structures, grades, employee pay setup, Sage migration review, and compensation planning remain available, now organized around payroll readiness, approvals, release, statutory outputs, and audit controls.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {activeTab.legacyHref ? <Link href={activeTab.legacyHref} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">Open {activeTab.label} <ChevronRight className="h-4 w-4" /></Link> : null}
+            <span className="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-700">Role: {role}</span>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <MetricCard label="Payroll Eligible" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.readyEmployees)} ready`} icon={Users} tone="blue" />
+        <MetricCard label="Gross Payroll" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net`} icon={Banknote} tone="green" />
+        <MetricCard label="Tax & Pension Liability" value={money(taxPensionLiability, canViewMoney)} detail="PAYE, pension, NHF, NSITF, ITF" icon={ReceiptText} tone="violet" />
+        <MetricCard label="Payroll Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
+        <MetricCard label="Payroll Status" value={runStatus} detail={payload?.workflow?.nextOwner || 'Payroll Officer'} icon={ShieldCheck} tone={statusTone(runStatus)} />
+        <MetricCard label="Pending Approvals" value={number(pendingApprovals)} detail={payload?.workflow?.approvalStage || 'Draft'} icon={ClipboardCheck} tone={pendingApprovals ? 'amber' : 'green'} />
+      </div>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Payroll Command Center</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Validate, compute, approve, release, publish, report, and audit payroll actions from one control surface.</p>
+          </div>
+          <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(runStatus)].chip}`}>Current status: {runStatus}</span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+          {commandActions.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button key={item.id} type="button" disabled={item.disabled || busyAction === item.id} onClick={() => runAction(item.id)} className={`min-h-20 rounded-lg border p-3 text-left transition ${item.disabled || busyAction === item.id ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400' : `${toneStyles[item.tone].card} hover:shadow-md`}`}>
+                <Icon className={`h-5 w-5 ${item.disabled ? 'text-slate-400' : toneStyles[item.tone].text}`} />
+                <p className="mt-2 text-xs font-black text-slate-950">{item.label}</p>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-black text-slate-950">Payroll Workflow Tracker</h3>
+        <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-4 xl:grid-cols-8">
+          {workflow.map((step, index) => (
+            <div key={step.label} className={`rounded-lg border p-3 ${step.done ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-black text-slate-950">{index + 1}. {step.label}</p>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{step.done ? 'Done' : 'Open'}</span>
+              </div>
+              <p className="mt-2 text-[11px] font-semibold text-slate-500">Owner: {step.owner}</p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">Audit: timestamp, comments, version stored</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-sm font-black text-slate-950">Payroll Calendar</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Period cut-off, approval, payment, and payslip publication dates.</p>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {calendarRows.map((item) => (
+              <div key={item.label} className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                <p className="text-sm font-black text-slate-950">{item.label}</p>
+                <p className="text-sm font-semibold text-slate-700">{item.date}</p>
+                <p className="text-xs font-bold text-slate-500">Owner: {item.owner}</p>
+                <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(item.status)].chip}`}>{item.status}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-sm font-black text-slate-950">Exception Management</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Ownership, severity, resolution tracking, comments, and audit log visibility.</p>
+          </div>
+          <div className="max-h-[360px] divide-y divide-slate-100 overflow-y-auto">
+            {(payload?.exceptions || []).slice(0, 8).map((item) => (
+              <div key={item.id} className="grid grid-cols-1 gap-3 p-4 md:grid-cols-[1.1fr_1fr_auto]">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{item.employeeName}</p>
+                  <p className="text-xs font-semibold text-slate-500">{item.employeeId} / {item.issue}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase text-slate-400">Owner</p>
+                  <p className="text-sm font-bold text-slate-700">{item.owner}</p>
+                </div>
+                <span className={`h-fit rounded-full px-2.5 py-1 text-[11px] font-black ${item.severity === 'High' ? toneStyles.red.chip : item.severity === 'Medium' ? toneStyles.amber.chip : toneStyles.slate.chip}`}>{item.severity}</span>
+              </div>
+            ))}
+            {!payload?.exceptions?.length ? <div className="p-4 text-sm font-black text-emerald-700">No payroll exceptions detected.</div> : null}
+          </div>
+        </section>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+        {categoryRows.map((item) => (
+          <section key={item.label} className={`rounded-lg border p-4 shadow-sm ${toneStyles[item.tone].card}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-950">{item.label}</h3>
+                <p className="mt-1 text-xs font-semibold text-slate-600">{item.detail}</p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-black ${toneStyles[item.tone].chip}`}>{number(item.rows.length)}</span>
+            </div>
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-[11px] font-black uppercase text-slate-500"><span>Readiness</span><span>{pctFmt.format(readyPct(item.rows))}%</span></div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/80"><div className={`h-full ${toneStyles[item.tone].bar}`} style={{ width: `${readyPct(item.rows)}%` }} /></div>
+            </div>
+          </section>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
+        {analysisGroups.map((group) => {
+          const Icon = group.icon;
+          return (
+            <section key={group.title} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${toneStyles[group.tone].icon}`}><Icon className="h-4 w-4" /></span>
+                <h3 className="text-sm font-black text-slate-950">{group.title}</h3>
+              </div>
+              <div className="mt-3 space-y-2">
+                {group.rows.slice(0, 5).map((row) => (
+                  <div key={row.label} className="rounded-lg bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-xs font-black text-slate-800">{row.label}</p>
+                      <p className="text-xs font-black text-slate-950">{number(row.employees)}</p>
+                    </div>
+                    <p className="mt-1 text-[11px] font-bold text-slate-500">{money(row.grossPay, canViewMoney)} gross / {number(row.exceptions)} exceptions</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Configurable Multi-Level Approval Workflow</h3>
+          <div className="mt-3 space-y-2">
+            {approvalLevels.map((item) => (
+              <div key={item.level} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div><p className="text-sm font-black text-slate-950">{item.level}</p><p className="mt-1 text-xs font-semibold text-slate-600">{item.control}</p></div>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-800">{item.status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Payroll Locking Controls</h3>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {['Salary structures locked after final approval', 'Payroll transactions locked after release', 'Bank schedule locked after payment file', 'Payslips versioned after publication', 'Reopening requires CFO approval', 'All changes create audit trail'].map((item) => (
+              <div key={item} className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-700" />
+                <p className="text-xs font-bold text-slate-700">{item}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Statutory Outputs, Integrations & Compliance</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Output packs, enterprise platform readiness, document control, notifications, and audit compliance.</p>
+          </div>
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">API + Sage ready</span>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          {outputs.map((item) => <div key={item} className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs font-black text-blue-800">{item}</div>)}
+          {enterpriseCapabilities.map((item) => <div key={item} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-black text-slate-700">{item}</div>)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const groupPayrollRows = (records: PayrollRecord[], key: keyof PayrollRecord) => Array.from(
+  records.reduce((map, record) => {
+    const label = String(record[key] || 'Unassigned');
+    const current = map.get(label) || { label, employees: 0, grossPay: 0, netPay: 0, exceptions: 0 };
+    current.employees += 1;
+    current.grossPay += record.grossPay || 0;
+    current.netPay += record.netPay || 0;
+    current.exceptions += record.exceptionCount || 0;
+    map.set(label, current);
+    return map;
+  }, new Map<string, { label: string; employees: number; grossPay: number; netPay: number; exceptions: number }>()).values(),
+).sort((a, b) => b.employees - a.employees);
+
 export default function PayrollManagementClient({ initialNow, initialSection = 'dashboard' }: { initialNow: string; initialSection?: string }) {
   const [sectionId, setSectionId] = useState<SectionId>(sectionById(initialSection).id);
   const [activeTabs, setActiveTabs] = useState<Record<string, string>>({});
@@ -1083,7 +1362,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             {section.id === 'dashboard' ? (
               <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} />
             ) : section.id === 'salary-management' ? (
-              <SalaryManagementWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
+              <PayrollAdministrationControlCenter activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} role={role} runAction={runAction} busyAction={busyAction} />
             ) : section.id === 'payroll-processing' && activeTab.id === 'payroll-period-management' ? (
               <PayrollPeriodManagementPanel payload={payload} activeTabId={periodTab} setActiveTabId={setPeriodTab} />
             ) : (
