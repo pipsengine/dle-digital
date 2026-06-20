@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    auditLeaveAction({
+    await auditLeaveAction({
       user: String(body.actor || role),
       role: payload.role,
       action,

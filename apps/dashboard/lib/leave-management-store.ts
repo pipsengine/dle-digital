@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import sql from 'mssql';
+import { getDleEnterpriseDbPool, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
-import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 
 export type LeaveRole = 'Leave Administrator' | 'HR Officer' | 'HR Manager' | 'Department Manager' | 'Supervisor' | 'Payroll Officer' | 'Employee' | 'Executive' | 'System Administrator';
 export type LeaveStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Withdrawn' | 'Cancelled' | 'Completed';
@@ -234,8 +235,6 @@ export const leaveActions: LeaveAction[] = [
   action('close-year', 'Close Leave Year', ['HR Manager', 'System Administrator'], undefined, false, true),
 ];
 
-const auditStore: LeaveAuditEntry[] = [];
-
 const dateAdd = (days: number) => {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -288,7 +287,7 @@ export const annualLeaveEntitlementForEmployee = (employee: DleEmployeeDirectory
       ? dormantLongPolicy.annualPermanentDays
       : 0;
 
-const seedLeaveTypes: LeaveTypeRule[] = [
+const defaultLeaveTypePolicies: LeaveTypeRule[] = [
   { id: 'annual-leave', name: 'Annual Leave', active: true, entitlementDays: dormantLongPolicy.annualPermanentDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 30 working days after confirmation of appointment; contract employees receive 14 working days annually while contract-active.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent', 'Contract'], genderRestriction: 'None', documentRequirements: [], approvalLevels: ['Supervisor', 'Manager', 'HR'], accrualRule: 'Annual entitlement grant with confirmation validation for permanent employees', carryForwardRule: `Every 1 January, unused Annual Leave rolls over to a maximum of ${dormantLongPolicy.carryForwardCap} working days as Carry Forward Leave and expires on 31 March.`, encashmentRule: 'Not encashable unless separately approved by HR and Payroll policy.', allowanceRule: `Leave Allowance is payable only when at least ${dormantLongPolicy.allowanceMinimumAnnualDays} working days Annual Leave is applied from the current year's entitlement.` },
   { id: 'sick-leave', name: 'Sick Leave', active: true, entitlementDays: dormantLongPolicy.sickDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 10 working days annually with medical evidence where required.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent'], genderRestriction: 'None', documentRequirements: ['Medical certificate'], approvalLevels: ['Supervisor', 'HR'], accrualRule: 'Annual grant', carryForwardRule: 'No carry forward', encashmentRule: 'Not encashable', allowanceRule: 'No leave allowance' },
   { id: 'casual-leave', name: 'Casual Leave', active: true, entitlementDays: dormantLongPolicy.casualDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 5 working days annually subject to manager approval.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent'], genderRestriction: 'None', documentRequirements: [], approvalLevels: ['Supervisor'], accrualRule: 'Annual grant', carryForwardRule: 'No carry forward', encashmentRule: 'Not encashable', allowanceRule: 'No leave allowance' },
@@ -298,7 +297,6 @@ const seedLeaveTypes: LeaveTypeRule[] = [
   { id: 'unpaid-leave', name: 'Unpaid Leave', active: true, entitlementDays: 0, durationBasis: 'Working days', eligibility: 'HR-approved exception with payroll impact.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent', 'Contract'], genderRestriction: 'None', documentRequirements: ['Reason evidence'], approvalLevels: ['Manager', 'HR', 'Payroll'], accrualRule: 'No accrual', carryForwardRule: 'Not applicable', encashmentRule: 'Not encashable', allowanceRule: 'Deductible through payroll where applicable' },
 ];
 
-const hashNum = (value: string) => value.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
 const activeStatus = (status: string) => ['active', 'confirmed', 'probation', 'on leave', 'contract active', 'reactivated'].includes(String(status || '').toLowerCase());
 const isConfirmedPermanent = (employee: DleEmployeeDirectoryRow) => {
   const status = String(employee.status || '').toLowerCase();
@@ -317,64 +315,239 @@ const entitlementFor = (employee: DleEmployeeDirectoryRow, leaveType = 'Annual L
   return 0;
 };
 
-const balanceFor = (employee: DleEmployeeDirectoryRow, leaveType = 'Annual Leave') => {
-  const base = entitlementFor(employee, leaveType);
-  const used = Math.min(base, hashNum(employee.employeeId) % Math.max(base || 1, 1));
-  const pending = hashNum(employee.fullName) % 4;
-  const carry = leaveType === 'Annual Leave' ? Math.min(dormantLongPolicy.carryForwardCap, hashNum(employee.department || '') % (dormantLongPolicy.carryForwardCap + 1)) : 0;
-  return {
-    current: Math.max(0, base + carry - used - pending),
-    accrued: base + carry,
-    used,
-    pending,
-    forfeited: leaveType === 'Annual Leave' ? hashNum(employee.employeeCode || employee.employeeId) % 3 : 0,
-    carry,
-  };
+type DbLeaveApplicationRow = {
+  Id: string;
+  EmployeeId: string;
+  FullName: string;
+  Department: string;
+  ManagerName: string;
+  Location: string;
+  EmployeeCategory: string;
+  LeaveType: string;
+  StartDate: Date | string;
+  EndDate: Date | string;
+  Days: number;
+  StatusName: LeaveStatus;
+  WorkflowStage: WorkflowStage;
+  ApprovalStatus: string;
+  PolicyComplianceStatus: LeaveApplicationRecord['policyComplianceStatus'];
+  BalanceImpact: number;
+  AvailableBalance: number;
+  ActingOfficer: string;
+  SupportingDocuments: number;
+  ExceptionsJson: string;
+  AuditCount: number;
 };
 
-const buildApplications = (employees: DleEmployeeDirectoryRow[]): LeaveApplicationRecord[] => {
-  const sample = employees.filter((employee) => activeStatus(employee.status)).slice(0, 18);
-  const statuses: LeaveStatus[] = ['Submitted', 'Under Review', 'Approved', 'Draft', 'Cancelled', 'Completed'];
-  return sample.map((employee, index) => {
-    const type = seedLeaveTypes[index % seedLeaveTypes.length].name;
-    const balance = balanceFor(employee, type);
-    const days = type === 'Annual Leave' && index % 3 === 0 ? 10 + (hashNum(employee.employeeId) % 6) : 1 + (hashNum(employee.employeeId) % 7);
-    const currentYearAnnualAllowance = type === 'Annual Leave' && days >= dormantLongPolicy.allowanceMinimumAnnualDays && balance.accrued > balance.carry;
-    const fourteenDayPaidLeave = isFourteenDayPaidLeaveEmployee(employee);
-    const status = statuses[index % statuses.length];
-    const exceptions = [
-      ...(type === 'Annual Leave' && !fourteenDayPaidLeave && !isConfirmedPermanent(employee) ? ['Annual Leave is available only after confirmation of appointment'] : []),
-      ...(days > balance.current && type !== 'Unpaid Leave' ? ['Insufficient leave balance'] : []),
-      ...(type === 'Annual Leave' && days < dormantLongPolicy.allowanceMinimumAnnualDays ? ['Leave Allowance not payable below 10 current-year Annual Leave days'] : []),
-      ...(index % 9 === 0 ? ['Acting officer not assigned'] : []),
-      ...(index % 11 === 0 ? ['Overlapping leave detected'] : []),
-      ...(index % 13 === 0 ? ['Requested date touches blocked period'] : []),
-    ];
-    const blocked = exceptions.some((item) => item.includes('Insufficient') || item.includes('Overlapping') || item.includes('blocked') || item.includes('confirmation'));
-    return {
-      id: `LV-${new Date().getFullYear()}-${String(index + 1).padStart(4, '0')}`,
-      employeeId: employee.employeeId,
-      fullName: employee.fullName,
-      department: employee.department || 'Unassigned',
-      managerName: employee.managerName || employee.departmentHead || 'Unassigned',
-      location: employee.location || employee.workLocation || 'Unassigned',
-      employeeCategory: employee.employeeCategory || employee.employmentType || 'Unassigned',
-      leaveType: type,
-      startDate: dateAdd(index + 1),
-      endDate: dateAdd(index + days),
-      days,
-      status,
-      stage: status === 'Draft' ? 'Employee' : status === 'Submitted' ? 'Supervisor' : status === 'Under Review' ? 'HR' : status === 'Approved' ? 'Final Approval' : 'Closed',
-      approvalStatus: status === 'Approved' || status === 'Completed' ? 'Approved' : status === 'Rejected' ? 'Rejected' : status === 'Cancelled' ? 'Cancelled' : 'Pending',
-      policyComplianceStatus: blocked ? 'Blocked' : exceptions.length ? 'Attention Required' : 'Compliant',
-      balanceImpact: type === 'Unpaid Leave' ? 0 : days,
-      availableBalance: balance.current,
-      actingOfficer: currentYearAnnualAllowance ? 'Payroll notified for Leave Allowance' : index % 9 === 0 ? 'Not assigned' : sample[(index + 1) % sample.length]?.fullName || 'Assigned',
-      supportingDocuments: index % 3,
-      exceptions,
-      auditCount: 2 + (index % 5),
-    };
-  });
+type DbLeaveBalanceRow = {
+  EmployeeId: string;
+  FullName: string;
+  Department: string;
+  LeaveType: string;
+  CurrentBalance: number;
+  AccruedBalance: number;
+  UsedBalance: number;
+  PendingBalance: number;
+  ForfeitedBalance: number;
+  CarryForwardBalance: number;
+  LiabilityValue: number;
+  StatusName: LeaveBalanceRecord['status'];
+  ExceptionsJson: string;
+};
+
+type DbLeaveAuditRow = {
+  Id: string;
+  CreatedAt: Date | string;
+  Actor: string;
+  ActorRole: LeaveRole;
+  ActionName: string;
+  RecordId: string;
+  OldValue: string | null;
+  NewValue: string | null;
+  Comments: string | null;
+  Reason: string | null;
+};
+
+const dbReady = { value: false };
+const clean = (value: unknown) => String(value || '').trim();
+const round2 = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+const dateOnly = (value: Date | string | null | undefined) => value ? (value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10)) : '';
+const parseJsonArray = (value: string | null | undefined) => {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+};
+
+const workflowStageForStatus = (status: LeaveStatus): WorkflowStage => {
+  if (status === 'Draft') return 'Employee';
+  if (status === 'Submitted') return 'Supervisor';
+  if (status === 'Under Review') return 'HR';
+  if (status === 'Approved') return 'Final Approval';
+  return 'Closed';
+};
+
+const approvalStatusFor = (status: LeaveStatus) => {
+  if (['Approved', 'Completed'].includes(status)) return 'Approved';
+  if (status === 'Rejected') return 'Rejected';
+  if (['Cancelled', 'Withdrawn'].includes(status)) return status;
+  return 'Pending';
+};
+
+const normalizeLeaveStatus = (status: string): LeaveStatus => {
+  const normalized = clean(status).toLowerCase();
+  if (['approved', 'closed'].includes(normalized)) return normalized === 'closed' ? 'Completed' : 'Approved';
+  if (['submitted', 'pending'].includes(normalized)) return 'Submitted';
+  if (['under review', 'review'].includes(normalized)) return 'Under Review';
+  if (['rejected', 'declined'].includes(normalized)) return 'Rejected';
+  if (['withdrawn'].includes(normalized)) return 'Withdrawn';
+  if (['cancelled', 'canceled'].includes(normalized)) return 'Cancelled';
+  if (['completed'].includes(normalized)) return 'Completed';
+  return 'Draft';
+};
+
+const monthlyPayFor = (employee: DleEmployeeDirectoryRow) => {
+  const sageGross = employee.sagePayrollEarnings?.reduce((sum, line) => sum + Number(line.amount || 0), 0) || 0;
+  if (sageGross > 0) return sageGross;
+  if (Number(employee.periodSalary || 0) > 0) return Number(employee.periodSalary || 0);
+  if (Number(employee.annualSalary || 0) > 0) return Number(employee.annualSalary || 0) / 12;
+  if (Number(employee.ratePerDay || 0) > 0) return Number(employee.ratePerDay || 0) * 22;
+  if (Number(employee.ratePerHour || 0) > 0) return Number(employee.ratePerHour || 0) * Number(employee.hoursPerPeriod || 176);
+  return 0;
+};
+
+const dailyPayFor = (employee: DleEmployeeDirectoryRow) => {
+  if (Number(employee.ratePerDay || 0) > 0) return Number(employee.ratePerDay || 0);
+  const monthly = monthlyPayFor(employee);
+  return monthly > 0 ? monthly / 22 : 0;
+};
+
+const ensureDb = async () => {
+  const pool = await getDleEnterpriseDbPool();
+  if (!pool) throw new Error('DLE Enterprise database is not configured. Leave management requires HRIS database persistence.');
+  if (!dbReady.value) {
+    await pool.request().query(`
+IF SCHEMA_ID(N'hris') IS NULL EXEC(N'CREATE SCHEMA [hris]');
+IF OBJECT_ID(N'[hris].[LeaveTypePolicies]', N'U') IS NULL
+CREATE TABLE [hris].[LeaveTypePolicies] (
+  [Id] NVARCHAR(80) NOT NULL CONSTRAINT [PK_LeaveTypePolicies] PRIMARY KEY,
+  [Name] NVARCHAR(120) NOT NULL,
+  [Active] BIT NOT NULL,
+  [EntitlementDays] DECIMAL(9,2) NOT NULL,
+  [DurationBasis] NVARCHAR(40) NOT NULL,
+  [Eligibility] NVARCHAR(800) NOT NULL,
+  [WaitingPeriodDays] INT NOT NULL,
+  [GradeRestrictionsJson] NVARCHAR(MAX) NOT NULL,
+  [CategoryRestrictionsJson] NVARCHAR(MAX) NOT NULL,
+  [GenderRestriction] NVARCHAR(40) NOT NULL,
+  [DocumentRequirementsJson] NVARCHAR(MAX) NOT NULL,
+  [ApprovalLevelsJson] NVARCHAR(MAX) NOT NULL,
+  [AccrualRule] NVARCHAR(500) NOT NULL,
+  [CarryForwardRule] NVARCHAR(500) NOT NULL,
+  [EncashmentRule] NVARCHAR(500) NOT NULL,
+  [AllowanceRule] NVARCHAR(500) NOT NULL,
+  [CreatedAt] DATETIME2 NOT NULL CONSTRAINT [DF_LeaveTypePolicies_CreatedAt] DEFAULT SYSUTCDATETIME(),
+  [UpdatedAt] DATETIME2 NOT NULL CONSTRAINT [DF_LeaveTypePolicies_UpdatedAt] DEFAULT SYSUTCDATETIME()
+);
+IF OBJECT_ID(N'[hris].[LeaveApplications]', N'U') IS NULL
+CREATE TABLE [hris].[LeaveApplications] (
+  [Id] NVARCHAR(120) NOT NULL CONSTRAINT [PK_LeaveApplications] PRIMARY KEY,
+  [SourceSystem] NVARCHAR(80) NOT NULL,
+  [EmployeeId] NVARCHAR(80) NOT NULL,
+  [FullName] NVARCHAR(220) NOT NULL,
+  [Department] NVARCHAR(180) NOT NULL,
+  [ManagerName] NVARCHAR(180) NOT NULL,
+  [Location] NVARCHAR(180) NOT NULL,
+  [EmployeeCategory] NVARCHAR(120) NOT NULL,
+  [LeaveType] NVARCHAR(120) NOT NULL,
+  [StartDate] DATE NOT NULL,
+  [EndDate] DATE NOT NULL,
+  [Days] DECIMAL(9,2) NOT NULL,
+  [StatusName] NVARCHAR(40) NOT NULL,
+  [WorkflowStage] NVARCHAR(40) NOT NULL,
+  [ApprovalStatus] NVARCHAR(60) NOT NULL,
+  [PolicyComplianceStatus] NVARCHAR(40) NOT NULL,
+  [BalanceImpact] DECIMAL(9,2) NOT NULL,
+  [AvailableBalance] DECIMAL(9,2) NOT NULL,
+  [ActingOfficer] NVARCHAR(180) NOT NULL,
+  [SupportingDocuments] INT NOT NULL,
+  [ExceptionsJson] NVARCHAR(MAX) NOT NULL,
+  [CreatedAt] DATETIME2 NOT NULL CONSTRAINT [DF_LeaveApplications_CreatedAt] DEFAULT SYSUTCDATETIME(),
+  [UpdatedAt] DATETIME2 NOT NULL CONSTRAINT [DF_LeaveApplications_UpdatedAt] DEFAULT SYSUTCDATETIME()
+);
+IF OBJECT_ID(N'[hris].[LeaveBalances]', N'U') IS NULL
+CREATE TABLE [hris].[LeaveBalances] (
+  [EmployeeId] NVARCHAR(80) NOT NULL,
+  [LeaveType] NVARCHAR(120) NOT NULL,
+  [FullName] NVARCHAR(220) NOT NULL,
+  [Department] NVARCHAR(180) NOT NULL,
+  [CurrentBalance] DECIMAL(9,2) NOT NULL,
+  [AccruedBalance] DECIMAL(9,2) NOT NULL,
+  [UsedBalance] DECIMAL(9,2) NOT NULL,
+  [PendingBalance] DECIMAL(9,2) NOT NULL,
+  [ForfeitedBalance] DECIMAL(9,2) NOT NULL,
+  [CarryForwardBalance] DECIMAL(9,2) NOT NULL,
+  [LiabilityValue] DECIMAL(19,2) NOT NULL,
+  [StatusName] NVARCHAR(40) NOT NULL,
+  [ExceptionsJson] NVARCHAR(MAX) NOT NULL,
+  [SourceSystem] NVARCHAR(80) NOT NULL,
+  [UpdatedAt] DATETIME2 NOT NULL CONSTRAINT [DF_LeaveBalances_UpdatedAt] DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT [PK_LeaveBalances] PRIMARY KEY ([EmployeeId], [LeaveType])
+);
+IF OBJECT_ID(N'[hris].[LeaveAuditTrail]', N'U') IS NULL
+CREATE TABLE [hris].[LeaveAuditTrail] (
+  [Id] NVARCHAR(140) NOT NULL CONSTRAINT [PK_LeaveAuditTrail] PRIMARY KEY,
+  [CreatedAt] DATETIME2 NOT NULL CONSTRAINT [DF_LeaveAuditTrail_CreatedAt] DEFAULT SYSUTCDATETIME(),
+  [Actor] NVARCHAR(180) NOT NULL,
+  [ActorRole] NVARCHAR(80) NOT NULL,
+  [ActionName] NVARCHAR(120) NOT NULL,
+  [RecordId] NVARCHAR(180) NOT NULL,
+  [OldValue] NVARCHAR(MAX) NULL,
+  [NewValue] NVARCHAR(MAX) NULL,
+  [Comments] NVARCHAR(700) NULL,
+  [Reason] NVARCHAR(700) NULL
+);`);
+    dbReady.value = true;
+  }
+  return pool;
+};
+
+const syncLeaveTypePolicies = async (pool: sql.ConnectionPool) => {
+  for (const type of defaultLeaveTypePolicies) {
+    await pool.request()
+      .input('Id', sql.NVarChar(80), type.id)
+      .input('Name', sql.NVarChar(120), type.name)
+      .input('Active', sql.Bit, type.active)
+      .input('EntitlementDays', sql.Decimal(9, 2), type.entitlementDays)
+      .input('DurationBasis', sql.NVarChar(40), type.durationBasis)
+      .input('Eligibility', sql.NVarChar(800), type.eligibility)
+      .input('WaitingPeriodDays', sql.Int, type.waitingPeriodDays)
+      .input('GradeRestrictionsJson', sql.NVarChar(sql.MAX), JSON.stringify(type.gradeRestrictions))
+      .input('CategoryRestrictionsJson', sql.NVarChar(sql.MAX), JSON.stringify(type.categoryRestrictions))
+      .input('GenderRestriction', sql.NVarChar(40), type.genderRestriction)
+      .input('DocumentRequirementsJson', sql.NVarChar(sql.MAX), JSON.stringify(type.documentRequirements))
+      .input('ApprovalLevelsJson', sql.NVarChar(sql.MAX), JSON.stringify(type.approvalLevels))
+      .input('AccrualRule', sql.NVarChar(500), type.accrualRule)
+      .input('CarryForwardRule', sql.NVarChar(500), type.carryForwardRule)
+      .input('EncashmentRule', sql.NVarChar(500), type.encashmentRule)
+      .input('AllowanceRule', sql.NVarChar(500), type.allowanceRule)
+      .query(`
+MERGE [hris].[LeaveTypePolicies] AS target
+USING (SELECT @Id AS [Id]) AS source
+ON target.[Id] = source.[Id]
+WHEN MATCHED THEN UPDATE SET
+  [Name]=@Name,[Active]=@Active,[EntitlementDays]=@EntitlementDays,[DurationBasis]=@DurationBasis,[Eligibility]=@Eligibility,
+  [WaitingPeriodDays]=@WaitingPeriodDays,[GradeRestrictionsJson]=@GradeRestrictionsJson,[CategoryRestrictionsJson]=@CategoryRestrictionsJson,
+  [GenderRestriction]=@GenderRestriction,[DocumentRequirementsJson]=@DocumentRequirementsJson,[ApprovalLevelsJson]=@ApprovalLevelsJson,
+  [AccrualRule]=@AccrualRule,[CarryForwardRule]=@CarryForwardRule,[EncashmentRule]=@EncashmentRule,[AllowanceRule]=@AllowanceRule,
+  [UpdatedAt]=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT
+  ([Id],[Name],[Active],[EntitlementDays],[DurationBasis],[Eligibility],[WaitingPeriodDays],[GradeRestrictionsJson],[CategoryRestrictionsJson],[GenderRestriction],[DocumentRequirementsJson],[ApprovalLevelsJson],[AccrualRule],[CarryForwardRule],[EncashmentRule],[AllowanceRule])
+VALUES
+  (@Id,@Name,@Active,@EntitlementDays,@DurationBasis,@Eligibility,@WaitingPeriodDays,@GradeRestrictionsJson,@CategoryRestrictionsJson,@GenderRestriction,@DocumentRequirementsJson,@ApprovalLevelsJson,@AccrualRule,@CarryForwardRule,@EncashmentRule,@AllowanceRule);`);
+  }
 };
 
 export type ApprovedPaidLeaveDay = {
@@ -401,32 +574,265 @@ type EssLeaveRequest = {
   paidLeave?: boolean;
 };
 
-const readApprovedEssPaidLeaveRequests = async () => {
+const readEssLeaveRequests = async () => {
   try {
     const parsed = JSON.parse(await readFile(ESS_REQUESTS_PATH, 'utf8')) as EssLeaveRequest[];
     return Array.isArray(parsed)
-      ? parsed.filter((request) =>
-          request.category === 'Leave' &&
-          request.paidLeave !== false &&
-          request.leaveType === 'Annual Leave' &&
-          ['Approved', 'Closed'].includes(request.status) &&
-          request.startDate &&
-          request.endDate,
-        )
+      ? parsed.filter((request) => request.category === 'Leave' && request.startDate && request.endDate)
       : [];
   } catch {
     return [];
   }
 };
 
+const rowToApplication = (row: DbLeaveApplicationRow): LeaveApplicationRecord => ({
+  id: row.Id,
+  employeeId: row.EmployeeId,
+  fullName: row.FullName,
+  department: row.Department,
+  managerName: row.ManagerName,
+  location: row.Location,
+  employeeCategory: row.EmployeeCategory,
+  leaveType: row.LeaveType,
+  startDate: dateOnly(row.StartDate),
+  endDate: dateOnly(row.EndDate),
+  days: Number(row.Days || 0),
+  status: row.StatusName,
+  stage: row.WorkflowStage,
+  approvalStatus: row.ApprovalStatus,
+  policyComplianceStatus: row.PolicyComplianceStatus,
+  balanceImpact: Number(row.BalanceImpact || 0),
+  availableBalance: Number(row.AvailableBalance || 0),
+  actingOfficer: row.ActingOfficer,
+  supportingDocuments: Number(row.SupportingDocuments || 0),
+  exceptions: parseJsonArray(row.ExceptionsJson),
+  auditCount: Number(row.AuditCount || 0),
+});
+
+const rowToBalance = (row: DbLeaveBalanceRow): LeaveBalanceRecord => ({
+  employeeId: row.EmployeeId,
+  fullName: row.FullName,
+  department: row.Department,
+  leaveType: row.LeaveType,
+  currentBalance: Number(row.CurrentBalance || 0),
+  accruedBalance: Number(row.AccruedBalance || 0),
+  usedBalance: Number(row.UsedBalance || 0),
+  pendingBalance: Number(row.PendingBalance || 0),
+  forfeitedBalance: Number(row.ForfeitedBalance || 0),
+  carryForwardBalance: Number(row.CarryForwardBalance || 0),
+  liabilityValue: Number(row.LiabilityValue || 0),
+  status: row.StatusName,
+  exceptions: parseJsonArray(row.ExceptionsJson),
+});
+
+const rowToAudit = (row: DbLeaveAuditRow): LeaveAuditEntry => ({
+  id: row.Id,
+  at: new Date(row.CreatedAt).toISOString(),
+  user: row.Actor,
+  role: row.ActorRole,
+  action: row.ActionName,
+  record: row.RecordId,
+  oldValue: row.OldValue,
+  newValue: row.NewValue,
+  comments: row.Comments || undefined,
+  reason: row.Reason || undefined,
+});
+
+const readLeaveApplications = async (pool: sql.ConnectionPool) => {
+  const result = await pool.request().query(`
+SELECT a.[Id],a.[EmployeeId],a.[FullName],a.[Department],a.[ManagerName],a.[Location],a.[EmployeeCategory],a.[LeaveType],
+  a.[StartDate],a.[EndDate],a.[Days],a.[StatusName],a.[WorkflowStage],a.[ApprovalStatus],a.[PolicyComplianceStatus],
+  a.[BalanceImpact],a.[AvailableBalance],a.[ActingOfficer],a.[SupportingDocuments],a.[ExceptionsJson],
+  (SELECT COUNT(1) FROM [hris].[LeaveAuditTrail] aud WHERE aud.[RecordId]=a.[Id]) AS [AuditCount]
+FROM [hris].[LeaveApplications] a
+ORDER BY a.[StartDate] DESC, a.[UpdatedAt] DESC;`);
+  return (result.recordset as DbLeaveApplicationRow[]).map(rowToApplication);
+};
+
+const readLeaveBalances = async (pool: sql.ConnectionPool) => {
+  const result = await pool.request().query(`
+SELECT [EmployeeId],[FullName],[Department],[LeaveType],[CurrentBalance],[AccruedBalance],[UsedBalance],[PendingBalance],
+  [ForfeitedBalance],[CarryForwardBalance],[LiabilityValue],[StatusName],[ExceptionsJson]
+FROM [hris].[LeaveBalances]
+ORDER BY [Department], [FullName], [LeaveType];`);
+  return (result.recordset as DbLeaveBalanceRow[]).map(rowToBalance);
+};
+
+const readLeaveTypes = async (pool: sql.ConnectionPool) => {
+  const result = await pool.request().query(`
+SELECT [Id],[Name],[Active],[EntitlementDays],[DurationBasis],[Eligibility],[WaitingPeriodDays],[GradeRestrictionsJson],
+  [CategoryRestrictionsJson],[GenderRestriction],[DocumentRequirementsJson],[ApprovalLevelsJson],[AccrualRule],[CarryForwardRule],
+  [EncashmentRule],[AllowanceRule]
+FROM [hris].[LeaveTypePolicies]
+ORDER BY [Name];`);
+  return result.recordset.map((row: any) => ({
+    id: row.Id,
+    name: row.Name,
+    active: Boolean(row.Active),
+    entitlementDays: Number(row.EntitlementDays || 0),
+    durationBasis: row.DurationBasis,
+    eligibility: row.Eligibility,
+    waitingPeriodDays: Number(row.WaitingPeriodDays || 0),
+    gradeRestrictions: parseJsonArray(row.GradeRestrictionsJson),
+    categoryRestrictions: parseJsonArray(row.CategoryRestrictionsJson),
+    genderRestriction: row.GenderRestriction,
+    documentRequirements: parseJsonArray(row.DocumentRequirementsJson),
+    approvalLevels: parseJsonArray(row.ApprovalLevelsJson),
+    accrualRule: row.AccrualRule,
+    carryForwardRule: row.CarryForwardRule,
+    encashmentRule: row.EncashmentRule,
+    allowanceRule: row.AllowanceRule,
+  } satisfies LeaveTypeRule));
+};
+
+const readLeaveAudit = async (pool: sql.ConnectionPool) => {
+  const result = await pool.request().query(`
+SELECT TOP (100) [Id],[CreatedAt],[Actor],[ActorRole],[ActionName],[RecordId],[OldValue],[NewValue],[Comments],[Reason]
+FROM [hris].[LeaveAuditTrail]
+ORDER BY [CreatedAt] DESC;`);
+  return (result.recordset as DbLeaveAuditRow[]).map(rowToAudit);
+};
+
+const upsertEssLeaveRequests = async (pool: sql.ConnectionPool, employees: DleEmployeeDirectoryRow[]) => {
+  const employeeById = new Map(employees.flatMap((employee) => [
+    [employee.employeeId, employee],
+    [employee.employeeCode, employee],
+  ].filter(([key]) => Boolean(key)) as Array<[string, DleEmployeeDirectoryRow]>));
+  const requests = await readEssLeaveRequests();
+  for (const item of requests) {
+    const employee = employeeById.get(item.employeeId);
+    const status = normalizeLeaveStatus(item.status);
+    const leaveType = clean(item.leaveType) || 'Annual Leave';
+    const startDate = dateOnly(item.startDate);
+    const endDate = dateOnly(item.endDate);
+    if (!startDate || !endDate) continue;
+    const days = Number(item.days || 0);
+    const exceptions = [
+      ...(days <= 0 ? ['Leave request has no calculated duration'] : []),
+      ...(!employee ? ['Employee record not found in HRIS employee master'] : []),
+      ...(leaveType === 'Annual Leave' && employee && !isFourteenDayPaidLeaveEmployee(employee) && !isConfirmedPermanent(employee) ? ['Annual Leave locked pending confirmation of appointment'] : []),
+    ];
+    const blocked = exceptions.some((entry) => entry.includes('not found') || entry.includes('locked'));
+    await pool.request()
+      .input('Id', sql.NVarChar(120), item.id)
+      .input('SourceSystem', sql.NVarChar(80), 'ESS Leave Request')
+      .input('EmployeeId', sql.NVarChar(80), employee?.employeeId || item.employeeId)
+      .input('FullName', sql.NVarChar(220), employee?.fullName || item.employeeId)
+      .input('Department', sql.NVarChar(180), employee?.department || 'Unassigned')
+      .input('ManagerName', sql.NVarChar(180), employee?.managerName || employee?.departmentHead || 'Unassigned')
+      .input('Location', sql.NVarChar(180), employee?.location || employee?.workLocation || 'Unassigned')
+      .input('EmployeeCategory', sql.NVarChar(120), employee?.employeeCategory || employee?.employmentType || 'Unassigned')
+      .input('LeaveType', sql.NVarChar(120), leaveType)
+      .input('StartDate', sql.Date, startDate)
+      .input('EndDate', sql.Date, endDate)
+      .input('Days', sql.Decimal(9, 2), round2(days))
+      .input('StatusName', sql.NVarChar(40), status)
+      .input('WorkflowStage', sql.NVarChar(40), workflowStageForStatus(status))
+      .input('ApprovalStatus', sql.NVarChar(60), approvalStatusFor(status))
+      .input('PolicyComplianceStatus', sql.NVarChar(40), blocked ? 'Blocked' : exceptions.length ? 'Attention Required' : 'Compliant')
+      .input('BalanceImpact', sql.Decimal(9, 2), leaveType === 'Unpaid Leave' ? 0 : round2(days))
+      .input('AvailableBalance', sql.Decimal(9, 2), 0)
+      .input('ActingOfficer', sql.NVarChar(180), 'Not configured')
+      .input('SupportingDocuments', sql.Int, 0)
+      .input('ExceptionsJson', sql.NVarChar(sql.MAX), JSON.stringify(exceptions))
+      .query(`
+MERGE [hris].[LeaveApplications] AS target
+USING (SELECT @Id AS [Id]) AS source
+ON target.[Id] = source.[Id]
+WHEN MATCHED THEN UPDATE SET
+  [SourceSystem]=@SourceSystem,[EmployeeId]=@EmployeeId,[FullName]=@FullName,[Department]=@Department,[ManagerName]=@ManagerName,
+  [Location]=@Location,[EmployeeCategory]=@EmployeeCategory,[LeaveType]=@LeaveType,[StartDate]=@StartDate,[EndDate]=@EndDate,
+  [Days]=@Days,[StatusName]=@StatusName,[WorkflowStage]=@WorkflowStage,[ApprovalStatus]=@ApprovalStatus,
+  [PolicyComplianceStatus]=@PolicyComplianceStatus,[BalanceImpact]=@BalanceImpact,[ActingOfficer]=@ActingOfficer,
+  [SupportingDocuments]=@SupportingDocuments,[ExceptionsJson]=@ExceptionsJson,[UpdatedAt]=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT
+  ([Id],[SourceSystem],[EmployeeId],[FullName],[Department],[ManagerName],[Location],[EmployeeCategory],[LeaveType],[StartDate],[EndDate],
+   [Days],[StatusName],[WorkflowStage],[ApprovalStatus],[PolicyComplianceStatus],[BalanceImpact],[AvailableBalance],[ActingOfficer],[SupportingDocuments],[ExceptionsJson])
+VALUES
+  (@Id,@SourceSystem,@EmployeeId,@FullName,@Department,@ManagerName,@Location,@EmployeeCategory,@LeaveType,@StartDate,@EndDate,
+   @Days,@StatusName,@WorkflowStage,@ApprovalStatus,@PolicyComplianceStatus,@BalanceImpact,@AvailableBalance,@ActingOfficer,@SupportingDocuments,@ExceptionsJson);`);
+  }
+};
+
+const syncLeaveBalances = async (pool: sql.ConnectionPool, employees: DleEmployeeDirectoryRow[]) => {
+  const existingRows = await pool.request().query(`
+SELECT [EmployeeId],[LeaveType],[CarryForwardBalance],[ForfeitedBalance]
+FROM [hris].[LeaveBalances];`);
+  const existing = new Map<string, { carry: number; forfeited: number }>();
+  for (const row of existingRows.recordset as Array<{ EmployeeId: string; LeaveType: string; CarryForwardBalance: number; ForfeitedBalance: number }>) {
+    existing.set(`${row.EmployeeId}::${row.LeaveType}`, { carry: Number(row.CarryForwardBalance || 0), forfeited: Number(row.ForfeitedBalance || 0) });
+  }
+
+  const applicationRows = await pool.request().query(`
+SELECT [EmployeeId],[LeaveType],
+  SUM(CASE WHEN [StatusName] IN (N'Approved',N'Completed') THEN [BalanceImpact] ELSE 0 END) AS [UsedDays],
+  SUM(CASE WHEN [StatusName] IN (N'Submitted',N'Under Review') THEN [BalanceImpact] ELSE 0 END) AS [PendingDays]
+FROM [hris].[LeaveApplications]
+WHERE [PolicyComplianceStatus] <> N'Blocked'
+GROUP BY [EmployeeId],[LeaveType];`);
+  const usage = new Map<string, { used: number; pending: number }>();
+  for (const row of applicationRows.recordset as Array<{ EmployeeId: string; LeaveType: string; UsedDays: number; PendingDays: number }>) {
+    usage.set(`${row.EmployeeId}::${row.LeaveType}`, { used: Number(row.UsedDays || 0), pending: Number(row.PendingDays || 0) });
+  }
+
+  for (const employee of employees.filter((row) => activeStatus(row.status))) {
+    const leaveType = 'Annual Leave';
+    const key = `${employee.employeeId}::${leaveType}`;
+    const entitlement = entitlementFor(employee, leaveType);
+    const currentExisting = existing.get(key);
+    const carry = Math.min(dormantLongPolicy.carryForwardCap, Number(currentExisting?.carry || 0));
+    const used = Number(usage.get(key)?.used || 0);
+    const pending = Number(usage.get(key)?.pending || 0);
+    const accrued = entitlement + carry;
+    const current = Math.max(0, accrued - used - pending);
+    const exceptions = [
+      ...(current < 3 && entitlement > 0 ? ['Low leave balance'] : []),
+      ...(!isFourteenDayPaidLeaveEmployee(employee) && !isConfirmedPermanent(employee) ? ['Annual Leave locked pending confirmation of appointment'] : []),
+      ...(employee.hasManagerAssigned === false ? ['Reporting manager missing'] : []),
+    ];
+    const status: LeaveBalanceRecord['status'] = entitlement <= 0 || exceptions.some((item) => item.includes('locked')) ? 'Blocked' : exceptions.length ? 'Review' : 'Healthy';
+    await pool.request()
+      .input('EmployeeId', sql.NVarChar(80), employee.employeeId)
+      .input('LeaveType', sql.NVarChar(120), leaveType)
+      .input('FullName', sql.NVarChar(220), employee.fullName)
+      .input('Department', sql.NVarChar(180), employee.department || 'Unassigned')
+      .input('CurrentBalance', sql.Decimal(9, 2), round2(current))
+      .input('AccruedBalance', sql.Decimal(9, 2), round2(accrued))
+      .input('UsedBalance', sql.Decimal(9, 2), round2(used))
+      .input('PendingBalance', sql.Decimal(9, 2), round2(pending))
+      .input('ForfeitedBalance', sql.Decimal(9, 2), round2(currentExisting?.forfeited || 0))
+      .input('CarryForwardBalance', sql.Decimal(9, 2), round2(carry))
+      .input('LiabilityValue', sql.Decimal(19, 2), round2(current * dailyPayFor(employee)))
+      .input('StatusName', sql.NVarChar(40), status)
+      .input('ExceptionsJson', sql.NVarChar(sql.MAX), JSON.stringify(exceptions))
+      .input('SourceSystem', sql.NVarChar(80), 'Sage Payroll Migration')
+      .query(`
+MERGE [hris].[LeaveBalances] AS target
+USING (SELECT @EmployeeId AS [EmployeeId], @LeaveType AS [LeaveType]) AS source
+ON target.[EmployeeId] = source.[EmployeeId] AND target.[LeaveType] = source.[LeaveType]
+WHEN MATCHED THEN UPDATE SET
+  [FullName]=@FullName,[Department]=@Department,[CurrentBalance]=@CurrentBalance,[AccruedBalance]=@AccruedBalance,
+  [UsedBalance]=@UsedBalance,[PendingBalance]=@PendingBalance,[ForfeitedBalance]=@ForfeitedBalance,[CarryForwardBalance]=@CarryForwardBalance,
+  [LiabilityValue]=@LiabilityValue,[StatusName]=@StatusName,[ExceptionsJson]=@ExceptionsJson,[SourceSystem]=@SourceSystem,[UpdatedAt]=SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT
+  ([EmployeeId],[LeaveType],[FullName],[Department],[CurrentBalance],[AccruedBalance],[UsedBalance],[PendingBalance],[ForfeitedBalance],[CarryForwardBalance],[LiabilityValue],[StatusName],[ExceptionsJson],[SourceSystem])
+VALUES
+  (@EmployeeId,@LeaveType,@FullName,@Department,@CurrentBalance,@AccruedBalance,@UsedBalance,@PendingBalance,@ForfeitedBalance,@CarryForwardBalance,@LiabilityValue,@StatusName,@ExceptionsJson,@SourceSystem);`);
+  }
+};
+
 export async function approvedPaidLeaveForDate(date: string): Promise<ApprovedPaidLeaveDay[]> {
   if (!date || !isWorkingDate(date)) return [];
   const employeeSource = await readPayrollEmployees();
+  const pool = await ensureDb();
+  await syncLeaveTypePolicies(pool);
+  await upsertEssLeaveRequests(pool, employeeSource.employees);
   const employeesById = new Map(employeeSource.employees.flatMap((employee) => [
     [employee.employeeId, employee],
     [employee.employeeCode, employee],
   ].filter(([key]) => Boolean(key)) as Array<[string, DleEmployeeDirectoryRow]>));
-  const generated = buildApplications(employeeSource.employees)
+  const applications = await readLeaveApplications(pool);
+  return applications
     .filter((application) =>
       application.leaveType === 'Annual Leave' &&
       ['Approved', 'Completed'].includes(application.status) &&
@@ -447,51 +853,7 @@ export async function approvedPaidLeaveForDate(date: string): Promise<ApprovedPa
         requestId: application.id,
       };
     });
-  const essRequests = (await readApprovedEssPaidLeaveRequests())
-    .filter((request) => dateInRange(date, request.startDate || '', request.endDate || ''))
-    .map((request) => {
-      const employee = employeesById.get(request.employeeId);
-      return {
-        employeeId: request.employeeId,
-        employeeCode: employee?.employeeCode || request.employeeId,
-        fullName: employee?.fullName || request.employeeId,
-        leaveType: request.leaveType || 'Annual Leave',
-        startDate: request.startDate || date,
-        endDate: request.endDate || date,
-        days: Number(request.days || 0),
-        status: request.status as LeaveStatus,
-        requestId: request.id,
-      };
-    });
-  return [...generated, ...essRequests];
 }
-
-const buildBalances = (employees: DleEmployeeDirectoryRow[]) => employees.slice(0, 120).map((employee) => {
-  const leaveType = 'Annual Leave';
-  const balance = balanceFor(employee, leaveType);
-  const fourteenDayPaidLeave = isFourteenDayPaidLeaveEmployee(employee);
-  const exceptions = [
-    ...(balance.current < 3 ? ['Low leave balance'] : []),
-    ...(!fourteenDayPaidLeave && !isConfirmedPermanent(employee) ? ['Annual Leave locked pending confirmation of appointment'] : []),
-    ...(!activeStatus(employee.status) ? ['Employee status is not leave active'] : []),
-    ...(employee.hasManagerAssigned === false ? ['Reporting manager missing'] : []),
-  ];
-  return {
-    employeeId: employee.employeeId,
-    fullName: employee.fullName,
-    department: employee.department || 'Unassigned',
-    leaveType,
-    currentBalance: balance.current,
-    accruedBalance: balance.accrued,
-    usedBalance: balance.used,
-    pendingBalance: balance.pending,
-    forfeitedBalance: balance.forfeited,
-    carryForwardBalance: balance.carry,
-    liabilityValue: balance.current * 18500,
-    status: exceptions.some((item) => item.includes('status')) ? 'Blocked' : exceptions.length ? 'Review' : 'Healthy',
-    exceptions,
-  } satisfies LeaveBalanceRecord;
-});
 
 const sectionConfig: LeavePayload['operationalSections'] = [
   { id: 'dashboard', label: 'Dashboard', area: 'Dashboard', description: 'Operational leave command center with status, approvals, liability, exceptions, calendars, and action queues.', actions: ['apply', 'view-history', 'process-accrual', 'process-carry-forward', 'generate-report', 'view-audit-trail'], controls: ['Current leave status', 'Available actions', 'Next required action', 'Approval status', 'Policy compliance status', 'Leave balance impact', 'Audit history', 'Workflow progress', 'Exception indicators'] },
@@ -546,7 +908,7 @@ const normalizeSection = (section = 'dashboard') => sectionAliases[section] || s
 const reportList = ['Executive Leave Policy Dashboard', 'Leave Utilization Report', 'Leave Balance Report', 'Leave Liability Report', 'Leave Allowance Eligibility Report', 'Carry Forward Expiry Report', 'Leave Approval Report', 'Leave Recall Report', 'Leave Cancellation Report', 'Leave Trend Analysis', 'Employee Leave History', 'Department Leave Report', 'Absenteeism Report'].map((name, index) => ({
   id: `rpt-${index + 1}`,
   name,
-  status: index % 3 === 0 ? 'Scheduled' : 'Ready',
+  status: 'Available',
   formats: 'Excel, PDF, CSV',
 }));
 
@@ -570,8 +932,14 @@ export async function readLeaveManagementPayload(section = 'dashboard', roleInpu
   const role = normalizeRole(roleInput);
   const employeeSource = await readPayrollEmployees();
   const employees = employeeSource.employees;
-  const applications = buildApplications(employees);
-  const balances = buildBalances(employees);
+  const pool = await ensureDb();
+  await syncLeaveTypePolicies(pool);
+  await upsertEssLeaveRequests(pool, employees);
+  await syncLeaveBalances(pool, employees);
+  const applications = await readLeaveApplications(pool);
+  const balances = await readLeaveBalances(pool);
+  const leaveTypes = await readLeaveTypes(pool);
+  const auditTrail = await readLeaveAudit(pool);
   const pendingApplications = applications.filter((item) => ['Submitted', 'Under Review', 'Draft'].includes(item.status)).length;
   const pendingApprovals = applications.filter((item) => ['Supervisor', 'Manager', 'HR', 'Final Approval'].includes(item.stage) && !['Approved', 'Completed', 'Cancelled', 'Rejected'].includes(item.status)).length;
   const employeesOnLeave = employees.filter((employee) => String(employee.status || '').toLowerCase().includes('leave')).length + applications.filter((item) => item.status === 'Approved').length;
@@ -584,7 +952,7 @@ export async function readLeaveManagementPayload(section = 'dashboard', roleInpu
 
   return {
     generatedAt: nowIso(),
-    source: `${employeeSource.source} with enterprise leave workflow controls`,
+    source: `${employeeSource.source} migrated into DLE HRIS leave tables; normal leave dashboard rendering is independent of live Sage payroll reads. ${employeeSource.warning || ''}`.trim(),
     role,
     section: currentSection.id,
     permissions: permissionsFor(role),
@@ -596,8 +964,8 @@ export async function readLeaveManagementPayload(section = 'dashboard', roleInpu
       pendingApprovals,
       leaveUtilizationPct: balances.length ? Math.round((balances.reduce((sum, item) => sum + item.usedBalance, 0) / Math.max(1, balances.reduce((sum, item) => sum + item.accruedBalance, 0))) * 100) : 0,
       leaveLiability,
-      encashmentRequests: Math.max(1, Math.floor(balances.filter((item) => item.currentBalance > 10).length / 18)),
-      recallRequests: applications.filter((item) => item.status === 'Approved').length,
+      encashmentRequests: 0,
+      recallRequests: 0,
       cancellationRequests: applications.filter((item) => item.status === 'Cancelled').length,
       exceptionCount,
     },
@@ -608,20 +976,16 @@ export async function readLeaveManagementPayload(section = 'dashboard', roleInpu
       approvalStatus: pendingApprovals ? `${pendingApprovals} approvals pending` : 'No approvals pending',
       policyComplianceStatus: blocked.length ? `${blocked.length} blocked requests` : 'Compliant',
       leaveBalanceImpact: `${balances.reduce((sum, item) => sum + item.pendingBalance, 0)} pending days reserved`,
-      auditHistory: `${auditStore.length} action logs captured this session`,
+      auditHistory: `${auditTrail.length} persisted audit actions available`,
       workflowProgress: pendingApprovals ? 'Employee -> Supervisor -> Manager -> HR -> Final Approval' : 'Workflow clear',
       exceptionIndicators: blocked.slice(0, 4).flatMap((item) => item.exceptions).slice(0, 5),
     },
     actions: availableActions,
     applications,
     balances,
-    leaveTypes: seedLeaveTypes,
+    leaveTypes,
     calendar: applications.slice(0, 10).map((item) => ({ id: item.id, label: `${item.fullName} - ${item.leaveType}`, from: item.startDate, to: item.endDate, status: item.status, department: item.department, location: item.location })),
-    blockedPeriods: [
-      { id: 'blk-001', name: 'Payroll close blackout', from: dateAdd(18), to: dateAdd(20), scope: 'Company-wide', status: 'Published' },
-      { id: 'blk-002', name: 'Major shutdown coverage window', from: dateAdd(35), to: dateAdd(39), scope: 'Operations', status: 'Reserved' },
-      { id: 'blk-003', name: 'Carry Forward Leave expiry reminder', from: `${currentYear}-03-24`, to: dormantLongPolicy.carryForwardExpiry, scope: 'Employees with carry-forward balances', status: 'Published' },
-    ],
+    blockedPeriods: [],
     workflowMatrix: [
       { dimension: 'Department', rule: 'Supervisor -> Manager -> HR' },
       { dimension: 'Grade', rule: 'Senior grades require final approval' },
@@ -631,7 +995,7 @@ export async function readLeaveManagementPayload(section = 'dashboard', roleInpu
     ],
     reports: reportList,
     notifications: ['Leave submitted', 'Leave approved', 'Leave rejected', 'Leave recalled', 'Leave cancelled', 'Leave Allowance payroll review required', 'Annual Leave locked pending confirmation', 'Carry Forward Leave created on 1 January', 'Carry Forward Leave expires 31 March', 'Leave balance adjusted', 'Accrual completed', 'Leave year closed'].map((name, index) => ({ id: `ntf-${index + 1}`, event: name, channels: 'Email, In-app, ESS', status: 'Enabled' })),
-    auditTrail: auditStore.slice(0, 50),
+    auditTrail,
     integrations: [
       { system: 'ESS Portal', status: 'Ready', purpose: 'Apply leave, view Dorman Long entitlements, balances, carry-forward expiry, calendars, history, status, withdrawals, and documents' },
       { system: 'Payroll Management', status: 'Ready', purpose: `Leave Allowance payable only for ${dormantLongPolicy.allowanceMinimumAnnualDays}+ current-year Annual Leave working days; unpaid leave and liability posting supported` },
@@ -643,9 +1007,21 @@ export async function readLeaveManagementPayload(section = 'dashboard', roleInpu
   };
 }
 
-export function auditLeaveAction(input: Omit<LeaveAuditEntry, 'id' | 'at'>) {
-  auditStore.unshift({ id: `leave-aud-${Date.now()}-${Math.random().toString(16).slice(2)}`, at: nowIso(), ...input });
-  if (auditStore.length > 300) auditStore.length = 300;
+export async function auditLeaveAction(input: Omit<LeaveAuditEntry, 'id' | 'at'>) {
+  const pool = await ensureDb();
+  await pool.request()
+    .input('Id', sql.NVarChar(140), `leave-aud-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    .input('Actor', sql.NVarChar(180), input.user)
+    .input('ActorRole', sql.NVarChar(80), input.role)
+    .input('ActionName', sql.NVarChar(120), input.action)
+    .input('RecordId', sql.NVarChar(180), input.record)
+    .input('OldValue', sql.NVarChar(sql.MAX), input.oldValue)
+    .input('NewValue', sql.NVarChar(sql.MAX), input.newValue)
+    .input('Comments', sql.NVarChar(700), input.comments || null)
+    .input('Reason', sql.NVarChar(700), input.reason || null)
+    .query(`
+INSERT [hris].[LeaveAuditTrail]([Id],[Actor],[ActorRole],[ActionName],[RecordId],[OldValue],[NewValue],[Comments],[Reason])
+VALUES (@Id,@Actor,@ActorRole,@ActionName,@RecordId,@OldValue,@NewValue,@Comments,@Reason);`);
 }
 
 export function validateLeaveAction(actionId: LeaveActionId, roleInput: string | null | undefined, payload: LeavePayload, body: any = {}) {
@@ -662,11 +1038,15 @@ export function validateLeaveAction(actionId: LeaveActionId, roleInput: string |
     const employeeCategory = String(body.employeeCategory || body.employmentType || 'Permanent');
     const fourteenDayPaidLeaveRequest = /contract|lumpsum|lump sum|daily rate|casual|temporary|nysc|national youth service|industrial training|intern|internship|\bit\b/i.test(employeeCategory) || /^(IT|I|NYSC|N)\d+/i.test(String(body.employeeId || body.employeeCode || ''));
     const confirmed = body.confirmed === true || String(body.confirmationStatus || '').toLowerCase() === 'confirmed';
-    const sampleBalance = payload.balances[0]?.currentBalance || 0;
+    const employeeKey = String(body.employeeId || body.employeeCode || '').trim();
+    const employeeBalance = payload.balances.find((balance) => balance.employeeId === employeeKey && balance.leaveType === leaveType)
+      || payload.balances.find((balance) => balance.employeeId === employeeKey)
+      || payload.balances.find((balance) => balance.leaveType === leaveType);
+    const availableBalance = employeeBalance?.currentBalance || 0;
     if (leaveType === 'Annual Leave' && !fourteenDayPaidLeaveRequest && !confirmed) return { ok: false, status: 409, message: 'Annual Leave is available only after confirmation of appointment.' };
     if (leaveType === 'Annual Leave' && fourteenDayPaidLeaveRequest && requestedDays > dormantLongPolicy.annualContractDays) return { ok: false, status: 409, message: `Contract/Lumpsum/NYSC/IT paid Annual Leave cannot exceed ${dormantLongPolicy.annualContractDays} working days annually.` };
     if (leaveType === 'Annual Leave' && requestedDays >= dormantLongPolicy.allowanceMinimumAnnualDays && body.usesCarryForward) return { ok: false, status: 409, message: 'Leave Allowance applies only to current-year Annual Leave entitlement, not Carry Forward Leave.' };
-    if (leaveType !== 'Unpaid Leave' && requestedDays > sampleBalance) return { ok: false, status: 409, message: 'Leave application cannot proceed without sufficient balance.' };
+    if (leaveType !== 'Unpaid Leave' && requestedDays > availableBalance) return { ok: false, status: 409, message: 'Leave application cannot proceed without sufficient balance.' };
     if (body.overlaps) return { ok: false, status: 409, message: 'Overlapping leave request detected.' };
     if (body.blockedPeriod) return { ok: false, status: 409, message: 'Leave application falls within a blocked period.' };
   }
