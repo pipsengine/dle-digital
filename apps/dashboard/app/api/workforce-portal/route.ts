@@ -7,10 +7,10 @@ import { calculatePayrollEarnings, calculatePermanentUnionDues } from '@/lib/pay
 import { activeLoansVersion, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
-import { hasLeaveAllowanceInYear, syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
-import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee, readLeaveManagementPayload } from '@/lib/leave-management-store';
+import { hasLeaveAllowanceInYear } from '@/lib/payroll-leave-allowance-store';
+import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
-import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
+import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
 
@@ -175,6 +175,8 @@ const serviceCatalog = [
 ];
 
 const ESS_CURRENT_PAYROLL_PERIOD = activePayrollPeriod();
+const ESS_RESPONSE_CACHE_MS = Number(process.env.ESS_PORTAL_RESPONSE_CACHE_MS || 30000);
+const essResponseCache = new Map<string, { expiresAt: number; payload: unknown }>();
 const normalize = (value: unknown) => compact(value).toLowerCase();
 const tokenFrom = (request: Request) => request.headers.get('cookie')?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${AUTH_COOKIE}=`))?.split('=').slice(1).join('=');
 const getSession = (request: Request) => verifySessionToken(tokenFrom(request) ? decodeURIComponent(tokenFrom(request) || '') : '');
@@ -231,12 +233,13 @@ export async function GET(request: Request) {
     if (!session) return err(401, 'Unauthenticated.');
     if (session.isGlobalAdmin) return err(403, 'Global administrator is not linked to an employee self-service profile.');
     const locale = compact(request.headers.get('x-ess-locale')) || 'en-NG';
-    await syncPayslipIdentitiesFromSage({ force: true, migratedBy: 'Employee Self-Service Payslip' }).catch(() => undefined);
+    const cacheKey = `${session.sub}:${session.employeeCode || session.employeeId || session.username}:${locale}`;
+    const cached = essResponseCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return ok(cached.payload);
     const [employeeSource, rawRequests, loanApplications, loansConfig, taxConfig, pensionConfig, identityByKey] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig(), payslipIdentityMap()]);
     const allRequests = await expireStaleLeaveRequests(rawRequests);
     const employee = resolveEssEmployee(employeeSource.employees, session);
     if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');
-    await syncSageLeaveAllowanceEvents();
     const payslipIdentity = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId]
       .map(normalizePayrollMatchKey)
       .map((key) => identityByKey.get(key))
@@ -347,12 +350,34 @@ export async function GET(request: Request) {
     const confirmedPermanent = String(employee.status || '').toLowerCase().includes('confirmed') || (employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() <= Date.now() : false);
     const leaveYear = new Date().getFullYear();
     const annualEntitlement = annualLeaveEntitlementForEmployee(employee);
-    const leavePayload = await readLeaveManagementPayload('dashboard', 'Employee');
-    const employeeLeaveApplications = leavePayload.applications.filter((item) => item.employeeId === employee.employeeId || item.employeeId === employee.employeeCode);
-    const annualBalanceRecord = leavePayload.balances.find((item) => (item.employeeId === employee.employeeId || item.employeeId === employee.employeeCode) && item.leaveType === 'Annual Leave');
-    const leaveUsed = Number(annualBalanceRecord?.usedBalance || 0);
-    const carryForward = Number(annualBalanceRecord?.carryForwardBalance || 0);
-    const annualBalance = Number(annualBalanceRecord?.currentBalance ?? Math.max(0, annualEntitlement - leaveUsed));
+    const employeeLeaveApplications = employeeRequests
+      .filter((item) => item.category === 'Leave' && item.startDate && item.endDate)
+      .map((item) => {
+        const status = item.status === 'Line Manager Review' || item.status === 'HR Review' || item.status === 'Submitted' ? 'Under Review' : item.status;
+        const stage = item.status === 'HR Review' ? 'HR' : item.status === 'Line Manager Review' ? 'Supervisor' : item.status === 'Approved' ? 'Closed' : 'Employee';
+        return {
+          id: item.id,
+          employeeId: item.employeeId,
+          fullName: employee.fullName,
+          department: employee.department,
+          managerName: managerOwnerFor(employee),
+          leaveType: item.leaveType || 'Annual Leave',
+          startDate: item.startDate || '',
+          endDate: item.endDate || '',
+          days: Number(item.days || 0),
+          status,
+          stage,
+          actingOfficer: item.relieverName || 'Not configured',
+          supportingDocuments: 0,
+          exceptions: item.status === 'Terminated' ? ['Approval validity expired after 5 working days'] : [],
+          approvalStatus: item.status === 'Approved' ? 'Approved' : item.status === 'Rejected' ? 'Rejected' : item.status === 'Terminated' ? 'Terminated' : 'Pending',
+        };
+      });
+    const annualLeaveApplications = employeeLeaveApplications.filter((item) => item.leaveType === 'Annual Leave');
+    const leaveUsed = annualLeaveApplications.filter((item) => ['Approved', 'Completed'].includes(item.status)).reduce((sum, item) => sum + Number(item.days || 0), 0);
+    const pendingAnnualLeave = annualLeaveApplications.filter((item) => ['Submitted', 'Under Review'].includes(item.status)).reduce((sum, item) => sum + Number(item.days || 0), 0);
+    const carryForward = 0;
+    const annualBalance = Math.max(0, annualEntitlement - leaveUsed - pendingAnnualLeave);
     leaveContext = { annualEntitlement, leaveUsed, leaveBalance: annualBalance, carryForward };
     const currentPayroll = payrollForPeriod(ESS_CURRENT_PAYROLL_PERIOD);
     const aprilPayroll = payrollForPeriod('2026-04');
@@ -364,7 +389,7 @@ export async function GET(request: Request) {
     const examUsed = employee.employeeDbId % 2;
     const maternityEligible = !fourteenDayPaidLeaveEmployee && /female/i.test(String((employee as any).gender || (employee as any).title || ''));
     const leavePolicyCards = [
-      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: annualBalanceRecord?.pendingBalance || 0, balance: annualBalance, expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Eligible - 14 paid working days annual entitlement' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Eligible - junior permanent employee' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: `Eligible only from ${dormantLongPolicy.allowanceMinimumAnnualDays} current-year Annual Leave working days`, policyNote: fourteenDayPaidLeaveEmployee ? 'Contract, lumpsum, NYSC, IT, and daily-rate employees receive 14 paid working days annually.' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Junior permanent employees receive 25 working days annually.' : 'Confirmed permanent employees receive 30 working days annually.' },
+      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: pendingAnnualLeave, balance: annualBalance, expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Eligible - 14 paid working days annual entitlement' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Eligible - junior permanent employee' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: `Eligible only from ${dormantLongPolicy.allowanceMinimumAnnualDays} current-year Annual Leave working days`, policyNote: fourteenDayPaidLeaveEmployee ? 'Contract, lumpsum, NYSC, IT, and daily-rate employees receive 14 paid working days annually.' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Junior permanent employees receive 25 working days annually.' : 'Confirmed permanent employees receive 30 working days annually.' },
       { id: 'sick-leave', type: 'Sick Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 10, basis: 'Working days', used: sickUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 10) - sickUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Medical certificate may be required.' },
       { id: 'casual-leave', type: 'Casual Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: casualUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - casualUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Short-duration absence subject to manager approval.' },
       { id: 'compassionate-leave', type: 'Compassionate Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: compassionateUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - compassionateUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Supporting document required where applicable.' },
@@ -429,7 +454,7 @@ export async function GET(request: Request) {
         department: item.department || 'Unassigned',
       }));
 
-    return ok({
+    const payload = {
       generatedAt: new Date().toISOString(),
       locale,
       security: {
@@ -656,7 +681,9 @@ export async function GET(request: Request) {
         { label: 'Workflow SLA compliance', value: 91, unit: '%' },
         { label: 'Mobile access share', value: 43, unit: '%' },
       ],
-    });
+    };
+    essResponseCache.set(cacheKey, { expiresAt: Date.now() + ESS_RESPONSE_CACHE_MS, payload });
+    return ok(payload);
   } catch (error) {
     console.error('Workforce portal API failed', error);
     return err(500, error instanceof Error ? error.message : 'Unable to load workforce portal.');
@@ -710,6 +737,7 @@ export async function POST(request: Request) {
           : item
       );
       await writeRequests(nextRequests);
+      essResponseCache.clear();
       if (!approved) {
         await notifyLeaveWorkflow(session, {
           requestId,
@@ -816,6 +844,7 @@ export async function POST(request: Request) {
 
     const requests = await readRequests();
     await writeRequests([requestItem, ...requests]);
+    essResponseCache.clear();
     if (isLeaveRequest) {
       await notifyLeaveWorkflow(session, {
         requestId: requestItem.id,

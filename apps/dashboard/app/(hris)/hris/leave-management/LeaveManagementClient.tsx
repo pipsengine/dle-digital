@@ -1,6 +1,6 @@
 'use client';
 
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -36,6 +36,7 @@ type LeaveTone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate
 type LeaveAction = { id: string; label: string; roles: LeaveRole[]; requiresReason?: boolean; sensitive?: boolean };
 type AppRecord = {
   id: string;
+  sourceSystem: string;
   employeeId: string;
   fullName: string;
   department: string;
@@ -56,6 +57,8 @@ type AppRecord = {
   supportingDocuments: number;
   exceptions: string[];
   auditCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 type BalanceRecord = {
   employeeId: string;
@@ -238,7 +241,7 @@ function StatusPanel({ payload }: { payload: Payload | null }) {
 
 const workspaces: Array<{ id: string; label: SectionArea; defaultSection: string; description: string }> = [
   { id: 'dashboard', label: 'Dashboard', defaultSection: 'dashboard', description: 'Executive overview, command center metrics, exceptions, workflow status, and leave governance signals.' },
-  { id: 'transactions', label: 'Transactions', defaultSection: 'applications', description: 'Employee requests, manager approvals, recalls, cancellations, encashments, workflow actions, and audit-ready transaction controls.' },
+  { id: 'transactions', label: 'Transactions', defaultSection: 'transactions', description: 'Employee requests, manager approvals, recalls, cancellations, encashments, workflow actions, and audit-ready transaction controls.' },
   { id: 'planning-and-balances', label: 'Planning & Balances', defaultSection: 'leave-calendar', description: 'Calendars, team coverage planning, balance administration, holiday controls, liability values, and scheduling governance.' },
   { id: 'administration', label: 'Administration', defaultSection: 'leave-types', description: 'Configurable leave types, policies, accruals, carry-forward, adjustments, year-end processing, RBAC, and compliance controls.' },
   { id: 'reports-and-analytics', label: 'Reports & Analytics', defaultSection: 'leave-reports', description: 'Operational reports, utilization, liability, trends, approval analytics, exports, and scheduled reporting.' },
@@ -443,6 +446,7 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
           </div>
 
           {section === 'dashboard' ? <DashboardView payload={payload} /> : null}
+          {section === 'transactions' ? <TransactionRegisterView rows={filteredApplications} payload={payload} /> : null}
           {section === 'applications' ? <ApplicationView rows={filteredApplications} /> : null}
           {section === 'approvals' ? <ApprovalView rows={filteredApplications} /> : null}
           {section === 'leave-calendar' ? <CalendarView payload={payload} /> : null}
@@ -501,6 +505,102 @@ function LeaveTypeDashboardCards({ payload }: { payload: Payload | null }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function TransactionRegisterView({ rows, payload }: { rows: AppRecord[]; payload: Payload | null }) {
+  const pending = rows.filter((item) => ['Draft', 'Submitted', 'Under Review'].includes(item.status)).length;
+  const approved = rows.filter((item) => ['Approved', 'Completed'].includes(item.status)).length;
+  const rejected = rows.filter((item) => ['Rejected', 'Cancelled', 'Withdrawn', 'Terminated'].includes(item.status)).length;
+  const exceptions = rows.reduce((sum, item) => sum + item.exceptions.length, 0);
+  return (
+    <div className="space-y-4">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Transactions" value={number(rows.length)} detail="Persisted HRIS leave records" icon={FileText} tone="blue" />
+        <MetricCard label="Pending Workflow" value={number(pending)} detail="Awaiting employee/manager/HR action" icon={Clock3} tone={pending ? 'amber' : 'green'} />
+        <MetricCard label="Approved / Closed" value={number(approved)} detail="Payroll and attendance ready where applicable" icon={BadgeCheck} tone="green" />
+        <MetricCard label="Exceptions" value={number(exceptions + rejected)} detail={`${number(rejected)} rejected, cancelled, withdrawn, or terminated`} icon={AlertTriangle} tone={exceptions || rejected ? 'red' : 'cyan'} />
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="text-base font-black text-slate-950">Production Data Source</h3>
+            <p className="mt-1 max-w-4xl text-xs font-semibold text-slate-600">
+              Transactions are read from HRIS persisted leave tables. Sage payroll is used only to migrate employee context and balance foundations when HRIS data is missing; normal rendering does not depend on live Sage reads.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Chip value={payload?.source.includes('HRIS') ? 'HRIS DB Active' : 'HRIS DB'} />
+            <Chip value={`${number(payload?.auditTrail.length)} audit actions`} />
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <TableHeader title="Leave Transaction Register" detail="Live HRIS leave transactions with workflow stage, approval status, reliever, source, balance impact, audit count, and exception posture." />
+        {rows.length ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-[1480px] w-full divide-y divide-slate-100">
+              <thead className="bg-slate-50">
+                <tr>{['Transaction', 'Employee', 'Department / Location', 'Leave', 'Period', 'Workflow', 'Reliever', 'Balance', 'Source / Audit', 'Exceptions'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {rows.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <div className="font-black text-slate-950">{item.id}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">Updated {stableDateTime(item.updatedAt)}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-black text-slate-950">{item.fullName}</div>
+                      <div className="text-xs font-semibold text-slate-500">{item.employeeId} - {item.employeeCategory}</div>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">
+                      <div>{item.department || 'Unassigned'}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">{item.location || 'No location'}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-black text-slate-900">{item.leaveType}</div>
+                      <div className="text-xs font-semibold text-slate-500">{item.days} day(s)</div>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.startDate} to {item.endDate}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-1">
+                        <Chip value={item.status} />
+                        <span className="text-xs font-bold text-slate-600">{item.stage} / {item.approvalStatus}</span>
+                        <span className="text-xs font-bold text-slate-500">Manager: {item.managerName || 'Not assigned'}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.actingOfficer || 'Not configured'}</td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">
+                      <div>{item.availableBalance} available</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">{item.balanceImpact} reserved/used</div>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">
+                      <div>{item.sourceSystem}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">Created {stableDateTime(item.createdAt)} / {item.auditCount} audit log(s)</div>
+                    </td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-600">
+                      {item.exceptions.length ? item.exceptions.join(', ') : <Chip value={item.policyComplianceStatus} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-6">
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
+              <h4 className="text-base font-black text-slate-950">No leave transactions found in HRIS</h4>
+              <p className="mt-2 max-w-3xl text-sm font-semibold text-slate-600">
+                The page is not showing mock transactions. Employee master data and leave balances can be migrated from Sage payroll into HRIS, but leave transaction records will appear only after ESS/HRIS leave applications are submitted, imported, or approved into the HRIS leave tables.
+              </p>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 

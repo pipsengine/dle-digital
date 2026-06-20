@@ -67,6 +67,7 @@ export type LeaveAuditEntry = {
 
 export type LeaveApplicationRecord = {
   id: string;
+  sourceSystem: string;
   employeeId: string;
   fullName: string;
   department: string;
@@ -87,6 +88,8 @@ export type LeaveApplicationRecord = {
   supportingDocuments: number;
   exceptions: string[];
   auditCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type LeaveBalanceRecord = {
@@ -334,6 +337,7 @@ export const annualLeaveEntitlementForEmployee = (employee: DleEmployeeDirectory
 
 type DbLeaveApplicationRow = {
   Id: string;
+  SourceSystem: string;
   EmployeeId: string;
   FullName: string;
   Department: string;
@@ -354,6 +358,8 @@ type DbLeaveApplicationRow = {
   SupportingDocuments: number;
   ExceptionsJson: string;
   AuditCount: number;
+  CreatedAt: Date | string;
+  UpdatedAt: Date | string;
 };
 
 type DbLeaveBalanceRow = {
@@ -622,6 +628,7 @@ const readEssLeaveRequests = async () => {
 
 const rowToApplication = (row: DbLeaveApplicationRow): LeaveApplicationRecord => ({
   id: row.Id,
+  sourceSystem: row.SourceSystem,
   employeeId: row.EmployeeId,
   fullName: row.FullName,
   department: row.Department,
@@ -642,6 +649,8 @@ const rowToApplication = (row: DbLeaveApplicationRow): LeaveApplicationRecord =>
   supportingDocuments: Number(row.SupportingDocuments || 0),
   exceptions: parseJsonArray(row.ExceptionsJson),
   auditCount: Number(row.AuditCount || 0),
+  createdAt: new Date(row.CreatedAt).toISOString(),
+  updatedAt: new Date(row.UpdatedAt).toISOString(),
 });
 
 const rowToBalance = (row: DbLeaveBalanceRow): LeaveBalanceRecord => ({
@@ -678,6 +687,7 @@ const readLeaveApplications = async (pool: sql.ConnectionPool) => {
 SELECT a.[Id],a.[EmployeeId],a.[FullName],a.[Department],a.[ManagerName],a.[Location],a.[EmployeeCategory],a.[LeaveType],
   a.[StartDate],a.[EndDate],a.[Days],a.[StatusName],a.[WorkflowStage],a.[ApprovalStatus],a.[PolicyComplianceStatus],
   a.[BalanceImpact],a.[AvailableBalance],a.[ActingOfficer],a.[SupportingDocuments],a.[ExceptionsJson],
+  a.[SourceSystem],a.[CreatedAt],a.[UpdatedAt],
   (SELECT COUNT(1) FROM [hris].[LeaveAuditTrail] aud WHERE aud.[RecordId]=a.[Id]) AS [AuditCount]
 FROM [hris].[LeaveApplications] a
 ORDER BY a.[StartDate] DESC, a.[UpdatedAt] DESC;`);
@@ -893,6 +903,7 @@ export async function approvedPaidLeaveForDate(date: string): Promise<ApprovedPa
 
 const sectionConfig: LeavePayload['operationalSections'] = [
   { id: 'dashboard', label: 'Dashboard', area: 'Dashboard', description: 'Operational leave command center with status, approvals, liability, exceptions, calendars, and action queues.', actions: ['apply', 'view-history', 'process-accrual', 'process-carry-forward', 'generate-report', 'view-audit-trail'], controls: ['Current leave status', 'Available actions', 'Next required action', 'Approval status', 'Policy compliance status', 'Leave balance impact', 'Audit history', 'Workflow progress', 'Exception indicators'] },
+  { id: 'transactions', label: 'Transaction Register', area: 'Transactions', description: 'Production leave transaction register backed by HRIS leave application records, ESS workflow submissions, migrated employee context, audit trail, balance impact, reliever assignment, and payroll readiness.', actions: ['apply', 'submit', 'approve', 'reject', 'cancel', 'withdraw', 'view-history', 'view-audit-trail', 'export'], controls: ['HRIS persisted transaction ID', 'Source system', 'Employee and department', 'Leave type and dates', 'Workflow stage', 'Approval status', 'Reliever / acting officer', 'Balance impact', 'Audit count', 'Exception indicators'] },
   { id: 'applications', label: 'Applications', area: 'Transactions', description: 'Workflow-driven leave applications, drafts, document upload readiness, validation, status tracking, printing, and history.', actions: ['apply', 'save-draft', 'submit', 'edit', 'withdraw', 'cancel', 'view-history'], controls: ['Leave balance verification', 'Eligibility verification', 'Leave conflict detection', 'Public holiday validation', 'Overlapping leave detection', 'Reporting manager validation', 'Acting officer validation'] },
   { id: 'approvals', label: 'Approvals', area: 'Transactions', description: 'Multi-level supervisor, manager, HR, and final approval queue with comments, delegation, escalation, and bulk decisions.', actions: ['approve', 'reject', 'request-clarification', 'escalate', 'delegate', 'reassign', 'bulk-approve', 'bulk-reject', 'view-history'], controls: ['Department matrix', 'Grade matrix', 'Leave type matrix', 'Duration matrix', 'Employee category matrix'] },
   { id: 'recalls', label: 'Recalls', area: 'Transactions', description: 'Manager-to-HR leave recall workflow with employee notification, balance impact, compensation tracking, and audit history.', actions: ['recall', 'approve', 'reject', 'view-history'], controls: ['Recall reason', 'Recall date', 'Unused leave days', 'Compensation impact', 'Employee notification'] },
@@ -917,7 +928,6 @@ const sectionConfig: LeavePayload['operationalSections'] = [
 
 const sectionAliases: Record<string, string> = {
   'leave-dashboard': 'dashboard',
-  transactions: 'applications',
   'planning-and-balances': 'leave-calendar',
   administration: 'leave-types',
   'reports-and-analytics': 'leave-reports',
