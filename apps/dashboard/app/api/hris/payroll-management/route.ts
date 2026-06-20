@@ -7,6 +7,7 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { writePayrollEmployeeOption } from '@/lib/payroll-employee-options-store';
+import { buildExcelHtml, excelMimeType } from '@/lib/excel-export';
 
 type Role =
   | 'Super Admin'
@@ -520,6 +521,26 @@ const csv = (records: any[]) => {
   return [headers.join(','), ...lines].join('\n');
 };
 
+const payrollExportColumns = ['Employee ID', 'Name', 'Department', 'Type', 'Status', 'Payroll Group', 'Salary Structure', 'Daily Rate', 'Hourly Rate', 'Currency', 'Gross Pay', 'Deductions', 'Net Pay', 'Payroll Status', 'Exceptions'];
+
+const payrollExportRows = (records: any[]) => records.map((r) => [
+  r.employeeId,
+  r.fullName,
+  r.department,
+  r.employmentType,
+  r.employmentStatus,
+  r.payrollGroup,
+  r.salaryStructure || r.salaryGrade,
+  r.ratePerDay ?? '',
+  r.ratePerHour ?? '',
+  r.payCurrency,
+  r.grossPay,
+  r.deductions,
+  r.netPay,
+  r.payrollStatus,
+  (r.exceptions || []).join('; '),
+]);
+
 export async function GET(request: Request) {
   try {
     const payload = await buildPayload(request);
@@ -531,6 +552,21 @@ export async function GET(request: Request) {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
           'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
+        },
+      });
+    }
+    if (url.searchParams.get('format') === 'xls' || url.searchParams.get('format') === 'excel') {
+      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      return new Response(buildExcelHtml({
+        title: `Payroll Register - ${payload.periodLabel}`,
+        subtitle: `${payload.summary.payrollEligible} eligible employees / ${payload.summary.exceptionCount} exceptions`,
+        sheetName: 'Payroll Register',
+        columns: payrollExportColumns,
+        rows: payrollExportRows(payload.records),
+      }), {
+        headers: {
+          'content-type': excelMimeType,
+          'content-disposition': `attachment; filename="payroll-${payload.period}.xls"`,
         },
       });
     }
@@ -546,6 +582,21 @@ export async function GET(request: Request) {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
           'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
+        },
+      });
+    }
+    if (url.searchParams.get('format') === 'xls' || url.searchParams.get('format') === 'excel') {
+      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      return new Response(buildExcelHtml({
+        title: `Payroll Register - ${payload.periodLabel}`,
+        subtitle: payload.dataSource.warning || 'Payroll service fallback export',
+        sheetName: 'Payroll Register',
+        columns: payrollExportColumns,
+        rows: payrollExportRows(payload.records),
+      }), {
+        headers: {
+          'content-type': excelMimeType,
+          'content-disposition': `attachment; filename="payroll-${payload.period}.xls"`,
         },
       });
     }

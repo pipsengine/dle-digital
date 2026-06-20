@@ -28,6 +28,7 @@ import {
   Users,
 } from 'lucide-react';
 import { PageTemplate } from '@/components/layout/page-template';
+import { downloadExcelFile } from '@/lib/excel-export';
 
 type ReportType =
   | 'summary'
@@ -394,12 +395,23 @@ export default function TimesheetReportsClient() {
       ['Exception', 'exceptionType'],
       ['Audit Trail', 'auditTrail'],
     ];
+    if (format === 'excel') {
+      downloadExcelFile({
+        title: `Timesheet ${activeReport.label}`,
+        subtitle: `${from} to ${to} / ${rows.length} detail lines`,
+        sheetName: 'Timesheet Report',
+        fileName: `timesheet-${reportType}-${new Date().toISOString().slice(0, 10)}.xls`,
+        columns: columns.map(([label]) => label),
+        rows: rows.map((row) => columns.map(([, key]) => row[key] as string | number | null | undefined)),
+      });
+      return;
+    }
     const csv = [columns.map(([label]) => csvValue(label)).join(','), ...rows.map((row) => columns.map(([, key]) => csvValue(row[key])).join(','))].join('\n');
-    const blob = new Blob([csv], { type: format === 'excel' ? 'application/vnd.ms-excel;charset=utf-8' : 'text/csv;charset=utf-8' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `timesheet-${reportType}-${new Date().toISOString().slice(0, 10)}.${format === 'excel' ? 'xls' : 'csv'}`;
+    link.download = `timesheet-${reportType}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();

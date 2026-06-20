@@ -349,7 +349,6 @@ type ColumnKey =
   | 'status'
   | 'contact'
   | 'address'
-  | 'records'
   | 'joined'
   | 'yos'
   | 'promotion'
@@ -375,7 +374,6 @@ const DEFAULT_COLUMNS: ColumnDef[] = [
   { key: 'status', label: 'Status', defaultVisible: true, widthClass: 'min-w-[170px]' },
   { key: 'contact', label: 'Official Contact', defaultVisible: true, widthClass: 'min-w-[250px]' },
   { key: 'address', label: 'Address', defaultVisible: true, widthClass: 'min-w-[260px]' },
-  { key: 'records', label: 'Records', defaultVisible: true, widthClass: 'min-w-[170px]' },
   { key: 'joined', label: 'Date Joined', defaultVisible: true, widthClass: 'min-w-[140px]' },
   { key: 'yos', label: 'Years', defaultVisible: true, widthClass: 'min-w-[110px]' },
   { key: 'promotion', label: 'Last Promotion', defaultVisible: false, widthClass: 'min-w-[160px]' },
@@ -1171,95 +1169,17 @@ export default function EmployeeDirectoryClient({ initialNow }: { initialNow: st
       );
     }
 
-    if (col === 'personal')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{[e.title, e.gender].filter(Boolean).join(' / ') || 'Not recorded'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">
-            DOB: {formatDate(e.dateOfBirth || '')}
-            {e.maritalStatus ? <span className="ml-1">/ {e.maritalStatus}</span> : null}
-          </div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">Nationality: {e.nationality || 'Not recorded'}</div>
-        </div>
-      );
+    if (col === 'personal') return <div className="text-sm font-extrabold text-slate-800 truncate">{[e.title, e.gender].filter(Boolean).join(' / ') || 'Not recorded'}</div>;
 
-    if (col === 'job')
-      return (
-        <div className="text-sm">
-          <div className="font-semibold text-slate-800">{e.jobTitle}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5">
-            {e.designation || 'No designation'} {e.jobGrade ? <span className="mx-1">-</span> : null} {e.jobGrade || ''}
-          </div>
-        </div>
-      );
-    if (col === 'jobMeta')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{e.jobGrade || 'No grade'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.designation || 'No designation'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.costCenter || 'No cost center'}</div>
-        </div>
-      );
-    if (col === 'org')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{e.department}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">
-            {e.division} <span className="mx-1">-</span> {e.businessUnit}
-          </div>
-        </div>
-      );
-    if (col === 'manager')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{e.managerName || 'Unassigned'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">Functional: {e.functionalManager || 'Unassigned'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">HRBP: {e.hrBusinessPartner || 'Unassigned'}</div>
-        </div>
-      );
-    if (col === 'location')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{e.location}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.projectSite || 'No project site'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.workLocation || e.officeLocation || 'No work location'}</div>
-        </div>
-      );
-    if (col === 'employment')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800">{e.employmentType}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5">{e.staffCategory || e.employeeCategory || 'Unclassified'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5">{e.shift ? `${e.shift} shift` : 'Standard schedule'}</div>
-        </div>
-      );
+    if (col === 'job') return <div className="text-sm font-semibold text-slate-800 truncate">{e.jobTitle}</div>;
+    if (col === 'jobMeta') return <div className="text-sm font-extrabold text-slate-800 truncate">{e.jobGrade || 'No grade'}</div>;
+    if (col === 'org') return <div className="text-sm font-extrabold text-slate-800 truncate">{e.department}</div>;
+    if (col === 'manager') return <div className="text-sm font-extrabold text-slate-800 truncate">{e.managerName || 'Unassigned'}</div>;
+    if (col === 'location') return <div className="text-sm font-extrabold text-slate-800 truncate">{e.location}</div>;
+    if (col === 'employment') return <div className="text-sm font-extrabold text-slate-800 truncate">{e.employmentType}</div>;
     if (col === 'status') return <StatusBadge status={e.status} />;
-    if (col === 'contact')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{e.officialEmail || e.email || 'No official email'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.primaryPhone || e.phone || 'No primary phone'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.officeExtension ? `Ext. ${e.officeExtension}` : e.personalEmail || 'No personal email'}</div>
-        </div>
-      );
-    if (col === 'address')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800 truncate">{[e.city, e.state].filter(Boolean).join(', ') || 'No city/state'}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.country || 'No country'} {e.postalCode ? `/ ${e.postalCode}` : ''}</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{e.residentialAddress || e.permanentAddress || 'No address recorded'}</div>
-        </div>
-      );
-    if (col === 'records')
-      return (
-        <div className="text-sm">
-          <div className="font-extrabold text-slate-800">{formatNumber(e.documentCount || 0)} documents</div>
-          <div className="text-xs text-slate-500 font-semibold mt-0.5">{formatNumber(e.emergencyContactCount || 0)} emergency contacts</div>
-          <div className={`text-[11px] font-extrabold mt-1 ${e.emergencyContactsComplete ? 'text-emerald-700' : 'text-red-700'}`}>
-            {e.emergencyContactsComplete ? 'Emergency complete' : 'Emergency missing'}
-          </div>
-        </div>
-      );
+    if (col === 'contact') return <div className="text-sm font-extrabold text-slate-800 truncate">{e.officialEmail || e.email || 'No official email'}</div>;
+    if (col === 'address') return <div className="text-sm font-extrabold text-slate-800 truncate">{[e.city, e.state].filter(Boolean).join(', ') || 'No city/state'}</div>;
     if (col === 'joined') return <div className="text-sm font-extrabold text-slate-800">{formatDate(e.dateJoined)}</div>;
     if (col === 'yos') return <div className="text-sm font-extrabold text-slate-800">{e.yearsOfService}y</div>;
     if (col === 'promotion') return <div className="text-sm font-extrabold text-slate-800">{e.lastPromotion ? formatDate(e.lastPromotion) : '-'}</div>;

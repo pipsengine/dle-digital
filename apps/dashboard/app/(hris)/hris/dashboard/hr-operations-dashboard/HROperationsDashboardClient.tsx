@@ -47,6 +47,7 @@ import {
 } from 'recharts';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import type { LiveAttendanceRecord } from '@/lib/biometric-live-attendance-store';
+import { downloadExcelFile } from '@/lib/excel-export';
 
 type DateRange = 'MTD' | 'QTD' | 'YTD' | 'ALL';
 type Tone = 'green' | 'amber' | 'red' | 'blue' | 'violet' | 'cyan';
@@ -280,10 +281,21 @@ function exportRows(rows: DleEmployeeDirectoryRow[], format: 'csv' | 'xls') {
   const headers = ['Employee Code', 'Name', 'Status', 'Type', 'Department', 'Business Unit', 'Location', 'Manager', 'Date Joined'];
   const keys: (keyof DleEmployeeDirectoryRow)[] = ['employeeCode', 'fullName', 'status', 'employmentType', 'department', 'businessUnit', 'location', 'managerName', 'dateJoined'];
   const escape = (value: unknown) => String(value ?? '').replace(/"/g, '""');
+  if (format === 'xls') {
+    downloadExcelFile({
+      title: 'HR Operations Dashboard',
+      subtitle: `${rows.length} employees in current operational scope`,
+      sheetName: 'HR Operations',
+      fileName: `hr_operations_dashboard_${new Date().toISOString().slice(0, 10)}.xls`,
+      columns: headers,
+      rows: rows.map((row) => keys.map((key) => row[key] as string | number | null | undefined)),
+    });
+    return;
+  }
   const content = format === 'csv'
     ? [headers.join(','), ...rows.map((row) => keys.map((key) => `"${escape(row[key])}"`).join(','))].join('\n')
-    : `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${keys.map((key) => `<td>${String(row[key] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-  const blob = new Blob([content], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/vnd.ms-excel;charset=utf-8' });
+    : '';
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

@@ -1258,6 +1258,10 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
       exportCsv();
       return;
     }
+    if (actionItem.id === 'export-excel') {
+      exportExcel();
+      return;
+    }
     if (actionItem.sensitive) {
       setActionReason('');
       setConfirmAction(actionItem);
@@ -1276,6 +1280,10 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
 
   const exportCsv = () => {
     window.location.href = '/api/hris/payroll-management?format=csv';
+  };
+
+  const exportExcel = () => {
+    window.location.href = '/api/hris/payroll-management?format=xls';
   };
 
   return (
@@ -1305,6 +1313,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
           </select>
           <ActionButton label={loading ? 'Refreshing' : 'Refresh'} icon={RefreshCcw} onClick={() => void load()} disabled={loading} tone="blue" />
           <ActionButton label="Export CSV" icon={Download} onClick={exportCsv} disabled={!payload?.permissions.canExport} tone="slate" />
+          <ActionButton label="Export Excel" icon={FileSpreadsheet} onClick={exportExcel} disabled={!payload?.permissions.canExport} tone="green" />
         </div>
       </div>
 

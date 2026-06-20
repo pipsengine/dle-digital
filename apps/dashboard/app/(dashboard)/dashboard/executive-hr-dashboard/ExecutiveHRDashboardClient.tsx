@@ -48,6 +48,7 @@ import {
 } from 'recharts';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import type { LiveAttendanceRecord } from '@/lib/biometric-live-attendance-store';
+import { downloadExcelFile } from '@/lib/excel-export';
 
 type DateRange = 'MTD' | 'QTD' | 'YTD' | 'ALL';
 type FilterState = {
@@ -390,22 +391,14 @@ function exportCsv(rows: DleEmployeeDirectoryRow[]) {
 function exportExcel(rows: DleEmployeeDirectoryRow[]) {
   const headers = ['Employee Code', 'Full Name', 'Status', 'Employee Type', 'Department', 'Business Unit', 'Location', 'Manager', 'Date Joined', 'Pay Currency', 'Payment Run'];
   const keys = ['employeeCode', 'fullName', 'status', 'employmentType', 'department', 'businessUnit', 'location', 'managerName', 'dateJoined', 'payCurrency', 'paymentRun'];
-  const escape = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const html = `
-    <table>
-      <thead><tr>${headers.map((header) => `<th>${escape(header)}</th>`).join('')}</tr></thead>
-      <tbody>
-        ${rows.map((row) => `<tr>${keys.map((key) => `<td>${escape((row as unknown as Record<string, unknown>)[key])}</td>`).join('')}</tr>`).join('')}
-      </tbody>
-    </table>
-  `;
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `executive_hr_dashboard_${new Date().toISOString().slice(0, 10)}.xls`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadExcelFile({
+    title: 'Executive HR Dashboard',
+    subtitle: `${rows.length} employees in current executive scope`,
+    sheetName: 'Executive HR',
+    fileName: `executive_hr_dashboard_${new Date().toISOString().slice(0, 10)}.xls`,
+    columns: headers,
+    rows: rows.map((row) => keys.map((key) => (row as unknown as Record<string, unknown>)[key] as string | number | null | undefined)),
+  });
 }
 
 export default function ExecutiveHRDashboardClient({ employees, attendanceRecords, attendanceDate, generatedAt }: DashboardProps) {

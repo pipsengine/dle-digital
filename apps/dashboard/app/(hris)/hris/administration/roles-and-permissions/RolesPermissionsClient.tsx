@@ -17,6 +17,7 @@ import {
   Search,
   ShieldCheck,
 } from 'lucide-react';
+import { downloadExcelFile } from '@/lib/excel-export';
 
 type AccessAction = 'view' | 'create' | 'edit' | 'delete' | 'submit' | 'approve' | 'reject' | 'export' | 'import' | 'print' | 'upload' | 'download' | 'configure' | 'audit' | 'enable' | 'disable' | 'assign' | 'override';
 type PermissionNode = {
@@ -42,15 +43,6 @@ const approvalLevels = ['L1 - User', 'L2 - Manager', 'L2 - HR Admin', 'L2 - Proj
 const riskyActions = new Set(['delete', 'disable', 'assign', 'override', 'approve']);
 
 const permissionOf = (node: PermissionNode, action: string) => `${node.permissionPrefix}.${action}`;
-const downloadText = (name: string, text: string, type: string) => {
-  const blob = new Blob([text], { type });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  URL.revokeObjectURL(url);
-};
 
 export default function RolesPermissionsClient() {
   const [loading, setLoading] = useState(true);
@@ -259,10 +251,17 @@ export default function RolesPermissionsClient() {
     setNotice(`Applied template: ${template.name}`);
   };
 
-  const exportCsv = () => {
+  const exportExcel = () => {
     const rows = [['Subject Type', 'Subject', 'Permission', 'Data Scope', 'Approval Level', 'Status']];
     [...published, ...drafts].forEach((assignment) => assignment.permissions.forEach((permission) => rows.push([assignment.subjectType, assignment.subjectId, permission, assignment.dataScope, assignment.approvalLevel, assignment.status])));
-    downloadText('access-permission-matrix.csv', rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n'), 'text/csv;charset=utf-8');
+    downloadExcelFile({
+      title: 'Access Permission Matrix',
+      subtitle: `${rows.length - 1} permission assignments`,
+      sheetName: 'Permissions',
+      fileName: `access-permission-matrix-${new Date().toISOString().slice(0, 10)}.xls`,
+      columns: rows[0],
+      rows: rows.slice(1),
+    });
   };
 
   const exportPdf = () => {
@@ -283,7 +282,7 @@ export default function RolesPermissionsClient() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={exportCsv} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"><Download className="h-4 w-4" />Excel</button>
+          <button onClick={exportExcel} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"><Download className="h-4 w-4" />Excel</button>
           <button onClick={exportPdf} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"><FileDown className="h-4 w-4" />PDF</button>
           <button onClick={() => save(false)} disabled={saving || loading} className="inline-flex h-10 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50"><Save className="h-4 w-4" />Save Draft</button>
           <button onClick={() => save(true)} disabled={saving || loading} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"><Check className="h-4 w-4" />Publish</button>

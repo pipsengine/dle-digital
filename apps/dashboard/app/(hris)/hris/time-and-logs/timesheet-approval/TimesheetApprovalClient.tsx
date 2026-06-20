@@ -26,6 +26,7 @@ import {
   Users,
 } from 'lucide-react';
 import { PageTemplate } from '@/components/layout/page-template';
+import { downloadExcelFile } from '@/lib/excel-export';
 
 type TimesheetStatus =
   | 'Draft'
@@ -347,12 +348,23 @@ export default function TimesheetApprovalClient() {
       pmStatus: project.projectManagerStatus,
     })));
     const columns = Object.keys(rows[0] || { date: '', period: '', supervisor: '', project: '', hours: '' });
+    if (format === 'excel') {
+      downloadExcelFile({
+        title: 'Timesheet Approval Workspace',
+        subtitle: `${filteredTimesheets.length} timesheets / ${rows.length} project approval lines`,
+        sheetName: 'Approvals',
+        fileName: `timesheet-approval-${new Date().toISOString().slice(0, 10)}.xls`,
+        columns: columns.map((column) => column.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase())),
+        rows: rows.map((row) => columns.map((col) => (row as Record<string, unknown>)[col] as string | number | null | undefined)),
+      });
+      return;
+    }
     const csv = [columns.map(csvValue).join(','), ...rows.map((row) => columns.map((col) => csvValue((row as Record<string, unknown>)[col])).join(','))].join('\n');
-    const blob = new Blob([csv], { type: format === 'excel' ? 'application/vnd.ms-excel;charset=utf-8' : 'text/csv;charset=utf-8' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `timesheet-approval-${new Date().toISOString().slice(0, 10)}.${format === 'excel' ? 'xls' : 'csv'}`;
+    link.download = `timesheet-approval-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
