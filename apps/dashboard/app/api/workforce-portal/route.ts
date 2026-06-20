@@ -10,6 +10,8 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { hasLeaveAllowanceInYear, syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
+import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
+import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 
 type EssRequest = {
   id: string;
@@ -149,10 +151,15 @@ export async function GET(request: Request) {
     if (!session) return err(401, 'Unauthenticated.');
     if (session.isGlobalAdmin) return err(403, 'Global administrator is not linked to an employee self-service profile.');
     const locale = compact(request.headers.get('x-ess-locale')) || 'en-NG';
-    const [employeeSource, allRequests, loanApplications, loansConfig, taxConfig, pensionConfig] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig()]);
+    await syncPayslipIdentitiesFromSage({ force: true, migratedBy: 'Employee Self-Service Payslip' }).catch(() => undefined);
+    const [employeeSource, allRequests, loanApplications, loansConfig, taxConfig, pensionConfig, identityByKey] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig(), payslipIdentityMap()]);
     const employee = resolveEssEmployee(employeeSource.employees, session);
     if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');
     await syncSageLeaveAllowanceEvents();
+    const payslipIdentity = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId]
+      .map(normalizePayrollMatchKey)
+      .map((key) => identityByKey.get(key))
+      .find(Boolean);
 
     const employeeRequests = allRequests.filter((item) => item.employeeId === employee.employeeId);
     const employeeLoans = loanApplications.filter((item) => item.employeeId === employee.employeeId);
@@ -189,7 +196,7 @@ export async function GET(request: Request) {
         payPeriodEnd: monthEndDate(period),
         payDate: monthEndDate(period),
         payrollNumber: `DLE-${period.replace('-', '')}-${employee.employeeId}`,
-        payeReference: employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
+        payeReference: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
         grossPay: earnings.grossPay,
         deductions,
         netPay: roundMoney(Math.max(0, earnings.grossPay - deductions)),
@@ -224,12 +231,12 @@ export async function GET(request: Request) {
           address: employeeAddress(employee),
         },
         statutoryInfo: {
-          bankName: employeeAny.bankName || 'Stanbic IBTC',
-          accountNumber: maskAccount(employeeAny.accountNo || employeeAny.accountNumber),
-          pensionFundAdministrator: configured(employeeAny.pensionProvider),
-          pensionNumber: configured(employeeAny.pensionPin),
+          bankName: payslipIdentity?.bankName || employeeAny.bankName || 'Not configured',
+          accountNumber: maskAccount(payslipIdentity?.accountNo || employeeAny.accountNo || employeeAny.accountNumber),
+          pensionFundAdministrator: configured(payslipIdentity?.pensionProvider || employeeAny.pensionProvider),
+          pensionNumber: configured(payslipIdentity?.pensionPin || employeeAny.pensionPin),
           nhfNumber: employeeAny.nhfNumber || 'Not applicable',
-          taxNumber: employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
+          taxNumber: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
           nhiaNumber: employeeAny.nhiaNumber || 'Not applicable',
         },
         leaveInfo: {
