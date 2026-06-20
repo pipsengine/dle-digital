@@ -202,6 +202,35 @@ const formatNumber = (value: number) => intFmt.format(Number(value || 0));
 const formatStatus = (status: string) => status.replace(/_/g, ' ');
 const isGroupedRow = (row: GroupedRow | DetailRow): row is GroupedRow => 'label' in row;
 
+const normalizeDimensionLabel = (value: string) => {
+  const raw = String(value || '').trim();
+  if (!raw) return 'Unassigned';
+  const normalized = raw.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  const key = normalized.toLowerCase();
+  if (['permanent', 'permanent staff'].includes(key)) return 'Permanent';
+  if (['lumpsum', 'lump sum', 'contract on lumpsum', 'contract lump sum'].includes(key)) return 'Lumpsum';
+  if (['daily rate', 'contract on day rate', 'contract day rate', 'day rate'].includes(key)) return 'Daily Rate';
+  if (key === 'no project') return 'No Project';
+  if (key === 'unassigned') return 'Unassigned';
+  if (/^p\d{4}\s+-/i.test(normalized) || /^c?\d{4}\s+-/i.test(normalized)) return normalized;
+  if (normalized.length <= 4) return normalized.toUpperCase();
+  return normalized
+    .toLowerCase()
+    .split(' ')
+    .map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : part)
+    .join(' ');
+};
+
+const uniqueFilterValues = (values: string[] = []) => {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const label = normalizeDimensionLabel(value).toLowerCase();
+    if (seen.has(label)) return false;
+    seen.add(label);
+    return true;
+  });
+};
+
 const statusClass = (status: string) => {
   if (status === 'HR_Acknowledged' || status === 'Locked' || status === 'Approved') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
   if (status === 'Rejected' || status === 'Returned') return 'border-red-200 bg-red-50 text-red-700';
@@ -216,8 +245,9 @@ const csvValue = (value: unknown) => {
   return `"${normalized.replace(/"/g, '""')}"`;
 };
 
-function MultiSelect({ label, values, selected, onChange, limit = 8 }: { label: string; values: string[]; selected: string[]; onChange: (next: string[]) => void; limit?: number }) {
-  const visible = values.slice(0, limit);
+function MultiSelect({ label, values, selected, onChange, limit = 8, compact = false }: { label: string; values: string[]; selected: string[]; onChange: (next: string[]) => void; limit?: number; compact?: boolean }) {
+  const cleanValues = uniqueFilterValues(values);
+  const visible = cleanValues.slice(0, limit);
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -228,12 +258,12 @@ function MultiSelect({ label, values, selected, onChange, limit = 8 }: { label: 
         {visible.map((value) => {
           const active = selected.includes(value);
           return (
-            <button key={value} type="button" onClick={() => onChange(active ? selected.filter((item) => item !== value) : [...selected, value])} title={value} className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${active ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
-              <span className="block max-w-[180px] truncate">{value}</span>
+            <button key={value} type="button" onClick={() => onChange(active ? selected.filter((item) => item !== value) : [...selected, value])} title={value} className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${active ? 'border-blue-500 bg-blue-600 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+              <span className={`block truncate ${compact ? 'max-w-[140px]' : 'max-w-[180px]'}`}>{normalizeDimensionLabel(value)}</span>
             </button>
           );
         })}
-        {values.length > visible.length ? <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-400">+{values.length - visible.length}</span> : null}
+        {cleanValues.length > visible.length ? <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-400">+{cleanValues.length - visible.length}</span> : null}
       </div>
     </div>
   );
@@ -241,22 +271,30 @@ function MultiSelect({ label, values, selected, onChange, limit = 8 }: { label: 
 
 function KpiCard({ label, value, detail, icon: Icon, tone = 'blue' }: { label: string; value: string; detail: string; icon: typeof BarChart3; tone?: 'blue' | 'green' | 'amber' | 'red' | 'slate' }) {
   const toneClass = {
-    blue: 'bg-blue-50 text-blue-700 border-blue-100',
-    green: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-    amber: 'bg-amber-50 text-amber-700 border-amber-100',
-    red: 'bg-red-50 text-red-700 border-red-100',
-    slate: 'bg-slate-50 text-slate-700 border-slate-100',
+    blue: 'bg-blue-50 text-blue-700 border-blue-200',
+    green: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    amber: 'bg-amber-50 text-amber-700 border-amber-200',
+    red: 'bg-red-50 text-red-700 border-red-200',
+    slate: 'bg-slate-100 text-slate-700 border-slate-200',
+  }[tone];
+  const iconClass = {
+    blue: 'bg-blue-600 text-white',
+    green: 'bg-emerald-600 text-white',
+    amber: 'bg-amber-500 text-white',
+    red: 'bg-red-600 text-white',
+    slate: 'bg-slate-800 text-white',
   }[tone];
   return (
-    <div className={`rounded-xl border bg-white p-4 shadow-sm ${toneClass}`}>
+    <div className={`relative overflow-hidden rounded-xl border p-4 shadow-sm ${toneClass}`}>
       <div className="flex items-center justify-between gap-3">
-        <div className={`rounded-lg p-2 ${toneClass}`}><Icon className="h-5 w-5" /></div>
+        <div className={`rounded-lg p-2 ${iconClass}`}><Icon className="h-5 w-5" /></div>
         <div className="text-right">
           <div className="text-xl font-black text-slate-950">{value}</div>
           <div className="text-[11px] font-semibold text-slate-500">{detail}</div>
         </div>
       </div>
       <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+      <div className={`absolute bottom-0 left-0 h-1 w-full ${iconClass}`} />
     </div>
   );
 }
@@ -282,6 +320,7 @@ export default function TimesheetReportsClient() {
   const [employmentTypes, setEmploymentTypes] = useState<string[]>([]);
   const [employeeCategories, setEmployeeCategories] = useState<string[]>([]);
   const [drilldown, setDrilldown] = useState<{ groupBy: string; key: string } | null>(null);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const requestUrl = useMemo(() => {
     const params = new URLSearchParams({ reportType, from, to });
@@ -370,6 +409,37 @@ export default function TimesheetReportsClient() {
   const filterOptions = payload?.filterOptions;
   const summary = payload?.summary;
   const activeReport = reportTypes.find((item) => item.id === reportType) || reportTypes[0];
+  const periodNameById = new Map((filterOptions?.periods || []).map((period) => [period.id, period.name]));
+  const activeFilterItems = [
+    ...periods.map((id) => ({ group: 'Period', value: periodNameById.get(id) || id })),
+    ...statuses.map((value) => ({ group: 'Status', value })),
+    ...projects.map((value) => ({ group: 'Project', value })),
+    ...departments.map((value) => ({ group: 'Department', value })),
+    ...projectManagers.map((value) => ({ group: 'Project Manager', value })),
+    ...supervisors.map((value) => ({ group: 'Supervisor', value })),
+    ...costCentres.map((value) => ({ group: 'Cost Centre', value })),
+    ...locations.map((value) => ({ group: 'Location', value })),
+    ...workCenters.map((value) => ({ group: 'Work Center', value })),
+    ...employmentTypes.map((value) => ({ group: 'Employment Type', value })),
+    ...employeeCategories.map((value) => ({ group: 'Employee Category', value })),
+    ...(payrollReady !== 'all' ? [{ group: 'Payroll', value: payrollReady === 'yes' ? 'Payroll Ready' : 'Not Payroll Ready' }] : []),
+  ];
+  const clearAllFilters = () => {
+    setQuery('');
+    setPayrollReady('all');
+    setStatuses([]);
+    setSupervisors([]);
+    setWorkCenters([]);
+    setPeriods([]);
+    setProjects([]);
+    setDepartments([]);
+    setLocations([]);
+    setProjectManagers([]);
+    setCostCentres([]);
+    setEmploymentTypes([]);
+    setEmployeeCategories([]);
+    setDrilldown(null);
+  };
   const drilldownRows = drilldown ? (payload?.detailRows || []).filter((row) => {
     const value = drilldown.groupBy === 'project' ? `${row.projectCode} - ${row.projectName}` : drilldown.groupBy === 'department' ? row.department : drilldown.groupBy === 'employee' ? `${row.employeeNo} - ${row.employeeName}` : drilldown.groupBy === 'supervisor' ? row.supervisorName : drilldown.groupBy === 'date' ? row.timesheetDate : row.businessUnit;
     return value === drilldown.key;
@@ -413,6 +483,22 @@ export default function TimesheetReportsClient() {
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Report Filters</p>
+              <h3 className="mt-1 text-sm font-black text-slate-950">{activeFilterItems.length} active filter{activeFilterItems.length === 1 ? '' : 's'}</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Period and date range are applied together as an intersection.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setShowAdvancedFilters((value) => !value)} className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50">
+                <Filter className="h-4 w-4" /> {showAdvancedFilters ? 'Hide Advanced' : 'Advanced Filters'}
+              </button>
+              <button type="button" onClick={clearAllFilters} disabled={!activeFilterItems.length && !query} className="inline-flex min-h-9 items-center rounded-lg border border-slate-200 bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">
+                Clear All
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.5fr_0.7fr_0.7fr_0.8fr]">
             <label className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -427,19 +513,43 @@ export default function TimesheetReportsClient() {
             </select>
           </div>
 
+          {activeFilterItems.length ? (
+            <div className="mt-4 flex flex-wrap gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3">
+              {activeFilterItems.slice(0, 12).map((item) => (
+                <span key={`${item.group}-${item.value}`} className="rounded-full border border-blue-200 bg-white px-3 py-1 text-[11px] font-black text-blue-800">
+                  {item.group}: {normalizeDimensionLabel(item.value)}
+                </span>
+              ))}
+              {activeFilterItems.length > 12 ? <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-[11px] font-black text-blue-800">+{activeFilterItems.length - 12} more</span> : null}
+            </div>
+          ) : null}
+
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-            <MultiSelect label="Periods" values={(filterOptions?.periods || []).map((period) => period.name)} selected={periods.map((id) => filterOptions?.periods.find((period) => period.id === id)?.name || id)} onChange={(nextNames) => setPeriods(nextNames.map((name) => filterOptions?.periods.find((period) => period.name === name)?.id || name))} />
-            <MultiSelect label="Statuses" values={filterOptions?.statuses || []} selected={statuses} onChange={setStatuses} />
-            <MultiSelect label="Projects" values={filterOptions?.projects || []} selected={projects} onChange={setProjects} />
-            <MultiSelect label="Project Managers" values={filterOptions?.projectManagers || []} selected={projectManagers} onChange={setProjectManagers} />
-            <MultiSelect label="Supervisors" values={filterOptions?.supervisors || []} selected={supervisors} onChange={setSupervisors} />
-            <MultiSelect label="Departments" values={filterOptions?.departments || []} selected={departments} onChange={setDepartments} />
-            <MultiSelect label="Cost Centres" values={filterOptions?.costCentres || []} selected={costCentres} onChange={setCostCentres} />
-            <MultiSelect label="Locations" values={filterOptions?.locations || []} selected={locations} onChange={setLocations} />
-            <MultiSelect label="Work Centers" values={filterOptions?.workCenters || []} selected={workCenters} onChange={setWorkCenters} />
-            <MultiSelect label="Employment Type" values={filterOptions?.employmentTypes || []} selected={employmentTypes} onChange={setEmploymentTypes} />
-            <MultiSelect label="Employee Category" values={filterOptions?.employeeCategories || []} selected={employeeCategories} onChange={setEmployeeCategories} />
+            <MultiSelect label="Periods" values={(filterOptions?.periods || []).map((period) => period.name)} selected={periods.map((id) => filterOptions?.periods.find((period) => period.id === id)?.name || id)} onChange={(nextNames) => setPeriods(nextNames.map((name) => filterOptions?.periods.find((period) => period.name === name)?.id || name))} compact />
+            <MultiSelect label="Statuses" values={filterOptions?.statuses || []} selected={statuses} onChange={setStatuses} compact />
+            <MultiSelect label="Projects" values={filterOptions?.projects || []} selected={projects} onChange={setProjects} compact />
+            <MultiSelect label="Departments" values={filterOptions?.departments || []} selected={departments} onChange={setDepartments} compact />
           </div>
+
+          {showAdvancedFilters ? (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Advanced Filters</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Use these for role, location, cost, employment, and workforce dimension analysis.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <MultiSelect label="Project Managers" values={filterOptions?.projectManagers || []} selected={projectManagers} onChange={setProjectManagers} compact />
+                <MultiSelect label="Supervisors" values={filterOptions?.supervisors || []} selected={supervisors} onChange={setSupervisors} compact />
+                <MultiSelect label="Cost Centres" values={filterOptions?.costCentres || []} selected={costCentres} onChange={setCostCentres} compact />
+                <MultiSelect label="Locations" values={filterOptions?.locations || []} selected={locations} onChange={setLocations} compact />
+                <MultiSelect label="Work Centers" values={filterOptions?.workCenters || []} selected={workCenters} onChange={setWorkCenters} compact />
+                <MultiSelect label="Employment Type" values={filterOptions?.employmentTypes || []} selected={employmentTypes} onChange={setEmploymentTypes} compact />
+                <MultiSelect label="Employee Category" values={filterOptions?.employeeCategories || []} selected={employeeCategories} onChange={setEmployeeCategories} compact />
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
