@@ -40,7 +40,7 @@ import {
 } from 'lucide-react';
 
 type Role = 'Super Admin' | 'System Administrator' | 'HR Director' | 'HR Manager' | 'HR Officer' | 'Payroll Officer' | 'Payroll Supervisor' | 'Finance Controller' | 'Finance Manager' | 'CFO' | 'Executive Director' | 'Executive Management' | 'Auditor' | 'Employee';
-type PayrollRunStatus = 'Draft' | 'Open' | 'Validation' | 'Ready for Approval' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Revision Requested' | 'Locked' | 'Posted' | 'Closed' | 'Reopened' | 'Cancelled' | 'Published';
+type PayrollRunStatus = 'Draft' | 'Open' | 'Validation' | 'Validated' | 'Computed' | 'Ready for Approval' | 'Submitted' | 'Under Review' | 'Approved' | 'Released' | 'Rejected' | 'Revision Requested' | 'Locked' | 'Posted' | 'Closed' | 'Reopened' | 'Cancelled' | 'Published';
 type Tone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
 
 type PayrollRecord = {
@@ -87,10 +87,23 @@ type PayrollRun = {
   netPay: number;
   createdAt: string;
   createdBy: string;
+  validatedAt?: string | null;
+  validatedBy?: string | null;
+  submittedAt?: string | null;
+  submittedBy?: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
+  releasedAt?: string | null;
+  releasedBy?: string | null;
   lockedAt: string | null;
+  payslipsGeneratedAt?: string | null;
+  payslipsGeneratedBy?: string | null;
+  bankScheduleGeneratedAt?: string | null;
+  bankScheduleGeneratedBy?: string | null;
+  statutorySchedulesGeneratedAt?: string | null;
+  statutorySchedulesGeneratedBy?: string | null;
   postedAt: string | null;
+  postedBy?: string | null;
 };
 
 type PayrollPayload = {
@@ -207,9 +220,9 @@ const toneStyles: Record<Tone, { card: string; icon: string; chip: string; butto
 };
 
 const statusTone = (status: string): Tone => {
-  if (['Ready', 'Approved', 'Posted', 'Passed', 'Calculated', 'Enabled'].includes(status)) return 'green';
+  if (['Ready', 'Approved', 'Released', 'Posted', 'Published', 'Closed', 'Passed', 'Calculated', 'Enabled'].includes(status)) return 'green';
   if (['Blocked', 'Validation', 'Attention Required'].includes(status)) return 'red';
-  if (['Review', 'Draft'].includes(status)) return 'amber';
+  if (['Review', 'Draft', 'Open', 'Submitted', 'Under Review', 'Validated', 'Computed', 'Ready for Approval'].includes(status)) return 'amber';
   if (status === 'Locked') return 'violet';
   return 'blue';
 };
@@ -428,6 +441,7 @@ const dashboardActions = [
   action('create-run', 'Process Payroll', 'primary', payrollMakerRoles, true),
   action('submit-run', 'Submit Payroll for Approval', 'workflow', payrollMakerRoles, true),
   action('approve-run', 'Approve Payroll', 'workflow', payrollApprovalRoles, true),
+  action('release-run', 'Release Payroll', 'workflow', [...payrollMakerRoles, ...financeRoles], true),
   action('generate-payslips', 'Generate Payslips', 'secondary', payrollMakerRoles, true),
   action('generate-bank-schedule', 'Generate Bank Schedule', 'secondary', financeRoles, true),
   action('post-run', 'Generate Payroll Journal', 'workflow', financeRoles, true),
@@ -492,6 +506,7 @@ const actionsBySection: Partial<Record<SectionId, PayrollAction[]>> = {
     action('validate-payroll', 'Run Validation', 'workflow', payrollMakerRoles),
     action('submit-run', 'Submit for Approval', 'workflow', payrollMakerRoles, true),
     action('approve-run', 'Approve Payroll', 'workflow', payrollApprovalRoles, true),
+    action('release-run', 'Release Payroll', 'workflow', [...payrollMakerRoles, ...financeRoles], true),
     action('reject-run', 'Reject Payroll', 'workflow', payrollApprovalRoles, true, true),
     action('request-revision', 'Request Revision', 'workflow', payrollApprovalRoles, true, true),
     action('generate-payslips', 'Publish Payslips to ESS', 'workflow', payrollMakerRoles, true),
@@ -567,7 +582,8 @@ const canRunAction = (actionItem: PayrollAction, role: Role, payload: PayrollPay
   const status = run?.status || 'Draft';
   const exceptions = payload?.summary.exceptionCount || 0;
   if (['approve-run'].includes(actionItem.id) && exceptions > 0) return { allowed: false, reason: 'Resolve validation exceptions before approval.' };
-  if (['generate-payslips', 'generate-bank-schedule', 'export-bank-file', 'post-run'].includes(actionItem.id) && !['Approved', 'Locked', 'Posted'].includes(status)) return { allowed: false, reason: 'Payroll approval is required first.' };
+  if (actionItem.id === 'release-run' && status !== 'Approved') return { allowed: false, reason: 'Payroll approval is required before release.' };
+  if (['generate-payslips', 'generate-bank-schedule', 'generate-statutory-schedules', 'export-bank-file', 'post-run'].includes(actionItem.id) && !['Approved', 'Released', 'Locked', 'Posted', 'Published'].includes(status)) return { allowed: false, reason: 'Payroll approval is required first.' };
   if (actionItem.id === 'close-period' && status !== 'Posted') return { allowed: false, reason: 'Close is blocked until payslips, bank schedule, journal, and statutory schedules are complete.' };
   if (status === 'Closed' && !['reopen-period', 'view-audit', 'generate-report', 'export-csv', 'export-excel', 'export-pdf'].includes(actionItem.id)) return { allowed: false, reason: 'Closed periods are locked until approved reopening.' };
   return { allowed: true, reason: '' };
@@ -897,19 +913,20 @@ function PayrollAdministrationControlCenter({
     { id: 'view-exceptions', label: 'View Exceptions', icon: AlertTriangle, tone: 'red' as Tone, disabled: false },
     { id: 'create-run', label: 'Run Payroll', icon: PlayCircle, tone: 'green' as Tone, disabled: !payload?.permissions.canManageRun },
     { id: 'submit-run', label: 'Submit for Approval', icon: Send, tone: 'violet' as Tone, disabled: !payload?.permissions.canManageRun },
-    { id: 'approve-run', label: 'Release Payroll', icon: BadgeCheck, tone: 'green' as Tone, disabled: !payload?.permissions.canApprove },
+    { id: 'approve-run', label: 'Approve Payroll', icon: BadgeCheck, tone: 'green' as Tone, disabled: !payload?.permissions.canApprove },
+    { id: 'release-run', label: 'Release Payroll', icon: ShieldCheck, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun && !payload?.permissions.canPost },
     { id: 'generate-payslips', label: 'Publish Payslips', icon: ReceiptText, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun },
     { id: 'generate-report', label: 'Generate Reports', icon: FileBarChart, tone: 'slate' as Tone, disabled: !payload?.permissions.canExport },
   ];
   const workflow = [
-    { label: 'Draft', owner: 'Payroll Officer', done: ['Draft', 'Validation', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'Validated', owner: 'Payroll Supervisor', done: ['Validation', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'Computed', owner: 'Payroll Officer', done: ['Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'HR Review', owner: 'HR Manager', done: ['Submitted', 'Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'Finance Review', owner: 'Finance Manager', done: ['Under Review', 'Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'CFO Approval', owner: 'CFO', done: ['Approved', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'Released', owner: 'Payroll / Finance', done: ['Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { label: 'Payslips Published', owner: 'Payroll Officer', done: ['Published', 'Closed'].includes(runStatus) },
+    { label: 'Draft', owner: 'Payroll Officer', done: Boolean(currentRun?.createdAt) },
+    { label: 'Validated', owner: 'Payroll Supervisor', done: Boolean(currentRun?.validatedAt) || ['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Computed', owner: 'Payroll Officer', done: ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'HR Review', owner: 'HR Manager', done: Boolean(currentRun?.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Finance Review', owner: 'Finance Manager', done: ['Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'CFO Approval', owner: 'CFO', done: Boolean(currentRun?.approvedAt) || ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Released', owner: 'Payroll / Finance', done: Boolean(currentRun?.releasedAt) || ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Payslips Published', owner: 'Payroll Officer', done: Boolean(currentRun?.payslipsGeneratedAt) || ['Published', 'Closed'].includes(runStatus) },
   ];
   const periodBase = new Date();
   const calendarRows = [
@@ -974,7 +991,7 @@ function PayrollAdministrationControlCenter({
           </div>
           <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(runStatus)].chip}`}>Current status: {runStatus}</span>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
           {commandActions.map((item) => {
             const Icon = item.icon;
             return (
@@ -1446,10 +1463,17 @@ function DashboardWorkspace({
             <InfoTile label="Approval" value={currentRun?.approvedBy || 'Pending'} detail={currentRun?.approvedAt ? new Date(currentRun.approvedAt).toLocaleString('en-GB') : 'Awaiting approval'} tone="violet" />
           </div>
           <div className="flex flex-wrap gap-2 border-t border-slate-100 p-4">
+            <ActionButton label="Validate" icon={ClipboardCheck} onClick={() => runAction('validate-payroll')} disabled={busyAction === 'validate-payroll' || !payload?.permissions.canManageRun} tone="cyan" />
             <ActionButton label="Run Payroll" icon={PlayCircle} onClick={() => runAction('create-run')} disabled={busyAction === 'create-run' || !payload?.permissions.canManageRun} tone="blue" />
+            <ActionButton label="Submit" icon={Send} onClick={() => runAction('submit-run')} disabled={busyAction === 'submit-run' || !payload?.permissions.canManageRun} tone="amber" />
             <ActionButton label="Approve" icon={BadgeCheck} onClick={() => runAction('approve-run')} disabled={busyAction === 'approve-run' || !payload?.permissions.canApprove} tone="green" />
+            <ActionButton label="Release" icon={ShieldCheck} onClick={() => runAction('release-run')} disabled={busyAction === 'release-run' || (!payload?.permissions.canManageRun && !payload?.permissions.canPost)} tone="green" />
             <ActionButton label="Lock" icon={Lock} onClick={() => runAction('lock-run')} disabled={busyAction === 'lock-run' || !payload?.permissions.canManageRun} tone="violet" />
+            <ActionButton label="Bank Schedule" icon={CreditCard} onClick={() => runAction('generate-bank-schedule')} disabled={busyAction === 'generate-bank-schedule' || !payload?.permissions.canPost} tone="slate" />
+            <ActionButton label="Statutory" icon={FileCheck2} onClick={() => runAction('generate-statutory-schedules')} disabled={busyAction === 'generate-statutory-schedules' || !payload?.permissions.canManageRun} tone="blue" />
+            <ActionButton label="Payslips" icon={ReceiptText} onClick={() => runAction('generate-payslips')} disabled={busyAction === 'generate-payslips' || !payload?.permissions.canManageRun} tone="cyan" />
             <ActionButton label="Post to Finance" icon={Send} onClick={() => runAction('post-run')} disabled={busyAction === 'post-run' || !payload?.permissions.canPost} tone="slate" />
+            <ActionButton label="Close Period" icon={Lock} onClick={() => runAction('close-period')} disabled={busyAction === 'close-period' || (!payload?.permissions.canManageRun && !payload?.permissions.canApprove)} tone="red" />
           </div>
         </section>
 
@@ -1639,6 +1663,7 @@ const workflowSteps = [
   ['Exceptions Resolved', 'Payroll Officer', 'view-exceptions'],
   ['Submitted for Approval', 'Payroll Supervisor', 'submit-run'],
   ['Approved', 'HR / Finance / CFO', 'approve-run'],
+  ['Payroll Released', 'Payroll / Finance', 'release-run'],
   ['Payslips Generated', 'Payroll Officer', 'generate-payslips'],
   ['Bank Schedule Generated', 'Finance Manager', 'generate-bank-schedule'],
   ['Journal Posted', 'Finance Manager', 'post-run'],
@@ -1649,22 +1674,57 @@ const workflowSteps = [
 function WorkflowStepper({ payload, onAction }: { payload: PayrollPayload | null; onAction: (action: PayrollAction) => void }) {
   const run = payload?.runs[0];
   const status = run?.status || 'Draft';
-  const completed = status === 'Closed' ? 12 : status === 'Posted' ? 10 : status === 'Approved' || status === 'Locked' ? 7 : status === 'Submitted' ? 6 : status === 'Ready for Approval' ? 5 : status === 'Validation' ? 3 : 1;
+  const stepDone = (actionId: string) => {
+    if (!run) return false;
+    if (actionId === 'create-period') return Boolean(run.createdAt);
+    if (actionId === 'open-period') return ['Open', 'Validation', 'Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status);
+    if (actionId === 'validate-payroll') return Boolean(run.validatedAt) || ['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status);
+    if (actionId === 'create-run') return ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status);
+    if (actionId === 'view-exceptions') return (payload?.summary.exceptionCount || 0) === 0;
+    if (actionId === 'submit-run') return Boolean(run.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status);
+    if (actionId === 'approve-run') return Boolean(run.approvedAt) || ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status);
+    if (actionId === 'release-run') return Boolean(run.releasedAt) || ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status);
+    if (actionId === 'generate-payslips') return Boolean(run.payslipsGeneratedAt) || ['Published', 'Closed'].includes(status);
+    if (actionId === 'generate-bank-schedule') return Boolean(run.bankScheduleGeneratedAt);
+    if (actionId === 'generate-statutory-schedules') return Boolean(run.statutorySchedulesGeneratedAt);
+    if (actionId === 'post-run') return Boolean(run.postedAt) || ['Posted', 'Closed'].includes(status);
+    if (actionId === 'close-period') return status === 'Closed';
+    return false;
+  };
+  const stepTimestamp = (actionId: string) => {
+    if (!run) return payload?.generatedAt || 'Pending';
+    const values: Record<string, string | null | undefined> = {
+      'create-period': run.createdAt,
+      'open-period': run.createdAt,
+      'validate-payroll': run.validatedAt,
+      'create-run': run.createdAt,
+      'view-exceptions': (payload?.summary.exceptionCount || 0) === 0 ? run.validatedAt || run.createdAt : null,
+      'submit-run': run.submittedAt,
+      'approve-run': run.approvedAt,
+      'release-run': run.releasedAt,
+      'generate-payslips': run.payslipsGeneratedAt,
+      'generate-bank-schedule': run.bankScheduleGeneratedAt,
+      'generate-statutory-schedules': run.statutorySchedulesGeneratedAt,
+      'post-run': run.postedAt,
+      'close-period': status === 'Closed' ? run.lockedAt || run.postedAt : null,
+    };
+    return values[actionId] ? new Date(values[actionId] as string).toLocaleString('en-GB') : 'Pending';
+  };
   return (
     <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
       {workflowSteps.map(([label, owner, actionId], index) => {
-        const done = index + 1 <= completed;
+        const done = stepDone(actionId);
         return (
           <div key={label} className={`rounded-lg border p-3 ${done ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-xs font-black text-slate-950">{index + 1}. {label}</p>
                 <p className="mt-1 text-[11px] font-semibold text-slate-500">Owner: {owner}</p>
-                <p className="mt-1 text-[11px] font-semibold text-slate-500">{done ? (run?.approvedAt || run?.postedAt || run?.createdAt || payload?.generatedAt || 'Completed') : 'Pending'}</p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-500">{stepTimestamp(actionId)}</p>
               </div>
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>{done ? 'Done' : 'Open'}</span>
             </div>
-            {!done ? <button type="button" onClick={() => onAction(action(actionId, label, 'workflow', viewRoles, ['approve-run', 'close-period', 'post-run'].includes(actionId)))} className="mt-2 text-[11px] font-black text-blue-700 hover:underline">Run action</button> : null}
+            {!done ? <button type="button" onClick={() => onAction(action(actionId, label, 'workflow', viewRoles, ['approve-run', 'release-run', 'close-period', 'post-run'].includes(actionId)))} className="mt-2 text-[11px] font-black text-blue-700 hover:underline">Run action</button> : null}
           </div>
         );
       })}

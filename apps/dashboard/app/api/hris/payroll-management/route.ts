@@ -24,7 +24,7 @@ type Role =
   | 'Auditor'
   | 'Employee';
 
-type PayrollRunStatus = 'Draft' | 'Open' | 'Validation' | 'Ready for Approval' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Revision Requested' | 'Locked' | 'Posted' | 'Closed' | 'Reopened' | 'Cancelled' | 'Published';
+type PayrollRunStatus = 'Draft' | 'Open' | 'Validation' | 'Validated' | 'Computed' | 'Ready for Approval' | 'Submitted' | 'Under Review' | 'Approved' | 'Released' | 'Rejected' | 'Revision Requested' | 'Locked' | 'Posted' | 'Closed' | 'Reopened' | 'Cancelled' | 'Published';
 
 type PayrollRun = {
   id: string;
@@ -36,10 +36,23 @@ type PayrollRun = {
   netPay: number;
   createdAt: string;
   createdBy: string;
+  validatedAt?: string | null;
+  validatedBy?: string | null;
+  submittedAt?: string | null;
+  submittedBy?: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
+  releasedAt?: string | null;
+  releasedBy?: string | null;
   lockedAt: string | null;
+  payslipsGeneratedAt?: string | null;
+  payslipsGeneratedBy?: string | null;
+  bankScheduleGeneratedAt?: string | null;
+  bankScheduleGeneratedBy?: string | null;
+  statutorySchedulesGeneratedAt?: string | null;
+  statutorySchedulesGeneratedBy?: string | null;
   postedAt: string | null;
+  postedBy?: string | null;
   closedAt?: string | null;
   reopenedAt?: string | null;
   reopenedBy?: string | null;
@@ -108,6 +121,8 @@ const logAudit = (request: Request, entry: Omit<PayrollAuditEntry, 'id' | 'at' |
   auditStore.unshift({ id: `aud-${Date.now()}-${Math.random().toString(16).slice(2)}`, at: nowIso(), ip, ...entry });
   if (auditStore.length > 300) auditStore.length = 300;
 };
+
+const getCurrentRun = () => Array.from(runStore.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] || null;
 
 const monthPeriod = activePayrollPeriod;
 
@@ -379,13 +394,27 @@ const buildPayload = async (request: Request) => {
       netPay: roundMoney(totals.netPay),
       createdAt: nowIso(),
       createdBy: 'System',
+      validatedAt: null,
+      validatedBy: null,
+      submittedAt: null,
+      submittedBy: null,
       approvedAt: null,
       approvedBy: null,
+      releasedAt: null,
+      releasedBy: null,
       lockedAt: null,
+      payslipsGeneratedAt: null,
+      payslipsGeneratedBy: null,
+      bankScheduleGeneratedAt: null,
+      bankScheduleGeneratedBy: null,
+      statutorySchedulesGeneratedAt: null,
+      statutorySchedulesGeneratedBy: null,
       postedAt: null,
+      postedBy: null,
     };
     runStore.set(run.id, run);
   }
+  const currentRun = getCurrentRun();
   const exceptions = records
     .filter((record) => record.exceptionCount > 0)
     .flatMap((record) =>
@@ -434,17 +463,32 @@ const buildPayload = async (request: Request) => {
     controls: [
       { id: 'master-data', label: 'Master Data Validation', status: blocked.length ? 'Attention Required' : 'Passed', tone: blocked.length ? 'red' : 'green' },
       { id: 'statutory', label: 'PAYE and Pension Estimate', status: 'Calculated', tone: 'blue' },
-      { id: 'approval', label: 'Segregated Approval', status: Array.from(runStore.values())[0]?.status || 'Draft', tone: 'violet' },
+      { id: 'approval', label: 'Segregated Approval', status: currentRun?.status || 'Draft', tone: 'violet' },
       { id: 'audit', label: 'Payroll Audit Trail', status: 'Enabled', tone: 'cyan' },
     ],
     workflow: {
-      currentStatus: Array.from(runStore.values())[0]?.status || 'Draft',
-      nextOwner: blocked.length ? 'Payroll Officer' : Array.from(runStore.values())[0]?.status === 'Approved' ? 'Finance Manager' : 'Finance Manager / CFO',
+      currentStatus: currentRun?.status || 'Draft',
+      nextOwner: blocked.length
+        ? 'Payroll Officer'
+        : !currentRun?.validatedAt
+          ? 'Payroll Supervisor'
+          : !currentRun?.submittedAt
+            ? 'Payroll Officer'
+            : !currentRun?.approvedAt
+              ? 'HR / Finance / CFO'
+              : !currentRun?.releasedAt
+                ? 'Payroll Supervisor'
+                : !currentRun?.postedAt
+                  ? 'Finance Manager'
+                  : 'Payroll Officer',
       blockedActions: [
         ...(blocked.length ? ['Approval is blocked until validation exceptions are resolved.'] : []),
-        ...(!Array.from(runStore.values())[0]?.approvedAt ? ['Payslip publishing, bank schedule generation, and journal posting require payroll approval.'] : []),
+        ...(!currentRun?.approvedAt ? ['Payslip publishing, bank schedule generation, and journal posting require payroll approval.'] : []),
+        ...(currentRun?.approvedAt && !currentRun.bankScheduleGeneratedAt ? ['Bank schedule must be generated before posting and closing.'] : []),
+        ...(currentRun?.approvedAt && !currentRun.statutorySchedulesGeneratedAt ? ['Statutory schedules must be generated before posting and closing.'] : []),
+        ...(currentRun?.postedAt && !currentRun.payslipsGeneratedAt ? ['Payslips must be published before period close.'] : []),
       ],
-      approvalStage: blocked.length ? 'Validation' : Array.from(runStore.values())[0]?.approvedAt ? 'Approved' : 'Awaiting Approval',
+      approvalStage: blocked.length ? 'Validation' : currentRun?.approvedAt ? 'Approved' : currentRun?.submittedAt ? 'Awaiting Approval' : 'Preparation',
     },
     auditTrail: auditStore.slice(0, 50),
   };
@@ -552,17 +596,30 @@ export async function POST(request: Request) {
     const run: PayrollRun = {
       id: runId,
       period: payload.period,
-      status: 'Ready for Approval',
+      status: 'Computed',
       employeeCount: payload.summary.payrollEligible,
       grossPay: payload.summary.grossPay,
       deductions: payload.summary.deductions,
       netPay: payload.summary.netPay,
       createdAt: nowIso(),
       createdBy: role,
+      validatedAt: nowIso(),
+      validatedBy: role,
+      submittedAt: null,
+      submittedBy: null,
       approvedAt: null,
       approvedBy: null,
+      releasedAt: null,
+      releasedBy: null,
       lockedAt: null,
+      payslipsGeneratedAt: null,
+      payslipsGeneratedBy: null,
+      bankScheduleGeneratedAt: null,
+      bankScheduleGeneratedBy: null,
+      statutorySchedulesGeneratedAt: null,
+      statutorySchedulesGeneratedBy: null,
       postedAt: null,
+      postedBy: null,
       closedAt: null,
       reopenedAt: null,
       reopenedBy: null,
@@ -594,25 +651,80 @@ export async function POST(request: Request) {
   }
   if (action === 'lock-run') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
-    if (existing.status !== 'Approved') return jsonErr(409, 'Payroll results can only be locked after approval.');
+    if (!['Approved', 'Released', 'Published'].includes(existing.status)) return jsonErr(409, 'Payroll results can only be locked after approval.');
     existing.status = 'Locked';
     existing.lockedAt = nowIso();
     logAudit(request, { user: actor, role, action: 'lock-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
     return jsonOk({ run: existing });
   }
+  if (action === 'validate-payroll') {
+    if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
+    const payload = await buildPayload(request);
+    existing.status = payload.summary.blockedEmployees > 0 ? 'Validation' : 'Validated';
+    existing.validatedAt = nowIso();
+    existing.validatedBy = role;
+    logAudit(request, { user: actor, role, action: 'validate-payroll', record: existing.id, oldValue: before, newValue: existing.status, reason, comment: `${payload.summary.exceptionCount} validation exceptions detected.` });
+    return jsonOk({ run: existing, exceptionCount: payload.summary.exceptionCount });
+  }
+  if (action === 'release-run') {
+    if (!perms.canManageRun && !perms.canPost) return jsonErr(403, 'Permission denied');
+    if (existing.status !== 'Approved') return jsonErr(409, 'Payroll can only be released after approval.');
+    existing.status = 'Released';
+    existing.releasedAt = nowIso();
+    existing.releasedBy = role;
+    existing.lockedAt = existing.lockedAt || nowIso();
+    logAudit(request, { user: actor, role, action: 'release-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'generate-payslips') {
+    if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
+    if (!['Approved', 'Released', 'Locked', 'Posted', 'Published'].includes(existing.status)) return jsonErr(409, 'Payslips can only be published after payroll approval.');
+    existing.payslipsGeneratedAt = nowIso();
+    existing.payslipsGeneratedBy = role;
+    existing.status = existing.postedAt ? existing.status : 'Published';
+    logAudit(request, { user: actor, role, action: 'generate-payslips', record: existing.id, oldValue: before, newValue: existing.status, reason, comment: 'Payslips published to employee self-service queue.' });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'generate-bank-schedule') {
+    if (!perms.canPost) return jsonErr(403, 'Permission denied');
+    if (!['Approved', 'Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Bank schedule generation requires approved payroll.');
+    existing.bankScheduleGeneratedAt = nowIso();
+    existing.bankScheduleGeneratedBy = role;
+    logAudit(request, { user: actor, role, action: 'generate-bank-schedule', record: existing.id, oldValue: before, newValue: 'Bank schedule generated', reason, comment });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'generate-statutory-schedules') {
+    if (!perms.canManageRun && !perms.canPost) return jsonErr(403, 'Permission denied');
+    if (!['Approved', 'Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Statutory schedules require approved payroll.');
+    existing.statutorySchedulesGeneratedAt = nowIso();
+    existing.statutorySchedulesGeneratedBy = role;
+    logAudit(request, { user: actor, role, action: 'generate-statutory-schedules', record: existing.id, oldValue: before, newValue: 'Statutory schedules generated', reason, comment: 'PAYE, Pension, NHF, NSITF, and ITF schedule pack generated.' });
+    return jsonOk({ run: existing });
+  }
   if (action === 'post-run') {
     if (!perms.canPost) return jsonErr(403, 'Permission denied');
-    if (!['Approved', 'Locked'].includes(existing.status)) return jsonErr(409, 'Payroll journal cannot be posted before payroll approval.');
+    if (!['Approved', 'Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Payroll journal cannot be posted before payroll approval.');
+    if (!existing.bankScheduleGeneratedAt) return jsonErr(409, 'Generate the bank schedule before posting payroll.');
+    if (!existing.statutorySchedulesGeneratedAt) return jsonErr(409, 'Generate statutory schedules before posting payroll.');
     existing.status = 'Posted';
     existing.postedAt = nowIso();
+    existing.postedBy = role;
     logAudit(request, { user: actor, role, action: 'post-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
     return jsonOk({ run: existing });
   }
   if (action === 'submit-run') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
-    if (!['Ready for Approval', 'Validation', 'Draft', 'Open'].includes(existing.status)) return jsonErr(409, `Cannot submit payroll from ${existing.status}.`);
+    if (!['Ready for Approval', 'Validated', 'Computed', 'Validation', 'Draft', 'Open'].includes(existing.status)) return jsonErr(409, `Cannot submit payroll from ${existing.status}.`);
     existing.status = 'Submitted';
+    existing.submittedAt = nowIso();
+    existing.submittedBy = role;
     logAudit(request, { user: actor, role, action: 'submit-run', record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
+    return jsonOk({ run: existing });
+  }
+  if (action === 'create-period' || action === 'open-period') {
+    if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
+    existing.status = action === 'create-period' ? 'Draft' : 'Open';
+    logAudit(request, { user: actor, role, action, record: existing.id, oldValue: before, newValue: existing.status, reason, comment });
     return jsonOk({ run: existing });
   }
   if (action === 'reject-run' || action === 'request-revision') {
@@ -623,7 +735,9 @@ export async function POST(request: Request) {
   }
   if (action === 'close-period') {
     if (!perms.canManageRun && !perms.canApprove) return jsonErr(403, 'Permission denied');
-    if (existing.status !== 'Posted') return jsonErr(409, 'Period closing requires payroll approval, payslips, bank schedule, journal posting, and statutory schedules.');
+    if (existing.status !== 'Posted') return jsonErr(409, 'Period closing requires payroll approval, release, payslips, bank schedule, journal posting, and statutory schedules.');
+    if (!existing.payslipsGeneratedAt) return jsonErr(409, 'Publish payslips before closing the payroll period.');
+    if (!existing.bankScheduleGeneratedAt || !existing.statutorySchedulesGeneratedAt) return jsonErr(409, 'Generate bank and statutory schedules before closing the payroll period.');
     existing.status = 'Closed';
     existing.closedAt = nowIso();
     existing.lockedAt = existing.lockedAt || nowIso();
