@@ -7,6 +7,7 @@ import {
   ArrowUpRight,
   BriefcaseBusiness,
   Building2,
+  Database,
   Download,
   RefreshCcw,
   Search,
@@ -21,6 +22,16 @@ type Payload = {
     canEdit: boolean;
     canExport: boolean;
     canViewCosts: boolean;
+  };
+  dataSource?: {
+    source: string;
+    databaseAvailable: boolean;
+    warning: string | null;
+    employeeCount: number;
+    structureSource: string;
+    migratedTitleCount: number;
+    migrationWarning: string | null;
+    independence: string;
   };
   summary: {
     totalTitles: number;
@@ -101,7 +112,7 @@ export default function JobTitlesClient() {
     void load();
   }, []);
 
-  const titles = payload?.titles || [];
+  const titles = useMemo(() => payload?.titles || [], [payload]);
 
   const visibleTitles = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -216,6 +227,35 @@ export default function JobTitlesClient() {
         <MetricCard icon={AlertTriangle} label="Needs Review" value={payload ? formatNumber(payload.summary.titlesNeedingReview) : '—'} detail="Titles needing architecture review" />
         <MetricCard icon={Building2} label="Variants" value={payload ? formatNumber(payload.summary.titleVariants) : '—'} detail="Naming or scope variants" />
       </div>
+
+      {payload?.dataSource ? (
+        <div className={`rounded-2xl border p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3 ${payload.dataSource.warning || payload.dataSource.migrationWarning ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+          <div className="flex items-start gap-3">
+            <span className={`w-10 h-10 rounded-2xl flex items-center justify-center ${payload.dataSource.warning || payload.dataSource.migrationWarning ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              <Database className="w-5 h-5" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-slate-900">Live job title migration source</div>
+              <div className="text-xs text-slate-600 mt-1">
+                {payload.dataSource.structureSource} from {payload.dataSource.source}; {formatNumber(payload.dataSource.employeeCount)} employee records produced {formatNumber(payload.dataSource.migratedTitleCount)} HRIS job title records.
+              </div>
+              {payload.dataSource.warning || payload.dataSource.migrationWarning ? (
+                <div className="text-xs font-semibold text-amber-800 mt-2">{payload.dataSource.warning || payload.dataSource.migrationWarning}</div>
+              ) : (
+                <div className="text-xs font-semibold text-emerald-800 mt-2">{payload.dataSource.independence}</div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2.5 py-1 rounded-full bg-white/80 border border-slate-200 text-[11px] font-semibold text-slate-700">
+              HRIS DB: {payload.dataSource.databaseAvailable ? 'Available' : 'Unavailable'}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-white/80 border border-slate-200 text-[11px] font-semibold text-slate-700">
+              Generated: {new Date(payload.generatedAt).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
         <label className="relative xl:col-span-2">
