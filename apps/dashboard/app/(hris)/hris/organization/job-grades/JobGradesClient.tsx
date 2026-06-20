@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   BriefcaseBusiness,
+  Database,
   Download,
   Plus,
   RefreshCcw,
@@ -22,6 +23,16 @@ type Payload = {
     canEdit: boolean;
     canExport: boolean;
     canViewCosts: boolean;
+  };
+  dataSource?: {
+    source: string;
+    databaseAvailable: boolean;
+    warning: string | null;
+    employeeCount: number;
+    structureSource: string;
+    migratedGradeCount: number;
+    migrationWarning: string | null;
+    independence: string;
   };
   summary: {
     totalGrades: number;
@@ -115,7 +126,7 @@ export default function JobGradesClient() {
     void load();
   }, []);
 
-  const grades = payload?.grades || [];
+  const grades = useMemo(() => payload?.grades || [], [payload]);
 
   const visibleGrades = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -302,8 +313,8 @@ export default function JobGradesClient() {
     >
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-slate-900">Persistence Mode</div>
-          <div className="text-xs text-slate-500 mt-1">New grades are saved through the API into a local JSON store and remain available after page reload.</div>
+          <div className="text-sm font-semibold text-slate-900">Production Persistence</div>
+          <div className="text-xs text-slate-500 mt-1">Job grades are migrated from Sage payroll into the DLE HRIS database and remain independent of the Sage database after storage.</div>
         </div>
         <button
           type="button"
@@ -314,6 +325,35 @@ export default function JobGradesClient() {
           Reload Data
         </button>
       </div>
+
+      {payload?.dataSource ? (
+        <div className={`rounded-2xl border p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3 ${payload.dataSource.warning || payload.dataSource.migrationWarning ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+          <div className="flex items-start gap-3">
+            <span className={`w-10 h-10 rounded-2xl flex items-center justify-center ${payload.dataSource.warning || payload.dataSource.migrationWarning ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              <Database className="w-5 h-5" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-slate-900">Live job grade migration source</div>
+              <div className="text-xs text-slate-600 mt-1">
+                {payload.dataSource.structureSource} from {payload.dataSource.source}; {formatNumber(payload.dataSource.employeeCount)} employee records produced {formatNumber(payload.dataSource.migratedGradeCount)} HRIS job grade records.
+              </div>
+              {payload.dataSource.warning || payload.dataSource.migrationWarning ? (
+                <div className="text-xs font-semibold text-amber-800 mt-2">{payload.dataSource.warning || payload.dataSource.migrationWarning}</div>
+              ) : (
+                <div className="text-xs font-semibold text-emerald-800 mt-2">{payload.dataSource.independence}</div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2.5 py-1 rounded-full bg-white/80 border border-slate-200 text-[11px] font-semibold text-slate-700">
+              HRIS DB: {payload.dataSource.databaseAvailable ? 'Available' : 'Unavailable'}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-white/80 border border-slate-200 text-[11px] font-semibold text-slate-700">
+              Generated: {new Date(payload.generatedAt).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       {showCreateForm ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">

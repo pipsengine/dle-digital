@@ -19,7 +19,42 @@ import {
 } from 'lucide-react';
 import { downloadExcelFile } from '@/lib/excel-export';
 
-type AccessAction = 'view' | 'create' | 'edit' | 'delete' | 'submit' | 'approve' | 'reject' | 'export' | 'import' | 'print' | 'upload' | 'download' | 'configure' | 'audit' | 'enable' | 'disable' | 'assign' | 'override';
+type AccessAction =
+  | 'view'
+  | 'create'
+  | 'edit'
+  | 'delete'
+  | 'submit'
+  | 'review'
+  | 'approve'
+  | 'reject'
+  | 'return'
+  | 'process'
+  | 'post'
+  | 'release'
+  | 'publish'
+  | 'lock'
+  | 'unlock'
+  | 'reopen'
+  | 'export'
+  | 'import'
+  | 'print'
+  | 'upload'
+  | 'download'
+  | 'configure'
+  | 'audit'
+  | 'enable'
+  | 'disable'
+  | 'assign'
+  | 'delegate'
+  | 'escalate'
+  | 'override'
+  | 'mask'
+  | 'unmask'
+  | 'sync'
+  | 'schedule'
+  | 'notify'
+  | 'impersonate';
 type PermissionNode = {
   module: string;
   subModule: string;
@@ -40,7 +75,7 @@ type SubjectOption = { id: string; label: string; permissions: string[]; meta: s
 
 const dataScopes = ['Own', 'Team', 'Department', 'Location', 'Company', 'Global'];
 const approvalLevels = ['L1 - User', 'L2 - Manager', 'L2 - HR Admin', 'L2 - Project Manager', 'L3 - Approver', 'L3 - Payroll Approver', 'L3 - Finance Approver', 'L3 - Super Admin'];
-const riskyActions = new Set(['delete', 'disable', 'assign', 'override', 'approve']);
+const riskyActions = new Set(['delete', 'disable', 'assign', 'override', 'approve', 'post', 'release', 'lock', 'unlock', 'reopen', 'unmask', 'sync', 'delegate', 'escalate', 'impersonate']);
 
 const permissionOf = (node: PermissionNode, action: string) => `${node.permissionPrefix}.${action}`;
 
@@ -152,6 +187,8 @@ export default function RolesPermissionsClient() {
     const out: string[] = [];
     if (permissions.some((item) => item.endsWith('.approve')) && permissions.some((item) => item.endsWith('.create') || item.endsWith('.edit'))) out.push('Segregation of Duties: create/edit and approve are assigned together.');
     if (permissions.some((item) => item.endsWith('.override'))) out.push('Override permission is selected and can bypass workflow controls.');
+    if (permissions.some((item) => item.endsWith('.post') || item.endsWith('.release') || item.endsWith('.lock') || item.endsWith('.reopen'))) out.push('Payroll/finance posting, release, lock, or reopening authority is selected.');
+    if (permissions.some((item) => item.endsWith('.unmask') || item.endsWith('.impersonate'))) out.push('Sensitive data unmasking or impersonation access is selected.');
     if (permissions.some((item) => item.endsWith('.delete') || item.endsWith('.disable'))) out.push('Destructive delete/disable permissions are selected.');
     if (permissions.some((item) => item.startsWith('admin.') || item.startsWith('security.') || item.startsWith('audit.'))) out.push('Security-sensitive permissions require Super Administrator control.');
     return out;

@@ -89,7 +89,12 @@ const validate = (payload: CreateJobGradePayload, existing: JobGradeRecord[]) =>
 };
 
 export async function GET() {
-  return ok(await getPersistedJobGradesData());
+  try {
+    return ok(await getPersistedJobGradesData());
+  } catch (error) {
+    console.error('Job grades load error:', error);
+    return err(500, error instanceof Error ? error.message : 'Unable to load job grades');
+  }
 }
 
 export async function POST(request: Request) {

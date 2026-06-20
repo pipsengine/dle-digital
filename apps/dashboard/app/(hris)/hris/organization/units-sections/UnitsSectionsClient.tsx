@@ -5,6 +5,7 @@ import { PageTemplate } from '@/components/layout/page-template';
 import {
   AlertTriangle,
   Building2,
+  Database,
   Download,
   Layers3,
   Network,
@@ -21,6 +22,15 @@ type Payload = {
     canEdit: boolean;
     canExport: boolean;
     canViewCosts: boolean;
+  };
+  dataSource?: {
+    source: string;
+    databaseAvailable: boolean;
+    warning: string | null;
+    employeeCount: number;
+    structureSource: string;
+    migratedEntityCount: number;
+    migrationWarning: string | null;
   };
   summary: {
     totalRecords: number;
@@ -90,7 +100,7 @@ export default function UnitsSectionsClient() {
     void load();
   }, []);
 
-  const records = payload?.records || [];
+  const records = useMemo(() => payload?.records || [], [payload]);
 
   const visibleRecords = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -208,6 +218,35 @@ export default function UnitsSectionsClient() {
         <MetricCard icon={ShieldCheck} label="Succession" value={payload ? `${payload.summary.avgSuccessionCoverage}%` : '—'} detail="Average continuity coverage" />
         <MetricCard icon={AlertTriangle} label="Attrition Risk" value={payload ? `${payload.summary.avgAttritionRisk}%` : '—'} detail="Average structural risk" />
       </div>
+
+      {payload?.dataSource ? (
+        <div className={`rounded-2xl border p-4 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3 ${payload.dataSource.warning || payload.dataSource.migrationWarning ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+          <div className="flex items-start gap-3">
+            <span className={`w-10 h-10 rounded-2xl flex items-center justify-center ${payload.dataSource.warning || payload.dataSource.migrationWarning ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              <Database className="w-5 h-5" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-slate-900">Live units and sections source</div>
+              <div className="text-xs text-slate-600 mt-1">
+                {payload.dataSource.structureSource} from {payload.dataSource.source}; {formatNumber(payload.dataSource.employeeCount)} employee records produced {formatNumber(payload.dataSource.migratedEntityCount)} unit and section records.
+              </div>
+              {payload.dataSource.warning || payload.dataSource.migrationWarning ? (
+                <div className="text-xs font-semibold text-amber-800 mt-2">{payload.dataSource.warning || payload.dataSource.migrationWarning}</div>
+              ) : (
+                <div className="text-xs font-semibold text-emerald-800 mt-2">No mock units or sections are being used. Records are generated from Sage-backed employee/payroll assignments.</div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2.5 py-1 rounded-full bg-white/80 border border-slate-200 text-[11px] font-semibold text-slate-700">
+              DB: {payload.dataSource.databaseAvailable ? 'Available' : 'Fallback'}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-white/80 border border-slate-200 text-[11px] font-semibold text-slate-700">
+              Generated: {new Date(payload.generatedAt).toLocaleString()}
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
         <label className="relative xl:col-span-2">

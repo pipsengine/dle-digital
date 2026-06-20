@@ -6,7 +6,43 @@ import { getDleEnterpriseDbPool } from '@/lib/dle-enterprise-db';
 import { enterpriseRoles, permissionsForRoles, roleDefinitions } from '@/lib/auth/rbac';
 import type { SessionPayload } from '@/lib/auth/session';
 
-export const accessActions = ['view', 'create', 'edit', 'delete', 'submit', 'approve', 'reject', 'export', 'import', 'print', 'upload', 'download', 'configure', 'audit', 'enable', 'disable', 'assign', 'override'] as const;
+export const accessActions = [
+  'view',
+  'create',
+  'edit',
+  'delete',
+  'submit',
+  'review',
+  'approve',
+  'reject',
+  'return',
+  'process',
+  'post',
+  'release',
+  'publish',
+  'lock',
+  'unlock',
+  'reopen',
+  'export',
+  'import',
+  'print',
+  'upload',
+  'download',
+  'configure',
+  'audit',
+  'enable',
+  'disable',
+  'assign',
+  'delegate',
+  'escalate',
+  'override',
+  'mask',
+  'unmask',
+  'sync',
+  'schedule',
+  'notify',
+  'impersonate',
+] as const;
 
 export type AccessAction = typeof accessActions[number];
 export type PermissionScope = 'role' | 'user';
@@ -166,6 +202,119 @@ export const permissionCatalog: PermissionNode[] = [
   node('Workflow', 'Approvals', 'Approval Engine', 'Workflow Approval', 'Workflow', 'L2 - Manager', 'Team', 'workflow'),
 ];
 
+permissionCatalog.push(
+  node('Page Access', 'Employees', 'Employee Directory', 'Employee Directory Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.employees.employee-directory'),
+  node('Page Access', 'Employees', 'Add New Employee', 'Employee Creation Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.employees.add-new-employee'),
+  node('Page Access', 'Employees', 'Employee Profile', 'Employee Profile Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.employee-profile'),
+  node('Page Access', 'Employees', 'Job Information', 'Job Information Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.job-information'),
+  node('Page Access', 'Employees', 'Department & Unit Assignment', 'Assignment Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.department-assignment'),
+  node('Page Access', 'Employees', 'Reporting Line', 'Reporting Line Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.reporting-line'),
+  node('Page Access', 'Employees', 'Employment History', 'Employment History Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.employment-history'),
+  node('Page Access', 'Employees', 'Employee Status', 'Employee Status Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.employee-status'),
+  node('Page Access', 'Employees', 'Employee Confirmation', 'Confirmation Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.confirmation'),
+  node('Page Access', 'Employees', 'Employee Promotion', 'Promotion Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.promotion'),
+  node('Page Access', 'Employees', 'Employee Exit Status', 'Exit Status Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.exit-status'),
+  node('Page Access', 'Employees', 'Emergency Contacts', 'Emergency Contacts Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.emergency-contacts'),
+  node('Page Access', 'Employees', 'Next of Kin', 'Next of Kin Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.next-of-kin'),
+  node('Page Access', 'Employees', 'Employee Documents', 'Employee Documents Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.documents'),
+  node('Page Access', 'Employees', 'Employee Timeline', 'Employee Timeline Page', 'Page', 'L2 - HR Admin', 'Department', 'page.hris.employees.timeline'),
+
+  node('Employee Data', 'Identity', 'Personal Information', 'DOB, Gender, Marital Status, Nationality', 'Module', 'L2 - HR Admin', 'Department', 'data.employee.personal'),
+  node('Employee Data', 'Contact', 'Contact Information', 'Email, Phone, Address', 'Module', 'L2 - HR Admin', 'Department', 'data.employee.contact'),
+  node('Employee Data', 'Banking', 'Bank Details', 'Bank Name, Account Number, Account Name', 'Module', 'L3 - Payroll Approver', 'Company', 'data.employee.bank'),
+  node('Employee Data', 'Payroll', 'Compensation Details', 'Salary, Grade, Allowances, Deductions', 'Module', 'L3 - Payroll Approver', 'Company', 'data.employee.payroll'),
+  node('Employee Data', 'Statutory', 'Tax/Pension/NHF Details', 'Tax ID, Pension PIN, NHF/NHIA Numbers', 'Module', 'L3 - Payroll Approver', 'Company', 'data.employee.statutory'),
+  node('Employee Data', 'Medical', 'Medical Records', 'Restricted Medical Information', 'Module', 'L3 - Compliance', 'Own', 'data.employee.medical'),
+  node('Employee Data', 'Documents', 'Confidential Documents', 'Contracts, IDs, Certificates, Letters', 'Module', 'L2 - HR Admin', 'Department', 'data.employee.documents'),
+  node('Employee Data', 'Audit', 'Employee Change History', 'Before/After Change Tracking', 'System', 'L3 - Super Admin', 'Company', 'data.employee.audit'),
+
+  node('Page Access', 'Organization', 'Company Structure', 'Company Structure Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.company-structure'),
+  node('Page Access', 'Organization', 'Departments', 'Departments Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.departments'),
+  node('Page Access', 'Organization', 'Units & Sections', 'Units & Sections Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.units-sections'),
+  node('Page Access', 'Organization', 'Job Grades', 'Job Grades Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.job-grades'),
+  node('Page Access', 'Organization', 'Job Titles', 'Job Titles Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.job-titles'),
+  node('Page Access', 'Organization', 'Positions', 'Positions Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.positions'),
+  node('Page Access', 'Organization', 'Locations & Sites', 'Locations & Sites Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.locations-sites'),
+  node('Page Access', 'Organization', 'Reporting Hierarchy', 'Reporting Hierarchy Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.reporting-hierarchy'),
+  node('Page Access', 'Organization', 'Organogram', 'Organogram Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.organogram'),
+  node('Page Access', 'Organization', 'Vacancy Management', 'Vacancy Management Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.vacancy-management'),
+  node('Page Access', 'Organization', 'Workforce Planning', 'Workforce Planning Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.organization.workforce-planning'),
+
+  node('Page Access', 'Attendance', 'Attendance Register', 'Attendance Register Page', 'Page', 'L2 - Manager', 'Department', 'page.hris.attendance.register'),
+  node('Page Access', 'Attendance', 'Biometric Attendance', 'Biometric Attendance Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.biometric'),
+  node('Page Access', 'Attendance', 'Clock In Clock Out', 'Clock In/Out Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.clock'),
+  node('Page Access', 'Attendance', 'Daily Attendance', 'Daily Attendance Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.daily'),
+  node('Page Access', 'Attendance', 'Mobile Attendance', 'Mobile Attendance Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.mobile'),
+  node('Page Access', 'Attendance', 'Site Attendance', 'Site Attendance Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.site'),
+
+  node('Timesheet', 'Entry', 'Timesheet Entry', 'Capture and Save Timesheet Lines', 'Workflow', 'L2 - Supervisor', 'Team', 'timesheet.entry'),
+  node('Timesheet', 'Submission', 'Timesheet Submission', 'Submit Timesheet for Approval', 'Workflow', 'L2 - Supervisor', 'Team', 'timesheet.submission'),
+  node('Timesheet', 'Supervisor Review', 'Supervisor Approval', 'Approve/Return/Reject Supervisor Stage', 'Workflow', 'L2 - Supervisor', 'Team', 'timesheet.supervisor'),
+  node('Timesheet', 'Cost Control Review', 'Cost Control Approval', 'Validate Cost Centre, Charge Code, Budget', 'Workflow', 'L3 - Approver', 'Company', 'timesheet.cost-control'),
+  node('Timesheet', 'Project Manager Review', 'Project Approval', 'Approve Project-Specific Time', 'Workflow', 'L2 - Project Manager', 'Team', 'timesheet.project-manager'),
+  node('Timesheet', 'HR Review', 'HR Approval', 'Payroll Readiness Review', 'Workflow', 'L2 - HR Admin', 'Company', 'timesheet.hr'),
+  node('Timesheet', 'Payroll Processing', 'Payroll Hours Processing', 'Consolidate Approved Hours', 'Workflow', 'L3 - Payroll Approver', 'Company', 'timesheet.payroll'),
+  node('Timesheet', 'Payroll Posting', 'Timesheet Payroll Posting', 'Post Approved Hours to Payroll', 'Workflow', 'L3 - Payroll Approver', 'Company', 'timesheet.payroll-posting'),
+  node('Timesheet', 'Bulk Operations', 'Bulk Timesheet Actions', 'Bulk Approve/Return/Reject/Export', 'Button', 'L3 - Approver', 'Company', 'button.timesheet.bulk-actions'),
+  node('Timesheet', 'Reports', 'Timesheet Reports', 'Timesheet Reporting and Analytics', 'Report', 'L2 - Manager', 'Company', 'reports.timesheet'),
+
+  node('Page Access', 'Payroll', 'Salary Management', 'Payroll Administration Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.salary-management'),
+  node('Page Access', 'Payroll', 'Salary Structure', 'Salary Structure Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.salary-structure'),
+  node('Page Access', 'Payroll', 'Employee Salary Setup', 'Employee Salary Setup Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.employee-salary-setup'),
+  node('Page Access', 'Payroll', 'Sage Migration Review', 'Sage Migration Review Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.sage-migration-review'),
+  node('Page Access', 'Payroll', 'Allowances', 'Allowances Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.allowances'),
+  node('Page Access', 'Payroll', 'Deductions', 'Deductions Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.deductions'),
+  node('Page Access', 'Payroll', 'Daily Rate Pay', 'Daily Rate Pay Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.daily-rate-pay'),
+  node('Page Access', 'Payroll', 'Overtime Pay', 'Overtime Pay Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.overtime-pay'),
+  node('Page Access', 'Payroll', 'Payroll Processing', 'Payroll Processing Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.processing'),
+  node('Page Access', 'Payroll', 'Payroll Approval', 'Payroll Approval Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.approval'),
+  node('Page Access', 'Payroll', 'Payslip Generation', 'Payslip Generation Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.payslip-generation'),
+  node('Page Access', 'Payroll', 'Tax PAYE', 'PAYE Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.tax-paye'),
+  node('Page Access', 'Payroll', 'Pension', 'Pension Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.pension'),
+  node('Page Access', 'Payroll', 'NHF NSITF ITF', 'Statutory Funds Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.statutory-funds'),
+  node('Page Access', 'Payroll', 'Loans & Salary Advances', 'Loans Page', 'Page', 'L3 - Payroll Approver', 'Company', 'page.hris.payroll.loans'),
+
+  node('Payroll Controls', 'Command Center', 'Validate Payroll', 'Run Payroll Validation', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.validate'),
+  node('Payroll Controls', 'Command Center', 'Run Payroll', 'Compute Payroll', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.run'),
+  node('Payroll Controls', 'Command Center', 'Submit Payroll', 'Submit Payroll for Approval', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.submit'),
+  node('Payroll Controls', 'Approval', 'HR Payroll Review', 'HR Payroll Approval Stage', 'Workflow', 'L2 - HR Admin', 'Company', 'payroll.workflow.hr-review'),
+  node('Payroll Controls', 'Approval', 'Finance Payroll Review', 'Finance Payroll Approval Stage', 'Workflow', 'L3 - Finance Approver', 'Company', 'payroll.workflow.finance-review'),
+  node('Payroll Controls', 'Approval', 'CFO Approval', 'Final Payroll Approval', 'Workflow', 'L3 - Finance Approver', 'Company', 'payroll.workflow.cfo-approval'),
+  node('Payroll Controls', 'Release', 'Release Payroll', 'Release Approved Payroll', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.release'),
+  node('Payroll Controls', 'Locking', 'Payroll Lock', 'Lock Payroll Period and Transactions', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.lock'),
+  node('Payroll Controls', 'Reopening', 'Payroll Reopening', 'Reopen Closed Payroll Period', 'Workflow', 'L3 - Finance Approver', 'Company', 'payroll.workflow.reopen'),
+  node('Payroll Controls', 'Posting', 'Payroll Posting', 'Post Payroll to Finance', 'Button', 'L3 - Finance Approver', 'Company', 'button.payroll.post'),
+  node('Payroll Outputs', 'Payslips', 'Publish Payslips', 'Publish Payslips to ESS', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.payslips.publish'),
+  node('Payroll Outputs', 'Payslips', 'Download Payslips', 'Bulk Payslip Download', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.payslips.download'),
+  node('Payroll Outputs', 'Bank Schedule', 'Generate Bank Schedule', 'Salary Bank Schedule', 'Report', 'L3 - Finance Approver', 'Company', 'reports.payroll.bank-schedule'),
+  node('Payroll Outputs', 'Payroll Register', 'Payroll Register', 'Payroll Register Export', 'Report', 'L3 - Payroll Approver', 'Company', 'reports.payroll.register'),
+  node('Payroll Outputs', 'Statutory', 'PAYE Schedule', 'PAYE Statutory Output', 'Report', 'L3 - Payroll Approver', 'Company', 'reports.payroll.paye'),
+  node('Payroll Outputs', 'Statutory', 'Pension Schedule', 'Pension Statutory Output', 'Report', 'L3 - Payroll Approver', 'Company', 'reports.payroll.pension'),
+  node('Payroll Outputs', 'Statutory', 'NHF Schedule', 'NHF Statutory Output', 'Report', 'L3 - Payroll Approver', 'Company', 'reports.payroll.nhf'),
+  node('Payroll Outputs', 'Statutory', 'NSITF Schedule', 'NSITF Statutory Output', 'Report', 'L3 - Payroll Approver', 'Company', 'reports.payroll.nsitf'),
+  node('Payroll Outputs', 'Statutory', 'ITF Schedule', 'ITF Statutory Output', 'Report', 'L3 - Payroll Approver', 'Company', 'reports.payroll.itf'),
+
+  node('Reports & Analytics', 'Dashboards', 'HR Operations Dashboard', 'HR Operations Dashboard Access', 'Dashboard', 'L2 - HR Admin', 'Company', 'dashboard.hr-operations'),
+  node('Reports & Analytics', 'Dashboards', 'Executive HR Dashboard', 'Executive HR Dashboard Access', 'Dashboard', 'L3 - Approver', 'Company', 'dashboard.executive-hr'),
+  node('Reports & Analytics', 'Exports', 'Excel Export', 'Excel Export Control', 'Button', 'L2 - Manager', 'Company', 'button.exports.excel'),
+  node('Reports & Analytics', 'Exports', 'PDF Export', 'PDF Export Control', 'Button', 'L2 - Manager', 'Company', 'button.exports.pdf'),
+  node('Reports & Analytics', 'Exports', 'CSV Export', 'CSV Export Control', 'Button', 'L2 - Manager', 'Company', 'button.exports.csv'),
+  node('Reports & Analytics', 'Schedules', 'Scheduled Reports', 'Scheduled Report Delivery', 'Report', 'L2 - Manager', 'Company', 'reports.schedule'),
+  node('Reports & Analytics', 'Subscriptions', 'Report Subscriptions', 'Email and In-App Report Delivery', 'Report', 'L2 - Manager', 'Company', 'reports.subscription'),
+  node('Reports & Analytics', 'Power BI', 'Power BI / Fabric', 'Analytics Platform Integration', 'API', 'L3 - Super Admin', 'Global', 'integration.analytics.powerbi'),
+
+  node('Integration', 'Sage Payroll', 'Sage Payroll Migration', 'Sage Payroll Sync and Review', 'API', 'L3 - Super Admin', 'Global', 'integration.sage.payroll'),
+  node('Integration', 'Sage ERP', 'Sage ERP Finance', 'Sage Finance Integration', 'API', 'L3 - Super Admin', 'Global', 'integration.sage.erp'),
+  node('Integration', 'Biometric Devices', 'Biometric Attendance Sync', 'Device/API Sync', 'API', 'L3 - IT Admin', 'Global', 'integration.biometric'),
+  node('Integration', 'Email', 'Email Notifications', 'Email Delivery Control', 'API', 'L3 - IT Admin', 'Global', 'integration.email'),
+  node('Integration', 'ESS', 'Employee Self-Service Publishing', 'ESS Data Publishing', 'API', 'L3 - Payroll Approver', 'Company', 'integration.ess'),
+
+  node('Administration', 'Workflow Configuration', 'Approval Workflow Setup', 'Approval Levels, Delegation, Escalation', 'System', 'L3 - Super Admin', 'Global', 'admin.workflow'),
+  node('Administration', 'Notifications', 'Notification Rules', 'Email and In-App Notification Configuration', 'System', 'L3 - Super Admin', 'Global', 'admin.notifications'),
+  node('Administration', 'Data Retention', 'Retention Policies', 'Retention, Archive, Purge Controls', 'System', 'L3 - Super Admin', 'Global', 'admin.retention'),
+  node('Administration', 'Impersonation', 'User Impersonation', 'Support Impersonation with Audit', 'System', 'L3 - Super Admin', 'Global', 'admin.impersonation', true),
+);
+
 const allCatalogPermissions = () => permissionCatalog.flatMap((item) => accessActions.map((action) => `${item.permissionPrefix}.${action}`));
 
 const defaultTemplates = (): PermissionTemplate[] => [
@@ -314,7 +463,8 @@ export const saveAccessAssignment = async (
   if (!actorIsSuper && requested.some(isProtectedPermission)) throw new Error('Admins cannot change security, audit, authentication, system control, or Super Administrator permissions.');
   if (!actorIsSuper && requested.some((permission) => isHigherThanActor(permission, actor.permissions))) throw new Error('Admins cannot grant permissions higher than their own access.');
 
-  const risky = requested.filter((permission) => ['delete', 'disable', 'assign', 'override', 'approve'].some((action) => permission.endsWith(`.${action}`)) || isProtectedPermission(permission));
+  const riskyActions = ['delete', 'disable', 'assign', 'override', 'approve', 'post', 'release', 'lock', 'unlock', 'reopen', 'unmask', 'sync', 'delegate', 'escalate', 'impersonate'];
+  const risky = requested.filter((permission) => riskyActions.some((action) => permission.endsWith(`.${action}`)) || isProtectedPermission(permission));
   const status: AccessStatus = payload.requireApproval && !actorIsSuper ? 'pending-approval' : payload.publish ? 'published' : 'draft';
   const state = await readState();
   const targetList = status === 'published' ? 'published' : 'drafts';
@@ -400,6 +550,9 @@ export const buildPermissionWarnings = (permissions: string[], subjectId: string
   const hasOverride = permissions.some((item) => item.endsWith('.override'));
   if (hasApprove && hasCreateOrEdit) warnings.push('Segregation of Duties: create/edit and approve are assigned together.');
   if (hasOverride) warnings.push('Risk warning: override permissions bypass normal workflow checks.');
+  if (permissions.some((item) => item.endsWith('.post') || item.endsWith('.release') || item.endsWith('.lock') || item.endsWith('.reopen'))) warnings.push('Payroll/finance risk: posting, release, locking, or reopening permissions are selected.');
+  if (permissions.some((item) => item.endsWith('.unmask') || item.endsWith('.impersonate'))) warnings.push('Sensitive access risk: unmasking or impersonation permissions are selected.');
+  if (permissions.some((item) => item.endsWith('.sync'))) warnings.push('Integration risk: external system synchronization permissions are selected.');
   if (permissions.some(isProtectedPermission) && subjectId !== 'Super Administrator') warnings.push('Security-sensitive permissions are included and require Super Administrator ownership.');
   if (permissions.some((item) => item.endsWith('.delete') || item.endsWith('.disable'))) warnings.push('Risk warning: destructive disable/delete permissions are selected.');
   return warnings;
