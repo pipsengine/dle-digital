@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getUiPermissions, resolveAccessContext } from '@/lib/hris-access';
 import {
-  advanceTimesheetWorkflow,
   advanceProjectTimesheetApproval,
+  advanceTimesheetWorkflow,
   buildProjectTimesheetApprovals,
   normalizePaidWorkHours,
   normalizeTimesheetStatus,
@@ -10,154 +10,286 @@ import {
   readTimesheetData,
   readTimesheetPayrollUpdates,
   readTimesheetPeriod,
+  writeTimesheetHeaderLines,
   type TimesheetHeader,
+  type TimesheetLine,
   type TimesheetStatus,
   type TimesheetWorkflowStage,
 } from '@/lib/timesheet-entry-store';
+import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 const ok = <T,>(data: T, status = 200) => NextResponse.json({ status: 'success', data }, { status });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
-const round1 = (value: number) => Math.round(value * 10) / 10;
+const round = (value: number, dp = 1) => Math.round(value * (10 ** dp)) / (10 ** dp);
+const lower = (value: unknown) => String(value || '').trim().toLowerCase();
+const includesAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
 const isSuperAdministrator = (role: string) => /\bsuper\b.*\badmin/i.test(role);
-const actorText = (value: string) => value.trim().toLowerCase();
-const textIncludesAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
 
-type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN';
-type ProjectApprovalStage = 'Project Manager' | 'Cost Control' | 'HR';
+type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN' | 'PROCESS_PAYROLL' | 'POST_PAYROLL';
+type ProjectApprovalStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR' | 'Payroll';
+type BulkMode = 'HEADER' | 'PROJECT';
 
-const stageByStatus: Partial<Record<TimesheetStatus, TimesheetWorkflowStage>> = {
-  Submitted: 'Supervisor',
-  Supervisor_Reviewed: 'Project Manager',
-  Project_Manager_Reviewed: 'Cost Control',
-  Cost_Control_Reviewed: 'HR',
-};
+const statusLabel = (status: TimesheetStatus) => normalizeTimesheetStatus(status).replace(/_/g, ' ');
 
-const nextActionLabel = (status: TimesheetStatus) => {
-  if (status === 'Submitted') return 'Supervisor Review';
-  if (status === 'Supervisor_Reviewed') return 'Project Manager Approve';
-  if (status === 'Project_Manager_Reviewed') return 'Cost Control Approve';
-  if (status === 'Cost_Control_Reviewed') return 'HR Acknowledge';
+const currentStageForStatus = (status: TimesheetStatus): TimesheetWorkflowStage | 'Payroll Processing' | 'Payroll Posted' | null => {
+  const normalized = normalizeTimesheetStatus(status);
+  if (normalized === 'Submitted') return 'Supervisor';
+  if (normalized === 'Supervisor_Reviewed') return 'Cost Control';
+  if (normalized === 'Cost_Control_Reviewed') return 'Project Manager';
+  if (normalized === 'Project_Manager_Reviewed') return 'HR';
+  if (normalized === 'HR_Acknowledged') return 'Payroll Processing';
+  if (normalized === 'Locked') return 'Payroll Posted';
   return null;
 };
 
-const requireHeaderStageAccess = (
-  header: TimesheetHeader,
-  action: ApprovalAction,
-  actor: string,
-  role: string,
-) => {
+const nextActionLabel = (status: TimesheetStatus) => {
+  const stage = currentStageForStatus(status);
+  if (stage === 'Supervisor') return 'Supervisor Review';
+  if (stage === 'Cost Control') return 'Cost Approve';
+  if (stage === 'Project Manager') return 'Project Approve';
+  if (stage === 'HR') return 'HR Approve';
+  if (stage === 'Payroll Processing') return 'Process Payroll';
+  return null;
+};
+
+const roleScope = (role: string, actor: string) => {
+  const text = lower(`${role} ${actor}`);
+  if (isSuperAdministrator(role) || includesAny(text, ['admin', 'hr', 'human resources', 'payroll'])) return 'enterprise';
+  if (includesAny(text, ['cost control', 'cost controller', 'finance'])) return 'cost-control';
+  if (includesAny(text, ['project manager', 'pm '])) return 'project-manager';
+  if (includesAny(text, ['supervisor', 'foreman', 'site lead'])) return 'supervisor';
+  return 'restricted';
+};
+
+const stageAccess = (stage: ProjectApprovalStage | null, actor: string, role: string) => {
+  if (isSuperAdministrator(role)) return true;
+  const text = lower(`${actor} ${role}`);
+  if (stage === 'Supervisor') return includesAny(text, ['supervisor', 'foreman', 'site lead']);
+  if (stage === 'Cost Control') return includesAny(text, ['cost control', 'cost controller', 'finance', 'cost']);
+  if (stage === 'Project Manager') return includesAny(text, ['project manager', 'pm ']);
+  if (stage === 'HR') return includesAny(text, ['hr', 'human resources']);
+  if (stage === 'Payroll') return includesAny(text, ['payroll']);
+  return false;
+};
+
+const requireHeaderStageAccess = (header: TimesheetHeader, action: ApprovalAction, actor: string, role: string) => {
   if (isSuperAdministrator(role)) return;
-  const status = normalizeTimesheetStatus(header.status);
-  const combined = actorText(`${actor} ${role}`);
-  const supervisorText = actorText(header.supervisorName || header.supervisorId || '');
+  const stage = currentStageForStatus(header.status);
+  const actorRole = lower(`${actor} ${role}`);
+  const supervisorText = lower(header.supervisorName || header.supervisorId || '');
 
-  if (!['Submitted', 'Cost_Control_Reviewed'].includes(status)) {
-    throw new Error('This workflow stage requires project-level approval. Only the Super Administrator can approve all levels at once.');
-  }
-
-  if (status === 'Submitted') {
-    const isAssignedSupervisor = supervisorText && (supervisorText.includes(actorText(actor)) || actorText(actor).includes(supervisorText));
-    const isSupervisorRole = textIncludesAny(combined, ['supervisor', 'site lead', 'foreman']);
-    if (!isAssignedSupervisor && !isSupervisorRole) {
-      throw new Error('Only the assigned supervisor can complete supervisor review.');
-    }
+  if (action === 'PROCESS_PAYROLL' || action === 'POST_PAYROLL') {
+    if (!includesAny(actorRole, ['payroll', 'hr', 'human resources'])) throw new Error('Only HR or Payroll can process payroll-ready timesheets.');
     return;
   }
 
-  if (status === 'Cost_Control_Reviewed' && !textIncludesAny(combined, ['hr', 'human resources', 'payroll'])) {
-    throw new Error('Only HR or Payroll can acknowledge a fully approved timesheet for payroll.');
+  if (stage === 'Supervisor') {
+    const isAssignedSupervisor = supervisorText && (supervisorText.includes(lower(actor)) || lower(actor).includes(supervisorText));
+    if (!isAssignedSupervisor && !stageAccess('Supervisor', actor, role)) throw new Error('Only the assigned supervisor can complete supervisor review.');
+    return;
   }
-
-  if ((action === 'REJECT' || action === 'RETURN') && status === 'Cost_Control_Reviewed' && !textIncludesAny(combined, ['hr', 'human resources', 'payroll'])) {
-    throw new Error('Only HR or Payroll can return or reject at HR acknowledgement stage.');
+  if (stage === 'HR') {
+    if (!stageAccess('HR', actor, role)) throw new Error('Only HR can approve consolidated project timesheets.');
+    return;
   }
+  throw new Error('This workflow stage requires project-level approval or a different role owner.');
 };
 
-const requireProjectStageAccess = (
-  stage: ProjectApprovalStage,
-  actor: string,
-  role: string,
-) => {
-  if (isSuperAdministrator(role)) return;
-  const combined = actorText(`${actor} ${role}`);
-  if (stage === 'Cost Control' && !textIncludesAny(combined, ['cost control', 'cost controller', 'cost', 'finance'])) {
-    throw new Error('Only Cost Control can approve cost-control project allocations.');
-  }
+const requireProjectStageAccess = (stage: ProjectApprovalStage, actor: string, role: string) => {
+  if (stage !== 'Cost Control' && stage !== 'Project Manager') return;
+  if (!stageAccess(stage, actor, role)) throw new Error(`Only ${stage} can perform this project-level approval.`);
+};
+
+const employeeMeta = (employees: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'], line: TimesheetLine) => {
+  const match = employees.find((item) => [item.employeeCode, item.employeeId, item.fullName].some((value) => lower(value) === lower(line.employeeNo) || lower(value) === lower(line.employeeId) || lower(value) === lower(line.employeeName)));
+  return {
+    department: match?.department || 'Unassigned',
+    businessUnit: match?.businessUnit || match?.payrollGroup || 'DLE',
+    employmentType: match?.employmentType || 'Unassigned',
+    category: match?.salaryGrade || match?.employmentType || 'Unassigned',
+    costCenter: match?.costCenter || match?.department || 'Unassigned',
+    location: match?.location || 'Unassigned',
+    labourRate: Number(match?.ratePerHour || (match?.ratePerDay ? Number(match.ratePerDay) / 8 : 0) || 2500),
+  };
 };
 
 const workflowSteps = (header: TimesheetHeader) => {
   const history = header.workflowHistory || [];
-  return (['Supervisor', 'Project Manager', 'Cost Control', 'HR'] as const).map((stage) => {
-    const event = [...history].reverse().find((item) => item.stage === stage);
+  return ([
+    { id: 'Submitted', stage: 'Supervisor', owner: header.supervisorName, slaHours: 12 },
+    { id: 'Supervisor_Reviewed', stage: 'Cost Control', owner: 'Cost Control', slaHours: 12 },
+    { id: 'Cost_Control_Reviewed', stage: 'Project Manager', owner: header.projectManager || 'Project Managers', slaHours: 24 },
+    { id: 'Project_Manager_Reviewed', stage: 'HR', owner: 'HR', slaHours: 12 },
+    { id: 'HR_Acknowledged', stage: 'Payroll Processing', owner: 'Payroll', slaHours: 24 },
+    { id: 'Locked', stage: 'Payroll Posted', owner: 'Payroll', slaHours: 24 },
+  ] as const).map((step) => {
+    const eventStage = step.stage === 'Payroll Processing' || step.stage === 'Payroll Posted' ? 'HR' : step.stage;
+    const event = [...history].reverse().find((item) => item.stage === eventStage);
+    const actedAt = event?.actedAt || null;
+    const ageSource = actedAt || header.submittedAt || header.timesheetDate;
+    const agingHours = Math.max(0, round((Date.now() - new Date(ageSource).getTime()) / 36e5, 1));
+    const current = currentStageForStatus(header.status) === step.stage;
     return {
-      stage,
-      status: event?.decision || 'Pending',
+      id: step.id,
+      stage: step.stage,
+      owner: step.owner,
+      status: normalizeTimesheetStatus(header.status) === step.id || current ? 'Current' : event ? event.decision : 'Pending',
       by: event?.by || null,
-      actedAt: event?.actedAt || null,
+      actedAt,
       comment: event?.comment || null,
+      agingHours: current ? agingHours : 0,
+      slaStatus: current && agingHours > step.slaHours ? 'Breached' : current && agingHours > step.slaHours * 0.75 ? 'At Risk' : 'On Track',
     };
   });
 };
 
+const canSeeHeader = (scope: string, header: TimesheetHeader, projectApprovals: ReturnType<typeof buildProjectTimesheetApprovals>, actor: string) => {
+  if (scope === 'enterprise' || scope === 'cost-control') return true;
+  if (scope === 'supervisor') return lower(header.supervisorName).includes(lower(actor)) || lower(actor).includes(lower(header.supervisorName));
+  if (scope === 'project-manager') return projectApprovals.some((item) => lower(item.projectManager).includes(lower(actor)) || lower(actor).includes(lower(item.projectManager)));
+  return false;
+};
+
 const buildPayload = async (request: Request) => {
   const access = resolveAccessContext(request);
-  const permissions = getUiPermissions(access);
-  const { headers, lines } = await readTimesheetData();
-  const projects = await readProjects();
-  const payrollUpdates = await readTimesheetPayrollUpdates();
-  const nonDraftHeaders = headers.filter((header) => normalizeTimesheetStatus(header.status) !== 'Draft');
+  const uiPermissions = getUiPermissions(access);
+  const [{ headers, lines }, projects, payrollUpdates, employees] = await Promise.all([
+    readTimesheetData(),
+    readProjects(),
+    readTimesheetPayrollUpdates(),
+    readPayrollEmployees(),
+  ]);
+  const payrollEmployees = employees.employees;
+  const scope = roleScope(access.role, access.actor);
+  const lineByHeader = new Map<string, TimesheetLine[]>();
+  for (const line of lines) lineByHeader.set(line.headerId, [...(lineByHeader.get(line.headerId) || []), line]);
 
-  const pendingTimesheets = await Promise.all(nonDraftHeaders.map(async (header) => {
+  const summaries = await Promise.all(headers.filter((header) => normalizeTimesheetStatus(header.status) !== 'Draft').map(async (header) => {
     const status = normalizeTimesheetStatus(header.status);
-    const headerLines = lines.filter((line) => line.headerId === header.id);
+    const headerLines = lineByHeader.get(header.id) || [];
     const period = await readTimesheetPeriod(new Date(header.timesheetDate));
     const payrollUpdate = payrollUpdates.find((update) => update.headerIds.includes(header.id));
-    const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects, access.actor);
     const allProjectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
-
+    if (!canSeeHeader(scope, header, allProjectApprovals, access.actor)) return null;
+    const visibleProjectApprovals = scope === 'project-manager' ? buildProjectTimesheetApprovals(header, headerLines, projects, access.actor) : allProjectApprovals;
+    const employeeRows = headerLines.map((line) => {
+      const meta = employeeMeta(payrollEmployees, line);
+      return {
+        lineId: line.id,
+        employeeId: line.employeeId,
+        employeeNo: line.employeeNo,
+        employeeName: line.employeeName,
+        department: meta.department,
+        businessUnit: meta.businessUnit,
+        employmentType: meta.employmentType,
+        location: meta.location,
+        clockIn: line.clockIn,
+        clockOut: line.clockOut,
+        attendanceHours: normalizePaidWorkHours(line.attendanceDuration),
+        productiveHours: normalizePaidWorkHours(line.usedHours),
+        idleHours: round(line.idleHours),
+        overtimeHours: Math.max(0, round(normalizePaidWorkHours(line.usedHours) - 8)),
+        totalHours: normalizePaidWorkHours(line.totalHours),
+        variance: round(line.variance),
+        validationStatus: line.validationStatus,
+        activities: line.projectAllocations.map((allocation) => ({
+          projectCode: allocation.projectCode,
+          projectName: allocation.projectName,
+          activityCode: allocation.activityId || allocation.taskId || 'General',
+          activityName: allocation.taskName || 'Timesheet Activity',
+          hours: round(Number(allocation.hours || 0)),
+          labourCost: round(Number(allocation.hours || 0) * meta.labourRate, 0),
+          remarks: allocation.remarks,
+        })),
+      };
+    });
+    const projectBreakdowns = visibleProjectApprovals.map((project) => {
+      const projectLines = headerLines.filter((line) => line.projectAllocations.some((allocation) => lower(allocation.projectCode) === lower(project.projectCode)));
+      const labourCost = projectLines.reduce((sum, line) => {
+        const meta = employeeMeta(payrollEmployees, line);
+        const hours = line.projectAllocations.filter((allocation) => lower(allocation.projectCode) === lower(project.projectCode)).reduce((h, allocation) => h + Number(allocation.hours || 0), 0);
+        return sum + hours * meta.labourRate;
+      }, 0);
+      return {
+        ...project,
+        costCenter: project.projectCode,
+        overtimeHours: round(projectLines.reduce((sum, line) => sum + Math.max(0, normalizePaidWorkHours(line.usedHours) - 8), 0)),
+        labourCost: round(labourCost, 0),
+        approvalStatus: project.costControlStatus !== 'Approved' ? `Cost ${project.costControlStatus}` : `PM ${project.projectManagerStatus}`,
+      };
+    });
+    const totalHours = round(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.totalHours), 0));
+    const productiveHours = round(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.usedHours), 0));
+    const overtimeHours = round(headerLines.reduce((sum, line) => sum + Math.max(0, normalizePaidWorkHours(line.usedHours) - 8), 0));
+    const labourCost = round(projectBreakdowns.reduce((sum, project) => sum + project.labourCost, 0), 0);
+    const projectManagerApproved = allProjectApprovals.filter((item) => item.projectManagerStatus === 'Approved').length;
+    const costControlApproved = allProjectApprovals.filter((item) => item.costControlStatus === 'Approved').length;
+    const totalProjects = allProjectApprovals.length;
     return {
       id: header.id,
       timesheetDate: header.timesheetDate,
       supervisorName: header.supervisorName,
       workCenterName: header.workCenterName,
       status,
-      currentStage: stageByStatus[status] || null,
+      statusLabel: statusLabel(status),
+      currentStage: currentStageForStatus(status),
+      currentOwner: header.currentApprover || String(currentStageForStatus(status) || '-'),
       nextActionLabel: nextActionLabel(status),
       payrollReady: status === 'HR_Acknowledged',
+      payrollProcessed: Boolean(payrollUpdate),
+      payrollPosted: status === 'Locked',
       payrollAcknowledgedAt: header.payrollAcknowledgedAt || payrollUpdate?.acknowledgedAt || null,
       payrollAcknowledgedBy: header.payrollAcknowledgedBy || payrollUpdate?.acknowledgedBy || null,
       totalEmployees: headerLines.length,
-      totalHours: round1(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.totalHours), 0)),
-      attendanceHours: round1(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.attendanceDuration), 0)),
-      idleHours: round1(headerLines.reduce((sum, line) => sum + line.idleHours, 0)),
+      totalHours,
+      productiveHours,
+      idleHours: round(headerLines.reduce((sum, line) => sum + line.idleHours, 0)),
+      overtimeHours,
+      labourCost,
+      payrollReadyHours: status === 'HR_Acknowledged' || status === 'Locked' ? totalHours : 0,
+      workforceUtilization: totalHours ? round((productiveHours / totalHours) * 100) : 0,
       submittedAt: header.submittedAt,
       lastSyncAt: header.lastSyncAt,
       periodName: period.name,
       periodStatus: period.status,
       workflowSteps: workflowSteps(header),
-      projectApprovals,
+      projectApprovals: projectBreakdowns,
+      employeeRows,
+      approvalHistory: header.workflowHistory || [],
       projectApprovalSummary: {
-        totalProjects: allProjectApprovals.length,
-        projectManagerApproved: allProjectApprovals.filter((item) => item.projectManagerStatus === 'Approved').length,
-        costControlApproved: allProjectApprovals.filter((item) => item.costControlStatus === 'Approved').length,
+        totalProjects,
+        projectManagerApproved,
+        costControlApproved,
         projectManagerPending: allProjectApprovals.filter((item) => item.projectManagerStatus === 'Pending').length,
         costControlPending: allProjectApprovals.filter((item) => item.costControlStatus === 'Pending').length,
-        consolidatedForHr: status === 'Cost_Control_Reviewed' || status === 'HR_Acknowledged',
+        approvalText: `${projectManagerApproved}/${totalProjects} Projects Approved${totalProjects > 0 && projectManagerApproved === totalProjects ? ' (Ready for HR)' : ''}`,
+        costControlText: `${costControlApproved}/${totalProjects} Cost Validated`,
+        consolidatedForHr: status === 'Project_Manager_Reviewed' || status === 'HR_Acknowledged' || status === 'Locked',
       },
     };
   }));
-  pendingTimesheets.sort((a, b) => new Date(b.timesheetDate).getTime() - new Date(a.timesheetDate).getTime());
 
+  const pendingTimesheets = summaries.filter(Boolean).sort((a, b) => new Date(b!.timesheetDate).getTime() - new Date(a!.timesheetDate).getTime());
   const stats = {
-    totalPending: pendingTimesheets.filter((item) => ['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(item.status)).length,
-    supervisorCount: pendingTimesheets.filter((item) => item.status === 'Submitted').length,
-    projectManagerCount: pendingTimesheets.filter((item) => item.status === 'Supervisor_Reviewed').length,
-    costControlCount: pendingTimesheets.filter((item) => item.status === 'Project_Manager_Reviewed').length,
-    hrAcknowledgementCount: pendingTimesheets.filter((item) => item.status === 'Cost_Control_Reviewed').length,
-    payrollReadyCount: pendingTimesheets.filter((item) => item.status === 'HR_Acknowledged').length,
-    projectSplitCount: pendingTimesheets.reduce((sum, item) => sum + item.projectApprovalSummary.totalProjects, 0),
-    projectManagerPendingLines: pendingTimesheets.reduce((sum, item) => sum + item.projectApprovalSummary.projectManagerPending, 0),
-    costControlPendingLines: pendingTimesheets.reduce((sum, item) => sum + item.projectApprovalSummary.costControlPending, 0),
+    pendingSubmission: headers.filter((header) => normalizeTimesheetStatus(header.status) === 'Draft').length,
+    pendingSupervisorApproval: pendingTimesheets.filter((item) => item!.status === 'Submitted').length,
+    pendingCostControlReview: pendingTimesheets.filter((item) => item!.status === 'Supervisor_Reviewed').length,
+    pendingProjectManagerApproval: pendingTimesheets.filter((item) => item!.status === 'Cost_Control_Reviewed').length,
+    pendingHrApproval: pendingTimesheets.filter((item) => item!.status === 'Project_Manager_Reviewed').length,
+    pendingPayrollProcessing: pendingTimesheets.filter((item) => item!.status === 'HR_Acknowledged' && !item!.payrollProcessed).length,
+    payrollReady: pendingTimesheets.filter((item) => item!.payrollReady).length,
+    payrollProcessed: pendingTimesheets.filter((item) => item!.payrollProcessed).length,
+    payrollPosted: pendingTimesheets.filter((item) => item!.payrollPosted).length,
+    returned: pendingTimesheets.filter((item) => item!.status === 'Returned').length,
+    rejected: pendingTimesheets.filter((item) => item!.status === 'Rejected').length,
+    totalHoursWorked: round(pendingTimesheets.reduce((sum, item) => sum + item!.totalHours, 0)),
+    overtimeHours: round(pendingTimesheets.reduce((sum, item) => sum + item!.overtimeHours, 0)),
+    labourCost: round(pendingTimesheets.reduce((sum, item) => sum + item!.labourCost, 0), 0),
+    projectCostAllocation: round(pendingTimesheets.reduce((sum, item) => sum + item!.projectApprovals.reduce((pSum, project) => pSum + project.labourCost, 0), 0), 0),
+    payrollReadyHours: round(pendingTimesheets.reduce((sum, item) => sum + item!.payrollReadyHours, 0)),
+    pendingApprovals: pendingTimesheets.filter((item) => ['Submitted', 'Supervisor_Reviewed', 'Cost_Control_Reviewed', 'Project_Manager_Reviewed'].includes(item!.status)).length,
+    approvalAgingHours: round(pendingTimesheets.reduce((sum, item) => sum + (item!.workflowSteps.find((step) => step.stage === item!.currentStage)?.agingHours || 0), 0) / Math.max(1, pendingTimesheets.length)),
+    workforceUtilization: round(pendingTimesheets.reduce((sum, item) => sum + item!.workforceUtilization, 0) / Math.max(1, pendingTimesheets.length)),
   };
 
   return {
@@ -165,18 +297,54 @@ const buildPayload = async (request: Request) => {
     permissions: {
       actor: access.actor,
       role: access.role,
-      canApprove: permissions.canApproveTimesheet,
-      canAcknowledgePayroll: permissions.canApproveTimesheet || permissions.canEditAttendance,
+      visibilityScope: scope,
+      canApprove: uiPermissions.canApproveTimesheet,
+      canBulkApprove: uiPermissions.canApproveTimesheet && (scope === 'enterprise' || scope === 'cost-control'),
+      canAcknowledgePayroll: uiPermissions.canApproveTimesheet || uiPermissions.canEditAttendance,
       canApproveAllLevels: isSuperAdministrator(access.role),
+      canExport: true,
     },
     pendingTimesheets,
     stats,
     filterOptions: {
       workCenters: Array.from(new Set(headers.map((header) => header.workCenterName))).sort(),
-      periods: Array.from(new Set(pendingTimesheets.map((item) => item.periodName))).sort(),
+      periods: Array.from(new Set(pendingTimesheets.map((item) => item!.periodName))).sort(),
       supervisors: Array.from(new Set(headers.map((header) => header.supervisorName))).sort(),
+      projects: Array.from(new Set(pendingTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectCode)))).sort(),
+      projectManagers: Array.from(new Set(pendingTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectManager)))).sort(),
+      costCenters: Array.from(new Set(pendingTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.costCenter)))).sort(),
+      statuses: Array.from(new Set(pendingTimesheets.map((item) => item!.status))).sort(),
+      workflowStages: ['Supervisor', 'Cost Control', 'Project Manager', 'HR', 'Payroll Processing', 'Payroll Posted'],
+    },
+    audit: {
+      generatedBy: access.actor,
+      generatedAt: new Date().toISOString(),
+      sourceModule: 'Timesheet Approval Workspace',
+      actionHistory: 'View, approval, return, rejection, payroll process, payroll post and export actions are recorded in workflow history.',
     },
   };
+};
+
+const processPayroll = async (headerId: string, actor: string, post = false) => {
+  const { headers, lines } = await readTimesheetData();
+  const header = headers.find((item) => item.id === headerId);
+  if (!header) throw new Error('Timesheet header not found.');
+  const status = normalizeTimesheetStatus(header.status);
+  if (status !== 'HR_Acknowledged' && status !== 'Locked') throw new Error('Only HR-approved timesheets can be processed by Payroll.');
+  if (post) header.status = 'Locked';
+  header.currentApprovalStage = null;
+  header.currentApprover = null;
+  header.workflowHistory = [
+    ...(header.workflowHistory || []),
+    {
+      stage: 'HR',
+      decision: post ? 'Approved' : 'Acknowledged',
+      by: actor,
+      actedAt: new Date().toISOString(),
+      comment: post ? 'Payroll posted and timesheet locked.' : 'Payroll processing completed for this timesheet.',
+    },
+  ];
+  await writeTimesheetHeaderLines(header, lines.filter((line) => line.headerId === headerId));
 };
 
 export async function GET(request: Request) {
@@ -191,34 +359,55 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const access = resolveAccessContext(request);
   const permissions = getUiPermissions(access);
-
-  if (!permissions.canApproveTimesheet) {
-    return err(403, 'You do not have permission to approve timesheets.');
-  }
+  if (!permissions.canApproveTimesheet) return err(403, 'You do not have permission to approve timesheets.');
 
   try {
-    const payload = await request.json() as { action?: ApprovalAction; headerId?: string; comment?: string; projectCode?: string; stage?: ProjectApprovalStage };
-    if (!payload.headerId) return err(400, 'Timesheet header ID is required.');
-    if (!payload.action || !['APPROVE', 'REJECT', 'RETURN'].includes(payload.action)) {
-      return err(400, 'Action must be APPROVE, REJECT, or RETURN.');
-    }
-
+    const payload = await request.json() as {
+      action?: ApprovalAction;
+      headerId?: string;
+      headerIds?: string[];
+      projectCode?: string;
+      projectSegments?: Array<{ headerId: string; projectCode: string; stage: ProjectApprovalStage }>;
+      stage?: ProjectApprovalStage;
+      bulkMode?: BulkMode;
+      comment?: string;
+    };
+    if (!payload.action || !['APPROVE', 'REJECT', 'RETURN', 'PROCESS_PAYROLL', 'POST_PAYROLL'].includes(payload.action)) return err(400, 'Invalid approval action.');
     const { headers } = await readTimesheetData();
-    const header = headers.find((item) => item.id === payload.headerId);
-    if (!header) return err(404, 'Timesheet header not found.');
+    const applyHeader = async (headerId: string) => {
+      const header = headers.find((item) => item.id === headerId);
+      if (!header) throw new Error(`Timesheet ${headerId} was not found.`);
+      requireHeaderStageAccess(header, payload.action!, access.actor, access.role);
+      if (payload.action === 'PROCESS_PAYROLL') return processPayroll(headerId, access.actor, false);
+      if (payload.action === 'POST_PAYROLL') return processPayroll(headerId, access.actor, true);
+      return advanceTimesheetWorkflow(headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, payload.comment);
+    };
 
-    if (payload.projectCode && payload.stage && payload.stage !== 'HR') {
+    if (payload.projectSegments?.length) {
+      for (const segment of payload.projectSegments) {
+        requireProjectStageAccess(segment.stage, access.actor, access.role);
+        await advanceProjectTimesheetApproval(segment.headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, {
+          projectCode: segment.projectCode,
+          stage: segment.stage as 'Project Manager' | 'Cost Control',
+          comment: payload.comment,
+          bypassAssigneeCheck: isSuperAdministrator(access.role),
+        });
+      }
+    } else if (payload.projectCode && payload.stage && payload.stage !== 'HR' && payload.stage !== 'Payroll') {
+      if (!payload.headerId) return err(400, 'Timesheet header ID is required.');
       requireProjectStageAccess(payload.stage, access.actor, access.role);
-      await advanceProjectTimesheetApproval(payload.headerId, payload.action, access.actor, {
+      await advanceProjectTimesheetApproval(payload.headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, {
         projectCode: payload.projectCode,
-        stage: payload.stage,
+        stage: payload.stage as 'Project Manager' | 'Cost Control',
         comment: payload.comment,
         bypassAssigneeCheck: isSuperAdministrator(access.role),
       });
     } else {
-      requireHeaderStageAccess(header, payload.action, access.actor, access.role);
-      await advanceTimesheetWorkflow(payload.headerId, payload.action, access.actor, payload.comment);
+      const headerIds = payload.headerIds?.length ? payload.headerIds : payload.headerId ? [payload.headerId] : [];
+      if (!headerIds.length) return err(400, 'Timesheet header ID is required.');
+      for (const headerId of headerIds) await applyHeader(headerId);
     }
+
     return ok(await buildPayload(request));
   } catch (error) {
     console.error('Approval API Error:', error);

@@ -32,9 +32,9 @@ export type WorkflowStage = {
 export const workflowStages: WorkflowStage[] = [
   { id: 'Draft', label: 'Draft', order: 1 },
   { id: 'Submitted', label: 'Supervisor Review', order: 2 },
-  { id: 'Supervisor_Reviewed', label: 'Project Manager Review', order: 3 },
-  { id: 'Project_Manager_Reviewed', label: 'Cost Control Review', order: 4 },
-  { id: 'Cost_Control_Reviewed', label: 'HR Payroll Acknowledgement', order: 5 },
+  { id: 'Supervisor_Reviewed', label: 'Cost Control Review', order: 3 },
+  { id: 'Cost_Control_Reviewed', label: 'Project Manager Review', order: 4 },
+  { id: 'Project_Manager_Reviewed', label: 'HR Review', order: 5 },
   { id: 'Locked', label: 'Payroll Lock', order: 6 },
 ];
 export type TimesheetApprovalDecision = 'Pending' | 'Approved' | 'Rejected' | 'Returned' | 'Locked';
@@ -1971,7 +1971,7 @@ export const normalizeTimesheetStatus = (status: TimesheetStatus): TimesheetStat
 };
 
 export const isTimesheetEditableStatus = (status: TimesheetStatus) =>
-  ['Draft', 'Submitted', 'Returned', 'Rejected'].includes(normalizeTimesheetStatus(status));
+  ['Draft', 'Returned', 'Rejected'].includes(normalizeTimesheetStatus(status));
 
 export const isTimesheetPayrollReadyStatus = (status: TimesheetStatus) =>
   ['HR_Acknowledged', 'Locked'].includes(normalizeTimesheetStatus(status));
@@ -2031,32 +2031,22 @@ export async function advanceTimesheetWorkflow(
     if (!['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
       throw new Error('Only in-progress timesheets can be rejected.');
     }
-    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Supervisor' : status === 'Supervisor_Reviewed' ? 'Project Manager' : status === 'Project_Manager_Reviewed' ? 'Cost Control' : 'HR';
+    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Supervisor' : status === 'Supervisor_Reviewed' ? 'Cost Control' : status === 'Cost_Control_Reviewed' ? 'Project Manager' : 'HR';
     header.status = 'Rejected';
     event = workflowEvent(stage, 'Rejected', actor, comment);
   } else if (action === 'RETURN') {
     if (!['Submitted', 'Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
       throw new Error('Only in-progress timesheets can be returned.');
     }
-    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Supervisor' : status === 'Supervisor_Reviewed' ? 'Project Manager' : status === 'Project_Manager_Reviewed' ? 'Cost Control' : 'HR';
+    const stage: TimesheetWorkflowStage = status === 'Submitted' ? 'Supervisor' : status === 'Supervisor_Reviewed' ? 'Cost Control' : status === 'Cost_Control_Reviewed' ? 'Project Manager' : 'HR';
     header.status = 'Returned';
     event = workflowEvent(stage, 'Returned', actor, comment);
   } else if (status === 'Submitted') {
     header.status = 'Supervisor_Reviewed';
-    header.currentApprovalStage = 'Project Manager';
-    header.currentApprover = header.projectManager || 'Project Manager';
-    event = workflowEvent('Supervisor', 'Approved', actor, comment || 'Supervisor reviewed and released timesheet for project manager review.');
-  } else if (status === 'Supervisor_Reviewed') {
-    header.status = 'Project_Manager_Reviewed';
     header.currentApprovalStage = 'Cost Control';
     header.currentApprover = 'Cost Control';
-    event = workflowEvent('Project Manager', 'Approved', actor, comment);
+    event = workflowEvent('Supervisor', 'Approved', actor, comment || 'Supervisor reviewed and released timesheet for cost-control validation.');
   } else if (status === 'Project_Manager_Reviewed') {
-    header.status = 'Cost_Control_Reviewed';
-    header.currentApprovalStage = 'HR';
-    header.currentApprover = 'HR';
-    event = workflowEvent('Cost Control', 'Approved', actor, comment);
-  } else if (status === 'Cost_Control_Reviewed') {
     header.status = 'HR_Acknowledged';
     header.approvedAt = now;
     header.approvedBy = actor;
@@ -2064,7 +2054,7 @@ export async function advanceTimesheetWorkflow(
     header.payrollAcknowledgedBy = actor;
     header.currentApprovalStage = null;
     header.currentApprover = null;
-    event = workflowEvent('HR', 'Acknowledged', actor, comment || 'Acknowledged for payroll update.');
+    event = workflowEvent('HR', 'Acknowledged', actor, comment || 'HR approved consolidated timesheet for payroll processing.');
   } else {
     throw new Error('This timesheet is not waiting for approval.');
   }
@@ -2136,8 +2126,8 @@ export function buildProjectTimesheetApprovals(header: TimesheetHeader, lines: T
     const ccRejected = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Rejected']));
     const ccReturned = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Returned']));
     const ccApproved = history.some((event) => eventMatchesProject(event, 'Cost Control', item.projectCode, ['Approved']));
-    const headerPmComplete = ['Project_Manager_Reviewed', 'Cost_Control_Reviewed', 'HR_Acknowledged', 'Locked'].includes(normalizedHeaderStatus);
-    const headerCostComplete = ['Cost_Control_Reviewed', 'HR_Acknowledged', 'Locked'].includes(normalizedHeaderStatus);
+    const headerCostComplete = ['Cost_Control_Reviewed', 'Project_Manager_Reviewed', 'HR_Acknowledged', 'Locked'].includes(normalizedHeaderStatus);
+    const headerPmComplete = ['Project_Manager_Reviewed', 'HR_Acknowledged', 'Locked'].includes(normalizedHeaderStatus);
     item.projectManagerStatus = pmRejected ? 'Rejected' : pmReturned ? 'Returned' : pmApproved || headerPmComplete ? 'Approved' : 'Pending';
     item.costControlStatus = ccRejected ? 'Rejected' : ccReturned ? 'Returned' : ccApproved || headerCostComplete ? 'Approved' : 'Pending';
   }
@@ -2162,14 +2152,14 @@ export async function advanceProjectTimesheetApproval(
   const header = headers.find((item) => item.id === headerId);
   if (!header) throw new Error('Timesheet header not found.');
   const status = normalizeTimesheetStatus(header.status);
-  if (!['Supervisor_Reviewed', 'Project_Manager_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
+  if (!['Supervisor_Reviewed', 'Cost_Control_Reviewed', 'Project_Manager_Reviewed'].includes(status)) {
     throw new Error('Supervisor review must be completed before project approvals.');
   }
-  if (options.stage === 'Project Manager' && !['Supervisor_Reviewed', 'Project_Manager_Reviewed'].includes(status)) {
-    throw new Error('Project Manager approval is only available after supervisor review.');
+  if (options.stage === 'Cost Control' && !['Supervisor_Reviewed', 'Cost_Control_Reviewed'].includes(status)) {
+    throw new Error('Cost Control approval is only available after supervisor review.');
   }
-  if (options.stage === 'Cost Control' && status !== 'Project_Manager_Reviewed') {
-    throw new Error('Cost Control approval is only available after Project Manager review.');
+  if (options.stage === 'Project Manager' && !['Cost_Control_Reviewed', 'Project_Manager_Reviewed'].includes(status)) {
+    throw new Error('Project Manager approval is only available after Cost Control review.');
   }
   const headerLines = lines.filter((line) => line.headerId === header.id);
   const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
@@ -2194,15 +2184,15 @@ export async function advanceProjectTimesheetApproval(
     header.currentApprover = actor;
   } else {
     const refreshed = buildProjectTimesheetApprovals(header, headerLines, projects);
-    const allPmApproved = refreshed.length > 0 && refreshed.every((item) => item.projectManagerStatus === 'Approved');
     const allCostApproved = refreshed.length > 0 && refreshed.every((item) => item.costControlStatus === 'Approved');
-    if (allPmApproved && !allCostApproved) {
-      header.status = 'Project_Manager_Reviewed';
-      header.currentApprovalStage = 'Cost Control';
-      header.currentApprover = 'Cost Control';
+    const allPmApproved = refreshed.length > 0 && refreshed.every((item) => item.projectManagerStatus === 'Approved');
+    if (allCostApproved && !allPmApproved) {
+      header.status = 'Cost_Control_Reviewed';
+      header.currentApprovalStage = 'Project Manager';
+      header.currentApprover = 'Project Manager';
     }
     if (allPmApproved && allCostApproved) {
-      header.status = 'Cost_Control_Reviewed';
+      header.status = 'Project_Manager_Reviewed';
       header.currentApprovalStage = 'HR';
       header.currentApprover = 'HR';
       header.workflowHistory = [
