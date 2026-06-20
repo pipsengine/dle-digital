@@ -35,7 +35,7 @@ const DAILY_BREAK_HOURS = 1;
 const GROSS_TIMESHEET_HOURS = STANDARD_TIMESHEET_HOURS + DAILY_BREAK_HOURS;
 const DEFAULT_IDLE_REASON_ID = 'idl-009';
 const DEFAULT_IDLE_REASON_NAME = 'Break Time';
-const editableTimesheetStatuses: TimesheetStatus[] = ['Draft', 'Submitted', 'Returned', 'Rejected'];
+const editableTimesheetStatuses: TimesheetStatus[] = ['Draft', 'Returned', 'Rejected'];
 const payrollReadyStatuses: TimesheetStatus[] = ['HR_Acknowledged', 'Approved', 'Locked'];
 const EMPLOYEE_CARD_PAGE_SIZE = 12;
 type TimesheetEntryMode = 'Supervisor Entry';
@@ -692,7 +692,11 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
       setLocalLines(json.data.lines);
       if (isSubmit) {
         setShowSubmitReview(false);
-        setNotice('Timesheet submitted for supervisor review. You can still edit it before release to the project manager.');
+        setSelectedEmployees([]);
+        setQuery('');
+        setBulkProject('');
+        setBulkHours(STANDARD_TIMESHEET_HOURS);
+        setNotice('Timesheet submitted for supervisor review. Capture fields are now locked until the sheet is returned or rejected.');
       } else if (saveAsDraft) {
         setNotice('Draft saved. You can continue editing this timesheet before submission.');
       } else {
@@ -937,6 +941,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const headerStatus = payload?.header?.status ?? 'Draft';
   const isPayrollReady = payrollReadyStatuses.includes(headerStatus);
   const canEditTimesheet = periodIsOpen && editableTimesheetStatuses.includes(headerStatus);
+  const showCaptureMatrix = canEditTimesheet;
   const activeSiteDevices = payload?.attendanceWorkCenters.filter((workCenter) => workCenter.location === selectedLocation || workCenter.site === selectedLocation) ?? [];
   const onlineSiteDevices = activeSiteDevices;
   const primarySiteDevice = [...activeSiteDevices].sort((a, b) => {
@@ -1157,7 +1162,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                   <p className={`mt-1 text-xs font-semibold ${isPayrollReady ? 'text-emerald-700' : 'text-indigo-700'}`}>
                     {isPayrollReady
                       ? 'HR has acknowledged this timesheet for payroll. Editing is locked and any correction must follow a formal return/reversal process.'
-                      : 'This timesheet has moved beyond supervisor review. It can only be edited again if it is returned or rejected.'}
+                      : 'This timesheet has been submitted for approval. Capture fields are locked and can only be edited again if it is returned or rejected.'}
                   </p>
                 </div>
               </div>
@@ -1292,7 +1297,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input type="text" placeholder="Search employee..." value={query} onChange={(e) => setQuery(e.target.value)} className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm font-medium focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
             </div>
-            {selectedEmployees.length > 0 && periodIsOpen && (
+            {selectedEmployees.length > 0 && periodIsOpen && showCaptureMatrix && (
               <button 
                 onClick={() => setShowBulkModal(true)}
                 className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-black text-white hover:bg-amber-700 shadow-lg shadow-amber-100 animate-in fade-in slide-in-from-left-2"
@@ -1315,8 +1320,49 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           </div>
         </div>
 
-        {/* Table or Card View */}
-        {viewMode === 'matrix' ? (
+        {!showCaptureMatrix && payload?.header ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-5 py-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Submitted Timesheet Summary</p>
+                <h3 className="mt-1 text-base font-black text-slate-950">{payload.header.workCenterName} / {payload.header.timesheetDate}</h3>
+              </div>
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-black text-indigo-800">{headerStatus.replace(/_/g, ' ')}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-white">
+                    {['Employee', 'Log', 'Duration', 'Productive Hrs', 'Idle / Break Hrs', 'Total Hrs', 'Variance', 'Status'].map((header) => (
+                      <th key={header} className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredLines.map((line) => (
+                    <tr key={line.id} className={line.validationStatus === 'Valid' ? 'bg-emerald-50/30' : 'bg-white'}>
+                      <td className="px-4 py-4">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-indigo-600">{line.employeeNo}</div>
+                        <div className="mt-1 text-[13px] font-black text-slate-900">{line.employeeName}</div>
+                      </td>
+                      <td className="px-4 py-4 text-[11px] font-black text-slate-700">{line.clockIn ? `${line.clockIn} - ${line.clockOut || '--:--'}` : 'Absent'}</td>
+                      <td className="px-4 py-4 text-center text-xs font-black text-slate-700">{line.attendanceDuration}h</td>
+                      <td className="px-4 py-4 text-center text-xs font-black text-blue-700">{line.usedHours}h</td>
+                      <td className="px-4 py-4 text-center text-xs font-black text-amber-700">{line.idleHours}h</td>
+                      <td className="px-4 py-4 text-center text-xs font-black text-emerald-700">{line.totalHours}h</td>
+                      <td className="px-4 py-4 text-center text-xs font-black text-slate-700">{line.variance > 0 ? `+${line.variance}` : line.variance}</td>
+                      <td className="px-4 py-4 text-center">
+                        <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${line.validationStatus === 'Valid' ? 'bg-emerald-100 text-emerald-700' : line.validationStatus === 'Error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {line.validationStatus === 'Valid' ? 'Complete' : line.validationStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : viewMode === 'matrix' ? (
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
