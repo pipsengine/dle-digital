@@ -37,6 +37,16 @@ export type OvertimeStatus =
 
 export type OvertimeAction = 'submit' | 'approve-supervisor' | 'approve-hr' | 'mark-payroll-ready' | 'post-payroll' | 'return' | 'reject' | 'reopen';
 
+export type OvertimeCreateRequest = {
+  employeeId: string;
+  date: string;
+  dayType?: OvertimeDayType;
+  workedHours: number;
+  payableHours?: number;
+  reason?: string | null;
+  projectCode?: string | null;
+};
+
 export type OvertimeAuditEntry = {
   id: string;
   at: string;
@@ -297,7 +307,7 @@ const buildCandidateRecords = async () => {
     const date = header.timesheetDate;
     const dayType = dayTypeFor(date);
     const workedHours = Math.max(normalizePaidWorkHours(line.attendanceDuration), normalizePaidWorkHours(line.totalHours), normalizePaidWorkHours(line.usedHours + line.idleHours));
-    const overtimeHours = Math.max(0, round2(normalizePaidWorkHours(line.totalHours) - STANDARD_TIMESHEET_HOURS));
+    const overtimeHours = Math.max(0, round2(workedHours - STANDARD_TIMESHEET_HOURS));
     const payableHours = dayType === 'Weekday' ? overtimeHours : workedHours;
     if (payableHours <= 0) return null;
     const overtime = calculatePayrollOvertime(employee, dayType, payableHours);
@@ -503,6 +513,9 @@ export const readOvertimeManagementPayload = async (roleInput?: string | null) =
   const { employeeSource, records: candidates } = await buildCandidateRecords();
   await upsertCandidates(candidates);
   const records = await readRecords();
+  const employeeDepartments = employeeSource.employees.map((employee) => clean(employee.department)).filter(Boolean);
+  const employeeLocations = employeeSource.employees.map((employee) => clean(employee.workLocation) || clean(employee.location) || clean(employee.officeLocation)).filter(Boolean);
+  const uniqueSorted = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const summary = {
     records: records.length,
     submitted: records.filter((item) => item.status === 'Submitted').length,
@@ -526,12 +539,88 @@ export const readOvertimeManagementPayload = async (roleInput?: string | null) =
     summary,
     filterOptions: {
       statuses: ['Draft', 'Submitted', 'Supervisor Approved', 'HR Approved', 'Payroll Ready', 'Payroll Posted', 'Returned', 'Rejected', 'Blocked'] as OvertimeStatus[],
-      departments: Array.from(new Set(records.map((item) => item.department))).sort(),
-      locations: Array.from(new Set(records.map((item) => item.location))).sort(),
+      departments: uniqueSorted([...records.map((item) => item.department), ...employeeDepartments]),
+      locations: uniqueSorted([...records.map((item) => item.location), ...employeeLocations]),
       dayTypes: ['Weekday', 'Saturday', 'Sunday', 'Public Holiday'] as OvertimeDayType[],
     },
     records,
   };
+};
+
+export const createOvertimeRequest = async (input: OvertimeCreateRequest, roleInput?: string | null, actorInput?: string | null) => {
+  const role = normalizeOvertimeRole(roleInput);
+  const perms = permissionsFor(role);
+  if (!perms.canSubmit) throw new Error(`${role} cannot create overtime requests.`);
+  const employeeKey = clean(input.employeeId);
+  if (!employeeKey) throw new Error('Employee is required for overtime request.');
+  if (!input.date) throw new Error('Overtime date is required.');
+  const workedHours = round2(Number(input.workedHours || 0));
+  if (workedHours <= STANDARD_TIMESHEET_HOURS) throw new Error(`Worked hours must exceed ${STANDARD_TIMESHEET_HOURS} hours for overtime.`);
+
+  const employeeSource = await readPayrollEmployees();
+  const employee = employeeSource.employees.find((item) => employeeKeys(item).includes(normalizePayrollMatchKey(employeeKey)));
+  if (!employee) throw new Error('Employee was not found in HRIS employee master.');
+  const dayType = input.dayType || dayTypeFor(input.date);
+  const payableHours = round2(Number(input.payableHours || (dayType === 'Weekday' ? workedHours - STANDARD_TIMESHEET_HOURS : workedHours)));
+  if (payableHours <= 0) throw new Error('Payable overtime hours must be greater than zero.');
+  const overtime = calculatePayrollOvertime(employee, dayType, payableHours);
+  const issues = [
+    ...(!overtime.hourlyRate ? ['Hourly rate cannot be derived from payroll setup'] : []),
+    ...(payableHours > 4 && dayType === 'Weekday' ? ['Weekday overtime exceeds 4 hours'] : []),
+  ];
+  const status: OvertimeStatus = issues.some((issue) => issue.toLowerCase().includes('rate')) ? 'Blocked' : 'Draft';
+  const id = `ot-req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const record: OvertimeRecord = {
+    id,
+    sourceLineId: id,
+    headerId: 'manual-overtime-request',
+    periodId: input.date.slice(0, 7),
+    date: input.date,
+    employeeId: employee.employeeCode || employee.employeeId,
+    employeeName: employee.fullName,
+    department: employee.department || 'Unassigned',
+    jobTitle: employee.jobTitle || 'Unassigned',
+    location: employee.workLocation || employee.location || 'Unassigned',
+    supervisor: employee.managerName || employee.departmentHead || 'Unassigned',
+    workCenter: employee.costCenter || 'Unassigned',
+    employmentType: employee.employmentType || employee.employeeCategory || 'Unassigned',
+    salaryGrade: employee.salaryGrade || employee.jobGrade || 'Unassigned',
+    dayType,
+    workedHours,
+    standardHours: STANDARD_TIMESHEET_HOURS,
+    overtimeHours: round2(Math.max(0, workedHours - STANDARD_TIMESHEET_HOURS)),
+    payableHours,
+    multiplier: overtime.multiplier,
+    hourlyRate: overtime.hourlyRate,
+    grossPay: overtime.amount,
+    earningCode: overtime.code,
+    earningName: overtime.name,
+    timesheetStatus: 'Manual Request',
+    payrollReady: false,
+    status,
+    currentOwner: currentOwnerFor(status),
+    severity: issues.length ? 'High' : 'Low',
+    issues,
+    projectCodes: clean(input.projectCode) ? [clean(input.projectCode)] : [],
+    lastActionAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    workflow: [],
+    auditTrail: [],
+  };
+  await upsertCandidates([record]);
+  const pool = await ensureDb();
+  await pool.request()
+    .input('Id', sql.NVarChar(120), `ot-aud-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    .input('OvertimeId', sql.NVarChar(220), id)
+    .input('Actor', sql.NVarChar(180), clean(actorInput) || role)
+    .input('ActorRole', sql.NVarChar(80), role)
+    .input('ActionName', sql.NVarChar(80), 'create-request')
+    .input('OldStatus', sql.NVarChar(60), null)
+    .input('NewStatus', sql.NVarChar(60), status)
+    .input('Comment', sql.NVarChar(500), clean(input.reason) || null)
+    .query('INSERT INTO [hris].[OvertimeManagementAudit] ([Id],[OvertimeId],[Actor],[ActorRole],[ActionName],[OldStatus],[NewStatus],[Comment]) VALUES (@Id,@OvertimeId,@Actor,@ActorRole,@ActionName,@OldStatus,@NewStatus,@Comment);');
+  return readOvertimeManagementPayload(role);
 };
 
 export const applyOvertimeAction = async (id: string, action: OvertimeAction, roleInput?: string | null, actorInput?: string | null, comment?: string | null) => {

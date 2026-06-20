@@ -5,7 +5,7 @@ import { getDleEnterpriseDbPool, type DleEmployeeDirectoryRow } from '@/lib/dle-
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 
 export type LeaveRole = 'Leave Administrator' | 'HR Officer' | 'HR Manager' | 'Department Manager' | 'Supervisor' | 'Payroll Officer' | 'Employee' | 'Executive' | 'System Administrator';
-export type LeaveStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Withdrawn' | 'Cancelled' | 'Completed';
+export type LeaveStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Withdrawn' | 'Cancelled' | 'Terminated' | 'Completed';
 export type WorkflowStage = 'Employee' | 'Supervisor' | 'Manager' | 'HR' | 'Final Approval' | 'Closed';
 export type LeaveTone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
 
@@ -252,6 +252,7 @@ const dateInRange = (date: string, startDate: string, endDate: string) =>
 const currentYear = new Date().getFullYear();
 export const dormantLongPolicy = {
   annualPermanentDays: 30,
+  annualJuniorPermanentDays: 25,
   annualContractDays: 14,
   sickDays: 10,
   casualDays: 5,
@@ -280,15 +281,8 @@ export const isFourteenDayPaidLeaveEmployee = (employee: Pick<DleEmployeeDirecto
   );
 };
 
-export const annualLeaveEntitlementForEmployee = (employee: DleEmployeeDirectoryRow) =>
-  isFourteenDayPaidLeaveEmployee(employee)
-    ? dormantLongPolicy.annualContractDays
-    : isConfirmedPermanent(employee)
-      ? dormantLongPolicy.annualPermanentDays
-      : 0;
-
 const defaultLeaveTypePolicies: LeaveTypeRule[] = [
-  { id: 'annual-leave', name: 'Annual Leave', active: true, entitlementDays: dormantLongPolicy.annualPermanentDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 30 working days after confirmation of appointment; contract employees receive 14 working days annually while contract-active.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent', 'Contract'], genderRestriction: 'None', documentRequirements: [], approvalLevels: ['Supervisor', 'Manager', 'HR'], accrualRule: 'Annual entitlement grant with confirmation validation for permanent employees', carryForwardRule: `Every 1 January, unused Annual Leave rolls over to a maximum of ${dormantLongPolicy.carryForwardCap} working days as Carry Forward Leave and expires on 31 March.`, encashmentRule: 'Not encashable unless separately approved by HR and Payroll policy.', allowanceRule: `Leave Allowance is payable only when at least ${dormantLongPolicy.allowanceMinimumAnnualDays} working days Annual Leave is applied from the current year's entitlement.` },
+  { id: 'annual-leave', name: 'Annual Leave', active: true, entitlementDays: dormantLongPolicy.annualPermanentDays, durationBasis: 'Working days', eligibility: 'Confirmed permanent employees receive 30 working days, junior permanent employees receive 25 working days, and contract/daily/lumpsum/NYSC/IT employees receive 14 paid working days annually while active.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent', 'Junior Permanent', 'Contract'], genderRestriction: 'None', documentRequirements: [], approvalLevels: ['Supervisor / Line Manager', 'HR Manager / Head'], accrualRule: 'Annual entitlement grant with confirmation and grade/category validation', carryForwardRule: `Every 1 January, unused Annual Leave rolls over to a maximum of ${dormantLongPolicy.carryForwardCap} working days as Carry Forward Leave and expires on 31 March.`, encashmentRule: 'Not encashable unless separately approved by HR and Payroll policy.', allowanceRule: `Leave Allowance is payable only when at least ${dormantLongPolicy.allowanceMinimumAnnualDays} working days Annual Leave is applied from the current year's entitlement.` },
   { id: 'sick-leave', name: 'Sick Leave', active: true, entitlementDays: dormantLongPolicy.sickDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 10 working days annually with medical evidence where required.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent'], genderRestriction: 'None', documentRequirements: ['Medical certificate'], approvalLevels: ['Supervisor', 'HR'], accrualRule: 'Annual grant', carryForwardRule: 'No carry forward', encashmentRule: 'Not encashable', allowanceRule: 'No leave allowance' },
   { id: 'casual-leave', name: 'Casual Leave', active: true, entitlementDays: dormantLongPolicy.casualDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 5 working days annually subject to manager approval.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent'], genderRestriction: 'None', documentRequirements: [], approvalLevels: ['Supervisor'], accrualRule: 'Annual grant', carryForwardRule: 'No carry forward', encashmentRule: 'Not encashable', allowanceRule: 'No leave allowance' },
   { id: 'compassionate-leave', name: 'Compassionate Leave', active: true, entitlementDays: dormantLongPolicy.compassionateDays, durationBasis: 'Working days', eligibility: 'Permanent employees receive 5 working days annually for HR-approved compassionate reasons.', waitingPeriodDays: 0, gradeRestrictions: [], categoryRestrictions: ['Permanent'], genderRestriction: 'None', documentRequirements: ['Supporting document'], approvalLevels: ['Supervisor', 'HR'], accrualRule: 'Annual grant', carryForwardRule: 'No carry forward', encashmentRule: 'Not encashable', allowanceRule: 'No leave allowance' },
@@ -314,6 +308,29 @@ const entitlementFor = (employee: DleEmployeeDirectoryRow, leaveType = 'Annual L
   if (leaveType === 'Maternity Leave') return dormantLongPolicy.maternityCalendarDays;
   return 0;
 };
+
+const isJuniorPermanentEmployee = (employee: Pick<DleEmployeeDirectoryRow, 'employmentType' | 'employeeCategory' | 'staffCategory' | 'payrollGroup' | 'salaryGrade' | 'jobGrade' | 'jobTitle' | 'designation'>) => {
+  const text = [
+    employee.employmentType,
+    employee.employeeCategory,
+    employee.staffCategory,
+    employee.payrollGroup,
+    employee.salaryGrade,
+    employee.jobGrade,
+    employee.jobTitle,
+    employee.designation,
+  ].map((value) => String(value || '').trim()).filter(Boolean).join(' ').toLowerCase();
+  return /\b(junior|jnr|jr|j[0-9])\b/.test(text) && /\b(permanent|perm)\b/.test(text);
+};
+
+export const annualLeaveEntitlementForEmployee = (employee: DleEmployeeDirectoryRow) =>
+  isFourteenDayPaidLeaveEmployee(employee)
+    ? dormantLongPolicy.annualContractDays
+    : isJuniorPermanentEmployee(employee)
+      ? dormantLongPolicy.annualJuniorPermanentDays
+      : isConfirmedPermanent(employee)
+        ? dormantLongPolicy.annualPermanentDays
+        : 0;
 
 type DbLeaveApplicationRow = {
   Id: string;
@@ -392,7 +409,7 @@ const workflowStageForStatus = (status: LeaveStatus): WorkflowStage => {
 const approvalStatusFor = (status: LeaveStatus) => {
   if (['Approved', 'Completed'].includes(status)) return 'Approved';
   if (status === 'Rejected') return 'Rejected';
-  if (['Cancelled', 'Withdrawn'].includes(status)) return status;
+  if (['Cancelled', 'Withdrawn', 'Terminated'].includes(status)) return status;
   return 'Pending';
 };
 
@@ -404,8 +421,21 @@ const normalizeLeaveStatus = (status: string): LeaveStatus => {
   if (['rejected', 'declined'].includes(normalized)) return 'Rejected';
   if (['withdrawn'].includes(normalized)) return 'Withdrawn';
   if (['cancelled', 'canceled'].includes(normalized)) return 'Cancelled';
+  if (['terminated', 'expired'].includes(normalized)) return 'Terminated';
   if (['completed'].includes(normalized)) return 'Completed';
   return 'Draft';
+};
+
+const workingDaysBetween = (fromIso: string, toIso = new Date().toISOString()) => {
+  const from = new Date(fromIso);
+  const to = new Date(toIso);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) return 0;
+  let days = 0;
+  for (let d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + 1)); d <= to; d = new Date(d.getTime() + 24 * 60 * 60 * 1000)) {
+    const day = d.getUTCDay();
+    if (day !== 0 && day !== 6) days += 1;
+  }
+  return days;
 };
 
 const monthlyPayFor = (employee: DleEmployeeDirectoryRow) => {
@@ -567,11 +597,16 @@ type EssLeaveRequest = {
   employeeId: string;
   category: string;
   status: string;
+  submittedAt?: string;
+  updatedAt?: string;
   leaveType?: string;
   startDate?: string;
   endDate?: string;
   days?: number;
   paidLeave?: boolean;
+  relieverEmployeeId?: string;
+  relieverName?: string;
+  workflow?: Array<{ stage: string; owner: string; status: string; actedAt?: string | null; comment?: string | null }>;
 };
 
 const readEssLeaveRequests = async () => {
@@ -701,7 +736,8 @@ const upsertEssLeaveRequests = async (pool: sql.ConnectionPool, employees: DleEm
   const requests = await readEssLeaveRequests();
   for (const item of requests) {
     const employee = employeeById.get(item.employeeId);
-    const status = normalizeLeaveStatus(item.status);
+    const initialStatus = normalizeLeaveStatus(item.status);
+    const status = ['Submitted', 'Under Review'].includes(initialStatus) && workingDaysBetween(item.updatedAt || item.submittedAt || new Date().toISOString()) > 5 ? 'Terminated' : initialStatus;
     const leaveType = clean(item.leaveType) || 'Annual Leave';
     const startDate = dateOnly(item.startDate);
     const endDate = dateOnly(item.endDate);
@@ -732,7 +768,7 @@ const upsertEssLeaveRequests = async (pool: sql.ConnectionPool, employees: DleEm
       .input('PolicyComplianceStatus', sql.NVarChar(40), blocked ? 'Blocked' : exceptions.length ? 'Attention Required' : 'Compliant')
       .input('BalanceImpact', sql.Decimal(9, 2), leaveType === 'Unpaid Leave' ? 0 : round2(days))
       .input('AvailableBalance', sql.Decimal(9, 2), 0)
-      .input('ActingOfficer', sql.NVarChar(180), 'Not configured')
+      .input('ActingOfficer', sql.NVarChar(180), clean(item.relieverName) || clean(item.relieverEmployeeId) || 'Not configured')
       .input('SupportingDocuments', sql.Int, 0)
       .input('ExceptionsJson', sql.NVarChar(sql.MAX), JSON.stringify(exceptions))
       .query(`

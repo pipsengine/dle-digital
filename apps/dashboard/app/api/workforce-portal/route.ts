@@ -8,17 +8,18 @@ import { activeLoansVersion, readPayrollLoanApplications, readPayrollLoansConfig
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { hasLeaveAllowanceInYear, syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
-import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
+import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee, readLeaveManagementPayload } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
+import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
 
 type EssRequest = {
   id: string;
   employeeId: string;
   category: string;
   title: string;
-  status: 'Draft' | 'Submitted' | 'Line Manager Review' | 'HR Review' | 'Finance Review' | 'Approved' | 'Rejected' | 'Closed';
+  status: 'Draft' | 'Submitted' | 'Line Manager Review' | 'HR Review' | 'Finance Review' | 'Approved' | 'Rejected' | 'Terminated' | 'Closed';
   priority: 'Low' | 'Normal' | 'High';
   submittedAt: string;
   updatedAt: string;
@@ -30,6 +31,11 @@ type EssRequest = {
   days?: number;
   payrollPeriod?: string;
   paidLeave?: boolean;
+  reason?: string;
+  relieverEmployeeId?: string;
+  relieverName?: string;
+  handover?: string;
+  workflow?: Array<{ stage: string; owner: string; status: string; actedAt?: string | null; comment?: string | null }>;
 };
 
 const ok = <T,>(data: T) => NextResponse.json({ status: 'success', data });
@@ -80,6 +86,80 @@ const writeRequests = async (requests: EssRequest[]) => {
   await mkdir(path.dirname(REQUESTS_PATH), { recursive: true });
   await writeFile(REQUESTS_PATH, JSON.stringify(requests, null, 2), 'utf8');
 };
+
+const workflowDeadlineDays = 5;
+const workingDaysSince = (iso: string) => {
+  const from = new Date(iso);
+  const to = new Date();
+  if (Number.isNaN(from.getTime()) || to <= from) return 0;
+  let days = 0;
+  for (let d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate() + 1)); d <= to; d = new Date(d.getTime() + 24 * 60 * 60 * 1000)) {
+    const day = d.getUTCDay();
+    if (day !== 0 && day !== 6) days += 1;
+  }
+  return days;
+};
+
+const expireStaleLeaveRequests = async (requests: EssRequest[]) => {
+  let changed = false;
+  const now = new Date().toISOString();
+  const next = requests.map((item) => {
+    if (item.category !== 'Leave' || !['Line Manager Review', 'HR Review', 'Submitted'].includes(item.status)) return item;
+    if (workingDaysSince(item.updatedAt || item.submittedAt) <= workflowDeadlineDays) return item;
+    changed = true;
+    return {
+      ...item,
+      status: 'Terminated' as EssRequest['status'],
+      updatedAt: now,
+      comments: [
+        ...(item.comments || []),
+        {
+          at: now,
+          actor: 'Leave Workflow Engine',
+          comment: `Leave request automatically terminated because it was not approved within ${workflowDeadlineDays} working days. Pending leave balance has been released.`,
+        },
+      ],
+      workflow: (item.workflow || []).map((step) =>
+        ['Pending', 'Current'].includes(step.status) ? { ...step, status: 'Terminated', actedAt: now, comment: `Auto-terminated after ${workflowDeadlineDays} working days.` } : step
+      ),
+    };
+  });
+  if (changed) await writeRequests(next);
+  return next;
+};
+
+const managerOwnerFor = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) =>
+  compact(employee.managerName) || compact((employee as Record<string, unknown>).supervisor) || 'Line Manager / Lead / Supervisor';
+
+const leaveWorkflowFor = (
+  employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number],
+  relieverName: string,
+  status: EssRequest['status'],
+  now: string
+) => [
+  { stage: 'Employee Request', owner: employee.fullName, status: 'Completed', actedAt: now, comment: 'Submitted from Employee Self-Service.' },
+  { stage: 'Line Manager / Lead / Supervisor', owner: managerOwnerFor(employee), status: status === 'Line Manager Review' ? 'Current' : status === 'HR Review' || status === 'Approved' ? 'Completed' : 'Pending', actedAt: status === 'Line Manager Review' ? null : now, comment: 'Approval validity: 5 working days.' },
+  { stage: 'HR Manager / Head', owner: 'HR Manager / Head', status: status === 'HR Review' ? 'Current' : status === 'Approved' ? 'Completed' : 'Pending', actedAt: status === 'Approved' ? now : null, comment: 'Final HR approval and leave balance confirmation.' },
+  { stage: 'Requester Notification', owner: employee.fullName, status: status === 'Approved' ? 'Delivered' : 'Pending', actedAt: status === 'Approved' ? now : null, comment: 'Requester notified after final approval.' },
+  { stage: 'Reliever Notification', owner: relieverName || 'Selected reliever', status: status === 'Approved' ? 'Delivered' : 'Pending', actedAt: status === 'Approved' ? now : null, comment: 'Reliever notified after final approval.' },
+];
+
+const notifyLeaveWorkflow = async (
+  session: SessionPayload,
+  input: { title: string; body: string; severity?: 'info' | 'success' | 'warning' | 'critical'; recipientEmployeeCode?: string; recipientRoles?: string[]; requestId: string }
+) =>
+  createEnterpriseNotification(session, {
+    kind: 'Approval',
+    module: 'Leave Management',
+    title: input.title,
+    body: input.body,
+    severity: input.severity || 'info',
+    recipientEmployeeCode: input.recipientEmployeeCode,
+    recipientRoles: input.recipientRoles || [],
+    href: `/workforce-portal?tab=workflow&request=${input.requestId}`,
+    channels: ['In-App', 'Email'],
+    metadata: { requestId: input.requestId },
+  });
 
 const serviceCatalog = [
   { id: 'profile-update', label: 'Profile Update', area: 'Profile', workflow: ['Employee', 'HR Operations', 'HR Manager'], slaHours: 24 },
@@ -152,7 +232,8 @@ export async function GET(request: Request) {
     if (session.isGlobalAdmin) return err(403, 'Global administrator is not linked to an employee self-service profile.');
     const locale = compact(request.headers.get('x-ess-locale')) || 'en-NG';
     await syncPayslipIdentitiesFromSage({ force: true, migratedBy: 'Employee Self-Service Payslip' }).catch(() => undefined);
-    const [employeeSource, allRequests, loanApplications, loansConfig, taxConfig, pensionConfig, identityByKey] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig(), payslipIdentityMap()]);
+    const [employeeSource, rawRequests, loanApplications, loansConfig, taxConfig, pensionConfig, identityByKey] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig(), payslipIdentityMap()]);
+    const allRequests = await expireStaleLeaveRequests(rawRequests);
     const employee = resolveEssEmployee(employeeSource.employees, session);
     if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');
     await syncSageLeaveAllowanceEvents();
@@ -259,44 +340,20 @@ export async function GET(request: Request) {
         },
       };
     };
-    const leaveUsed = employee.employeeId.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0) % 9;
     const attendanceRate = round(92 + (employee.employeeDbId % 70) / 10);
-
-    const seededRequests: EssRequest[] = [
-      {
-        id: 'seed-leave-001',
-        employeeId: employee.employeeId,
-        category: 'Leave',
-        title: 'Annual leave request',
-        status: 'Line Manager Review',
-        priority: 'Normal',
-        submittedAt: dateAdd(-3),
-        updatedAt: dateAdd(-1),
-        approvers: ['Line Manager', 'HR Operations'],
-        comments: [{ at: dateAdd(-2), actor: 'System', comment: 'Request routed to line manager.' }],
-      },
-      {
-        id: 'seed-document-001',
-        employeeId: employee.employeeId,
-        category: 'Documents',
-        title: 'Employment confirmation letter',
-        status: 'Approved',
-        priority: 'Low',
-        submittedAt: dateAdd(-12),
-        updatedAt: dateAdd(-9),
-        approvers: ['HR Operations'],
-        comments: [{ at: dateAdd(-9), actor: 'HR Operations', comment: 'Document is available in employee documents.' }],
-      },
-    ];
-
-    const requests = employeeRequests.length ? employeeRequests : seededRequests;
+    const requests = employeeRequests;
 
     const fourteenDayPaidLeaveEmployee = isFourteenDayPaidLeaveEmployee(employee);
     const confirmedPermanent = String(employee.status || '').toLowerCase().includes('confirmed') || (employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() <= Date.now() : false);
     const leaveYear = new Date().getFullYear();
     const annualEntitlement = annualLeaveEntitlementForEmployee(employee);
-    const carryForward = Math.min(7, employee.employeeDbId % 8);
-    leaveContext = { annualEntitlement, leaveUsed, leaveBalance: Math.max(0, annualEntitlement - leaveUsed), carryForward };
+    const leavePayload = await readLeaveManagementPayload('dashboard', 'Employee');
+    const employeeLeaveApplications = leavePayload.applications.filter((item) => item.employeeId === employee.employeeId || item.employeeId === employee.employeeCode);
+    const annualBalanceRecord = leavePayload.balances.find((item) => (item.employeeId === employee.employeeId || item.employeeId === employee.employeeCode) && item.leaveType === 'Annual Leave');
+    const leaveUsed = Number(annualBalanceRecord?.usedBalance || 0);
+    const carryForward = Number(annualBalanceRecord?.carryForwardBalance || 0);
+    const annualBalance = Number(annualBalanceRecord?.currentBalance ?? Math.max(0, annualEntitlement - leaveUsed));
+    leaveContext = { annualEntitlement, leaveUsed, leaveBalance: annualBalance, carryForward };
     const currentPayroll = payrollForPeriod(ESS_CURRENT_PAYROLL_PERIOD);
     const aprilPayroll = payrollForPeriod('2026-04');
     const mayPayroll = payrollForPeriod('2026-05', true);
@@ -307,7 +364,7 @@ export async function GET(request: Request) {
     const examUsed = employee.employeeDbId % 2;
     const maternityEligible = !fourteenDayPaidLeaveEmployee && /female/i.test(String((employee as any).gender || (employee as any).title || ''));
     const leavePolicyCards = [
-      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: 0, balance: Math.max(0, annualEntitlement - leaveUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Eligible - 14 paid working days annual entitlement' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: `Eligible only from ${dormantLongPolicy.allowanceMinimumAnnualDays} current-year Annual Leave working days`, policyNote: fourteenDayPaidLeaveEmployee ? 'Contract, lumpsum, NYSC, and IT employees receive 14 paid working days annually.' : 'Permanent employees receive 30 working days after confirmation.' },
+      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: annualBalanceRecord?.pendingBalance || 0, balance: annualBalance, expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Eligible - 14 paid working days annual entitlement' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Eligible - junior permanent employee' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: `Eligible only from ${dormantLongPolicy.allowanceMinimumAnnualDays} current-year Annual Leave working days`, policyNote: fourteenDayPaidLeaveEmployee ? 'Contract, lumpsum, NYSC, IT, and daily-rate employees receive 14 paid working days annually.' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Junior permanent employees receive 25 working days annually.' : 'Confirmed permanent employees receive 30 working days annually.' },
       { id: 'sick-leave', type: 'Sick Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 10, basis: 'Working days', used: sickUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 10) - sickUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Medical certificate may be required.' },
       { id: 'casual-leave', type: 'Casual Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: casualUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - casualUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Short-duration absence subject to manager approval.' },
       { id: 'compassionate-leave', type: 'Compassionate Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: compassionateUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - compassionateUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Supporting document required where applicable.' },
@@ -316,15 +373,61 @@ export async function GET(request: Request) {
       { id: 'carry-forward-leave', type: 'Carry Forward Leave', entitlement: carryForward, basis: 'Working days', used: Math.min(carryForward, employee.employeeDbId % 3), pending: 0, balance: Math.max(0, carryForward - Math.min(carryForward, employee.employeeDbId % 3)), expiryDate: `${leaveYear}-03-31`, eligibilityStatus: carryForward ? 'Available until 31 March' : 'No carry-forward balance', allowanceStatus: 'Does not trigger leave allowance', policyNote: 'Unused Annual Leave rolls over on 1 January up to 7 working days.' },
     ];
     const currentYearAllowanceAlreadyPaid = await hasLeaveAllowanceInYear(employee, leaveYear);
-    const allowanceEligible = annualEntitlement - leaveUsed >= 10 && !currentYearAllowanceAlreadyPaid;
-    const leaveWorkflow = [
-      { stage: 'Employee', owner: employee.fullName, status: 'Submitted', sla: 'Immediate' },
-      { stage: 'Supervisor/Line Manager', owner: employee.managerName || 'Line Manager', status: 'Pending', sla: '2 business days' },
-      { stage: 'Department Manager / GM', owner: 'Department approver', status: 'Not started', sla: '2 business days' },
-      { stage: 'HR', owner: 'HR Officer', status: 'Not started', sla: '1 business day' },
-      { stage: 'Payroll', owner: 'Payroll Officer', status: allowanceEligible ? 'Conditional' : 'Skipped unless allowance/unpaid leave applies', sla: '1 payroll cycle' },
-      { stage: 'Completed', owner: 'System', status: 'Not started', sla: 'After all approvals' },
-    ];
+    const allowanceEligible = annualBalance >= 10 && !currentYearAllowanceAlreadyPaid;
+    const activeLeaveApplication = employeeLeaveApplications.find((item) => ['Submitted', 'Under Review', 'Approved'].includes(item.status));
+    const currentLeaveNow = employeeLeaveApplications.find((item) => ['Approved', 'Completed'].includes(item.status) && item.startDate <= new Date().toISOString().slice(0, 10) && item.endDate >= new Date().toISOString().slice(0, 10));
+    const leaveWorkflow = activeLeaveApplication
+      ? [
+          { stage: 'Employee Request', owner: employee.fullName, status: 'Completed', sla: 'Immediate' },
+          { stage: 'Line Manager / Lead / Supervisor', owner: activeLeaveApplication.managerName || employee.managerName || 'Line Manager', status: activeLeaveApplication.stage === 'Supervisor' ? 'Current' : ['HR', 'Final Approval', 'Closed'].includes(activeLeaveApplication.stage) ? 'Completed' : 'Pending', sla: '5 working days' },
+          { stage: 'HR Manager / Head', owner: 'HR Manager / Head', status: ['HR', 'Final Approval'].includes(activeLeaveApplication.stage) ? 'Current' : activeLeaveApplication.status === 'Approved' ? 'Completed' : 'Pending', sla: '5 working days' },
+          { stage: 'Requester Notification', owner: employee.fullName, status: activeLeaveApplication.status === 'Approved' ? 'Delivered' : 'Pending', sla: 'After final approval' },
+          { stage: 'Reliever Notification', owner: activeLeaveApplication.actingOfficer || 'Reliever', status: activeLeaveApplication.status === 'Approved' ? 'Delivered' : 'Pending', sla: 'After final approval' },
+        ]
+      : [
+          { stage: 'Employee Request', owner: employee.fullName, status: 'Not started', sla: 'Immediate' },
+          { stage: 'Line Manager / Lead / Supervisor', owner: employee.managerName || 'Line Manager', status: 'Not started', sla: '5 working days' },
+          { stage: 'HR Manager / Head', owner: 'HR Manager / Head', status: 'Not started', sla: '5 working days' },
+          { stage: 'Requester Notification', owner: employee.fullName, status: 'Not started', sla: 'After final approval' },
+          { stage: 'Reliever Notification', owner: 'Selected reliever', status: 'Not started', sla: 'After final approval' },
+        ];
+    const leaveCalendar = employeeLeaveApplications
+      .filter((item) => ['Submitted', 'Under Review', 'Approved', 'Completed'].includes(item.status))
+      .map((item) => ({ id: item.id, label: `${item.leaveType} - ${item.fullName}`, from: item.startDate, to: item.endDate, status: item.status, type: item.leaveType, scope: item.department }));
+    const leaveHistory = employeeLeaveApplications.map((item) => ({
+      id: item.id,
+      type: item.leaveType,
+      from: item.startDate,
+      to: item.endDate,
+      days: item.days,
+      year: Number(item.startDate.slice(0, 4)),
+      status: item.status,
+      approvalStage: item.stage,
+      approvers: item.managerName ? `${item.managerName}, HR Manager / Head` : 'Line Manager / Supervisor, HR Manager / Head',
+      reliever: item.actingOfficer || 'Not configured',
+      payrollImpact: item.leaveType === 'Unpaid Leave' ? 'Payroll deduction review' : 'None',
+      allowanceStatus: item.leaveType === 'Annual Leave' && item.days >= dormantLongPolicy.allowanceMinimumAnnualDays ? 'Eligible after final approval' : 'Not eligible',
+      attachments: item.supportingDocuments ? `${item.supportingDocuments} document(s)` : 'None',
+      comments: item.exceptions.length ? item.exceptions.join('; ') : 'No exceptions',
+      auditTrail: item.approvalStatus,
+    }));
+    const leaveApprovals = employeeLeaveApplications
+      .filter((item) => !['Approved', 'Completed', 'Rejected', 'Cancelled', 'Terminated'].includes(item.status))
+      .map((item) => ({ id: item.id, employee: item.fullName, type: item.leaveType, days: item.days, stage: item.stage, status: item.status, reliever: item.actingOfficer, handover: 'Required before commencement', conflict: item.exceptions.join('; ') || 'No conflict' }));
+    const employeeDepartment = compact(employee.department).toLowerCase();
+    const relieverOptions = employeeSource.employees
+      .filter((item) => (item.employeeId !== employee.employeeId && (item.employeeCode || item.employeeId) !== (employee.employeeCode || employee.employeeId)))
+      .filter((item) => compact(item.department).toLowerCase() === employeeDepartment)
+      .filter((item) => !/inactive|terminated|resigned/i.test(compact(item.status)))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName))
+      .slice(0, 250)
+      .map((item) => ({
+        employeeId: item.employeeId,
+        employeeCode: item.employeeCode || item.employeeId,
+        fullName: item.fullName,
+        jobTitle: item.jobTitle || item.designation || 'Employee',
+        department: item.department || 'Unassigned',
+      }));
 
     return ok({
       generatedAt: new Date().toISOString(),
@@ -349,12 +452,13 @@ export async function GET(request: Request) {
         email: employee.officialEmail || employee.email || employee.personalEmail || `${employee.employeeId.toLowerCase()}@dormanlongeng.com`,
         phone: employee.primaryPhone || employee.phone,
         photoUrl: '/brand/dorman-long-logo.jpg',
+        status: currentLeaveNow ? 'On Leave' : employee.status || 'Active',
         yearsOfService: round(Number(employee.yearsOfService || 0)),
         payrollGroup: employee.payrollGroup || 'Monthly Payroll',
         salaryGrade: employee.salaryGrade || employee.jobGrade || 'Unassigned',
       },
       widgets: {
-        leave: { entitlement: annualEntitlement, used: leaveUsed, balance: Math.max(0, annualEntitlement - leaveUsed), pending: requests.filter((item) => item.category === 'Leave' && !['Approved', 'Rejected', 'Closed'].includes(item.status)).length },
+        leave: { entitlement: annualEntitlement, used: leaveUsed, balance: annualBalance, pending: requests.filter((item) => item.category === 'Leave' && !['Approved', 'Rejected', 'Terminated', 'Closed'].includes(item.status)).length },
         attendance: { monthRate: attendanceRate, lateArrivals: employee.employeeDbId % 3, overtimeHours: (employee.employeeDbId % 6) * 2, remoteDays: employee.remoteWorker ? 4 : 0 },
         payroll: { monthlyPay, currency: employee.payCurrency || 'NGN', payslips: 12, deductions: currentPayroll.deductions, pension: currentPayroll.deductionLines.find((line) => line.code === 'PENSION_EMPLOYEE')?.amount || 0, allowances: calculatePayrollEarnings(employee).allowances },
         requests: { pending: requests.filter((item) => !['Approved', 'Rejected', 'Closed'].includes(item.status)).length, approved: requests.filter((item) => item.status === 'Approved').length, total: requests.length },
@@ -405,26 +509,15 @@ export async function GET(request: Request) {
       ],
       leave: {
         balances: leavePolicyCards,
-        calendar: [
-          { id: 'lv-cal-001', label: 'My approved annual leave', from: sampleDate(10), to: sampleDate(14), status: 'Approved', type: 'Annual Leave', scope: 'My leave schedule' },
-          { id: 'lv-cal-002', label: 'Team leave blackout', from: sampleDate(20), to: sampleDate(24), status: 'Blackout', type: 'Policy', scope: employee.department || 'Department' },
-          { id: 'lv-cal-003', label: 'Carry forward expiry', from: `${leaveYear}-03-31`, to: `${leaveYear}-03-31`, status: 'Reminder', type: 'Carry Forward Leave', scope: 'ESS notification' },
-          { id: 'lv-cal-004', label: 'Public holiday', from: `${leaveYear}-10-01`, to: `${leaveYear}-10-01`, status: 'Holiday', type: 'Public Holiday', scope: 'Nigeria' },
-        ],
-        history: [
-          { id: 'lv-his-001', type: 'Annual Leave', from: sampleDate(-40), to: sampleDate(-35), days: 5, year: leaveYear, status: 'Completed', approvalStage: 'Completed', approvers: 'Supervisor, HR', reliever: 'Assigned colleague', payrollImpact: 'None', allowanceStatus: 'Not eligible below 10 days', attachments: 'None', comments: 'Completed', auditTrail: 'Submitted -> Approved -> Completed' },
-          { id: 'lv-his-002', type: 'Sick Leave', from: sampleDate(-12), to: sampleDate(-12), days: 1, year: leaveYear, status: 'Completed', approvalStage: 'Completed', approvers: 'Supervisor, HR', reliever: 'Not required', payrollImpact: 'None', allowanceStatus: 'Not applicable', attachments: 'Medical certificate', comments: 'Approved', auditTrail: 'Submitted -> HR approved' },
-        ],
+        calendar: leaveCalendar,
+        history: leaveHistory,
         workflows: leaveWorkflow,
         allowance: [
           { label: 'Leave Allowance Status', value: currentYearAllowanceAlreadyPaid ? `Already paid/approved for ${leaveYear}` : allowanceEligible ? `Eligible when applying for ${dormantLongPolicy.allowanceMinimumAnnualDays}+ current-year Annual Leave working days` : 'Not currently eligible', status: allowanceEligible ? 'Ready' : 'Review' },
           { label: 'Payroll Integration', value: 'Payroll is notified after eligible Annual Leave approval', status: 'Enabled' },
           { label: 'Carry Forward Rule', value: 'Carry Forward Leave does not trigger allowance', status: 'Enforced' },
         ],
-        approvals: [
-          { id: 'app-001', employee: 'Team member', type: 'Annual Leave', days: 10, stage: 'Supervisor/Line Manager', status: 'Pending', reliever: employee.fullName, handover: 'Project notes attached', conflict: 'No conflict' },
-          { id: 'app-002', employee: 'Team member', type: 'Sick Leave', days: 2, stage: 'HR', status: 'Under Review', reliever: 'Not required', handover: 'Medical attachment pending', conflict: 'Attachment required' },
-        ],
+        approvals: leaveApprovals,
         reports: ['Employee leave balance', 'Department leave utilization', 'Leave liability', 'Carry forward leave', 'Expired/forfeited leave', 'Leave allowance eligibility', 'Payroll-impact leave', 'Sick leave trend', 'Absenteeism', 'Employees currently on leave', 'Upcoming leave', 'Approval SLA report', 'Leave audit trail'].map((title, index) => ({ id: `ess-rpt-${index + 1}`, title, format: 'Excel / PDF / CSV', status: 'Available' })),
         notifications: ['Leave submitted', 'Approval pending', 'Leave approved', 'Leave rejected', 'Leave cancelled', 'Leave recalled', 'Carry forward balance created', 'Carry forward expiry reminder', 'Return-to-work reminder', 'Payroll leave allowance processing', 'Blackout conflict warning', 'Reliever assignment'].map((title, index) => ({ id: `leave-ntf-${index + 1}`, title, channel: 'Email, In-app, ESS', status: 'Enabled' })),
         security: [
@@ -433,6 +526,7 @@ export async function GET(request: Request) {
           { role: 'HR Officer', access: 'Final approval and leave record management' },
           { role: 'Payroll Officer', access: 'Payroll-impact leave only' },
         ],
+        relieverOptions,
       },
       attendance: {
         records: [
@@ -575,15 +669,89 @@ export async function POST(request: Request) {
     if (!session) return err(401, 'Unauthenticated.');
     if (session.isGlobalAdmin) return err(403, 'Global administrator is not linked to an employee self-service profile.');
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const action = compact(body.action);
+
+    const employeeSource = await readPayrollEmployees();
+    const employee = resolveEssEmployee(employeeSource.employees, session);
+    if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');
+
+    if (action === 'approve-leave' || action === 'reject-leave') {
+      const requestId = compact(body.requestId || body.id);
+      if (!requestId) return err(400, 'requestId is required');
+      const requests = await expireStaleLeaveRequests(await readRequests());
+      const found = requests.find((item) => item.id === requestId && item.category === 'Leave');
+      if (!found) return err(404, 'Leave request not found.');
+      if (['Approved', 'Rejected', 'Terminated', 'Closed'].includes(found.status)) return err(409, `Leave request is already ${found.status}.`);
+
+      const now = new Date().toISOString();
+      const approved = action === 'approve-leave';
+      const nextStatus: EssRequest['status'] = !approved ? 'Rejected' : found.status === 'Line Manager Review' ? 'HR Review' : 'Approved';
+      const nextWorkflow = leaveWorkflowFor(employee, found.relieverName || 'Selected reliever', nextStatus, now);
+      const nextRequests = requests.map((item) =>
+        item.id === requestId
+          ? {
+              ...item,
+              status: nextStatus,
+              updatedAt: now,
+              workflow: nextWorkflow,
+              comments: [
+                ...(item.comments || []),
+                {
+                  at: now,
+                  actor: session.fullName || session.username,
+                  comment: !approved
+                    ? compact(body.comment) || 'Leave request rejected.'
+                    : nextStatus === 'HR Review'
+                      ? 'Line manager / supervisor approval completed. Routed to HR Manager / Head.'
+                      : 'HR Manager / Head final approval completed. Requester and reliever notifications issued.',
+                },
+              ],
+            }
+          : item
+      );
+      await writeRequests(nextRequests);
+      if (!approved) {
+        await notifyLeaveWorkflow(session, {
+          requestId,
+          recipientEmployeeCode: found.employeeId,
+          title: 'Leave request rejected',
+          body: `${found.title} was rejected by ${session.fullName || session.username}.`,
+          severity: 'warning',
+        });
+      } else if (nextStatus === 'HR Review') {
+        await notifyLeaveWorkflow(session, {
+          requestId,
+          recipientRoles: ['HR Manager', 'HR Head', 'HR Officer'],
+          title: 'Leave request awaiting HR approval',
+          body: `${found.title} has been approved by the line manager and is awaiting HR Manager / Head approval.`,
+          severity: 'warning',
+        });
+      } else {
+        await notifyLeaveWorkflow(session, {
+          requestId,
+          recipientEmployeeCode: found.employeeId,
+          title: 'Leave request approved',
+          body: `${found.title} has received final HR approval.`,
+          severity: 'success',
+        });
+        if (found.relieverEmployeeId) {
+          await notifyLeaveWorkflow(session, {
+            requestId,
+            recipientEmployeeCode: found.relieverEmployeeId,
+            title: 'Leave reliever assignment confirmed',
+            body: `You have been assigned as reliever for ${employee.fullName}: ${found.title}.`,
+            severity: 'info',
+          });
+        }
+      }
+      return ok({ request: nextRequests.find((item) => item.id === requestId) });
+    }
+
     const category = compact(body.category);
     const title = compact(body.title);
     const priority = compact(body.priority) as EssRequest['priority'];
     if (!category) return err(400, 'category is required');
     if (!title) return err(400, 'title is required');
-
-    const employeeSource = await readPayrollEmployees();
-    const employee = resolveEssEmployee(employeeSource.employees, session);
-    if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');
 
     const catalogItem = serviceCatalog.find((item) => item.label === category || item.id === category);
     const now = new Date().toISOString();
@@ -591,26 +759,50 @@ export async function POST(request: Request) {
     const leaveDays = Number(body.days || 0);
     const startDate = compact(body.startDate);
     const endDate = compact(body.endDate);
+    const reason = compact(body.reason);
+    const handover = compact(body.handover);
+    const relieverEmployeeId = compact(body.relieverEmployeeId);
+    const relieverNameInput = compact(body.relieverName);
+    const isLeaveRequest = catalogItem?.id === 'leave' || /leave/i.test(category);
+    const reliever = relieverEmployeeId
+      ? employeeSource.employees.find((item) => item.employeeId === relieverEmployeeId || item.employeeCode === relieverEmployeeId)
+      : null;
+    if (isLeaveRequest) {
+      if (!leaveType) return err(400, 'leaveType is required');
+      if (!startDate || !endDate || !leaveDays) return err(400, 'startDate, endDate, and days are required');
+      if (!reason) return err(400, 'reason is required');
+      if (!handover) return err(400, 'handover notes are required');
+      if (!reliever) return err(400, 'A department reliever must be selected.');
+      if (compact(reliever.department).toLowerCase() !== compact(employee.department).toLowerCase()) return err(400, 'Reliever must be selected from the same department.');
+      if ((reliever.employeeCode || reliever.employeeId) === (employee.employeeCode || employee.employeeId)) return err(400, 'Employee cannot be selected as own reliever.');
+    }
     const leaveYear = Number(body.leaveYear || new Date().getFullYear());
-    const allowanceAlreadyPaid = catalogItem?.id === 'leave' || /leave/i.test(category)
+    const allowanceAlreadyPaid = isLeaveRequest
       ? await hasLeaveAllowanceInYear(employee, leaveYear)
       : false;
+    const initialStatus: EssRequest['status'] = isLeaveRequest ? 'Line Manager Review' : catalogItem?.workflow.includes('Line Manager') ? 'Line Manager Review' : 'Submitted';
+    const relieverName = reliever ? reliever.fullName : relieverNameInput;
     const requestItem: EssRequest = {
       id: `ess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       employeeId: employee.employeeId,
       category: catalogItem?.area || category,
       title,
-      status: catalogItem?.workflow.includes('Line Manager') ? 'Line Manager Review' : 'Submitted',
+      status: initialStatus,
       priority: ['Low', 'Normal', 'High'].includes(priority) ? priority : 'Normal',
       submittedAt: now,
       updatedAt: now,
-      approvers: catalogItem?.workflow.slice(1) || ['HR Operations'],
+      approvers: isLeaveRequest ? [managerOwnerFor(employee), 'HR Manager / Head'] : catalogItem?.workflow.slice(1) || ['HR Operations'],
       leaveType: leaveType || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       days: leaveDays || undefined,
       payrollPeriod: startDate ? startDate.slice(0, 7) : undefined,
-      paidLeave: /leave/i.test(category) && leaveType === 'Annual Leave',
+      paidLeave: isLeaveRequest && leaveType === 'Annual Leave',
+      reason: reason || undefined,
+      relieverEmployeeId: reliever ? reliever.employeeId : relieverEmployeeId || undefined,
+      relieverName: relieverName || undefined,
+      handover: handover || undefined,
+      workflow: isLeaveRequest ? leaveWorkflowFor(employee, relieverName, initialStatus, now) : undefined,
       comments: [{
         at: now,
         actor: 'Employee Self-Service',
@@ -624,6 +816,22 @@ export async function POST(request: Request) {
 
     const requests = await readRequests();
     await writeRequests([requestItem, ...requests]);
+    if (isLeaveRequest) {
+      await notifyLeaveWorkflow(session, {
+        requestId: requestItem.id,
+        recipientEmployeeCode: employee.employeeCode || employee.employeeId,
+        title: 'Leave request submitted',
+        body: `${title} has been submitted and routed to ${managerOwnerFor(employee)}. It must be approved within ${workflowDeadlineDays} working days.`,
+        severity: 'success',
+      });
+      await notifyLeaveWorkflow(session, {
+        requestId: requestItem.id,
+        recipientRoles: ['Supervisor', 'Line Manager', 'Manager'],
+        title: 'Leave request awaiting line manager approval',
+        body: `${employee.fullName} submitted ${title}. Approve, return, or reject within ${workflowDeadlineDays} working days.`,
+        severity: 'warning',
+      });
+    }
     return ok({ request: requestItem });
   } catch (error) {
     return err(500, error instanceof Error ? error.message : 'Unable to submit ESS request.');

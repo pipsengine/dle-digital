@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   applyOvertimeAction,
+  createOvertimeRequest,
   normalizeOvertimeRole,
   overtimeCsv,
   readOvertimeManagementPayload,
@@ -35,6 +36,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const id = String(body.id || '').trim();
     const action = String(body.action || '').trim() as OvertimeAction;
+    if (String(body.action || '').trim() === 'create-request') {
+      return ok(await createOvertimeRequest(body, role, body.actor ? String(body.actor) : role));
+    }
     if (!id) return err(400, 'Overtime record is required.');
     if (!action) return err(400, 'Overtime action is required.');
     const payload = await applyOvertimeAction(id, action, role, body.actor ? String(body.actor) : role, body.comment ? String(body.comment) : null);

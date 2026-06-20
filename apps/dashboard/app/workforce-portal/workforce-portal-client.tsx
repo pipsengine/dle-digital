@@ -1,6 +1,6 @@
 'use client';
 
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/exhaustive-deps */
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -53,6 +53,9 @@ type EssRequest = {
   updatedAt: string;
   approvers: string[];
   comments: Array<{ at: string; actor: string; comment: string }>;
+  relieverEmployeeId?: string;
+  relieverName?: string;
+  workflow?: Array<{ stage: string; owner: string; status: string; actedAt?: string | null; comment?: string | null }>;
 };
 type LoanProduct = { id: string; label: string; type: string; interestRate: number; maxPrincipalMultiple: number; maxTenorMonths: number };
 type SimpleRecord = Record<string, string | number | boolean | null>;
@@ -83,7 +86,7 @@ type Payload = {
   generatedAt: string;
   locale: string;
   security: Record<string, string>;
-  employee: { employeeId: string; employeeCode: string; fullName: string; jobTitle: string; department: string; businessUnit: string; location: string; manager: string; email: string; phone: string; photoUrl: string; yearsOfService: number; payrollGroup: string; salaryGrade: string };
+  employee: { employeeId: string; employeeCode: string; fullName: string; jobTitle: string; department: string; businessUnit: string; location: string; manager: string; email: string; phone: string; photoUrl: string; status?: string; yearsOfService: number; payrollGroup: string; salaryGrade: string };
   widgets: {
     leave: { entitlement: number; used: number; balance: number; pending: number };
     attendance: { monthRate: number; lateArrivals: number; overtimeHours: number; remoteDays: number };
@@ -108,6 +111,7 @@ type Payload = {
     reports: SimpleRecord[];
     notifications: SimpleRecord[];
     security: SimpleRecord[];
+    relieverOptions: Array<{ employeeId: string; employeeCode: string; fullName: string; jobTitle: string; department: string }>;
   };
   attendance: { records: SimpleRecord[]; shifts: SimpleRecord[]; timesheets: SimpleRecord[] };
   payrollHistory: PayrollHistoryRow[];
@@ -753,7 +757,7 @@ const calcLeaveDays = (from: string, to: string, basis: string) => {
   return days;
 };
 
-function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string }) => Promise<void>; saving?: boolean }) {
+function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string }) => Promise<void>; saving?: boolean }) {
   const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
   const [leaveType, setLeaveType] = useState('Annual Leave');
   const [startDate, setStartDate] = useState('');
@@ -765,6 +769,8 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
   const [address, setAddress] = useState(employee?.location || '');
   const [ack, setAck] = useState(false);
   const selected = (payload?.leave.balances || []).find((item) => String(item.type) === leaveType) || payload?.leave.balances?.[0];
+  const relieverOptions = payload?.leave.relieverOptions || [];
+  const selectedReliever = relieverOptions.find((item) => item.employeeId === reliever || item.employeeCode === reliever);
   const basis = String(selected?.basis || 'Working days');
   const days = calcLeaveDays(startDate, endDate, basis);
   const balance = Number(selected?.balance || 0);
@@ -776,6 +782,9 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
     ...(leaveRequiresAttachment(leaveType) ? ['Attachment is mandatory for this leave type.'] : []),
     ...(usesCarryForward && endDate > `${new Date().getFullYear()}-03-31` ? ['Carry Forward Leave must be consumed on or before 31 March.'] : []),
     ...(leaveType === 'Annual Leave' && days > 0 && days < 10 ? ['This request does not qualify for Leave Allowance.'] : []),
+    ...(!reason.trim() ? ['Reason is required.'] : []),
+    ...(!reliever ? ['A department reliever is required.'] : []),
+    ...(!handover.trim() ? ['Handover notes are required.'] : []),
     ...(!ack ? ['Policy acknowledgement is required before submission.'] : []),
   ];
 
@@ -834,7 +843,10 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
               <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
               <input value={`${days} ${basis.toLowerCase()}`} readOnly className="h-11 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-800" />
-              <input value={reliever} onChange={(e) => setReliever(e.target.value)} placeholder="Reliever / acting person" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+              <select value={reliever} onChange={(e) => setReliever(e.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold">
+                <option value="">Select department reliever...</option>
+                {relieverOptions.map((item) => <option key={item.employeeId} value={item.employeeId}>{item.fullName} - {item.jobTitle}</option>)}
+              </select>
               <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Contact number while on leave" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold" />
               <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Leave address / location" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold md:col-span-2" />
               <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason" className="min-h-24 rounded-lg border border-slate-200 p-3 text-sm font-bold md:col-span-2" />
@@ -848,10 +860,10 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
             <p className="text-xs font-semibold text-slate-600">Allowance: {allowanceEligible && !usesCarryForward ? 'Eligible after approval and payroll notification' : 'Not eligible for this selection'}</p>
             <p className="text-xs font-semibold text-slate-600">Available balance: {balance} days</p>
             <div className="space-y-2">{validations.map((item, index) => <div key={`${item}-${index}`} className={`rounded-lg border px-3 py-2 text-xs font-bold ${item.includes('does not qualify') ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-red-200 bg-red-50 text-red-800'}`}>{item}</div>)}</div>
-            {!validations.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">{'Ready to submit. Workflow: Employee -> Supervisor -> Manager/GM -> HR -> Payroll when applicable -> Completed.'}</div> : null}
+            {!validations.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">{'Ready to submit. Workflow: Employee Request -> Line Manager / Lead / Supervisor -> HR Manager / Head -> requester and reliever notifications.'}</div> : null}
             <button
               type="button"
-              onClick={() => onLeaveSubmitted?.({ leaveType, startDate, endDate, days, reason })}
+              onClick={() => onLeaveSubmitted?.({ leaveType, startDate, endDate, days, reason, relieverEmployeeId: reliever, relieverName: selectedReliever?.fullName || '', handover })}
               disabled={saving || Boolean(validations.filter((item) => !item.includes('does not qualify')).length)}
               className="h-11 w-full rounded-lg bg-blue-600 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
             >
@@ -861,7 +873,7 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
         </section>
       )}
 
-      {active === 'My Applications' && <DataList rows={(payload?.requests.filter((item) => item.category === 'Leave').map((item) => ({ id: item.id, title: item.title, status: item.status, submittedAt: item.submittedAt, updatedAt: item.updatedAt, approvers: item.approvers.join(', ') })) || [])} titleKey="title" subtitleKeys={['status', 'submittedAt', 'updatedAt', 'approvers']} />}
+      {active === 'My Applications' && <DataList rows={(payload?.requests.filter((item) => item.category === 'Leave').map((item) => ({ id: item.id, title: item.title, status: item.status, submittedAt: item.submittedAt, updatedAt: item.updatedAt, reliever: item.relieverName || 'Reliever not configured', workflow: item.workflow?.map((step) => `${step.stage}: ${step.status}`).join(' | ') || item.approvers.join(', ') })) || [])} titleKey="title" subtitleKeys={['status', 'submittedAt', 'updatedAt', 'reliever', 'workflow']} />}
       {active === 'Leave Calendar' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Calendar" rows={payload?.leave.calendar || []} keys={['label', 'from', 'to', 'status', 'scope']} /><InfoListLike title="Notifications" rows={payload?.leave.notifications || []} keys={['title', 'channel', 'status']} /></section>}
       {active === 'Leave History' && <DataList rows={payload?.leave.history || []} titleKey="type" subtitleKeys={['from', 'to', 'days', 'approvalStage', 'allowanceStatus']} />}
       {active === 'Approvals' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Approval Workflow" rows={payload?.leave.workflows || []} keys={['stage', 'owner', 'status', 'sla']} /><InfoListLike title="Manager/HR Queue" rows={payload?.leave.approvals || []} keys={['employee', 'type', 'days', 'stage', 'status', 'conflict']} /></section>}
@@ -948,7 +960,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
     }
   };
 
-  const submitLeaveApplication = async (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string }) => {
+  const submitLeaveApplication = async (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string }) => {
     if (!payload) return;
     setSaving(true);
     setToast('');
@@ -966,6 +978,9 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           endDate: input.endDate,
           days: input.days,
           reason: input.reason,
+          relieverEmployeeId: input.relieverEmployeeId,
+          relieverName: input.relieverName,
+          handover: input.handover,
         }),
       });
       const json = (await res.json()) as ApiResponse<{ request: EssRequest }>;
