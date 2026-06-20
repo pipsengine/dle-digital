@@ -15,6 +15,7 @@ const titleOverrides: Record<string, string> = {
   '/hris/payroll/employee-salary-setup': 'Employee Salary Setup',
   '/hris/payroll/sage-migration-review': 'Sage Payroll Migration Review',
   '/hris/time-and-logs/timesheet-entry': 'Timesheet Entry',
+  '/hris/time-and-logs/timesheet-review': 'Timesheet Review',
   '/hris/time-and-logs/timesheet-period': 'Timesheet Period',
   '/hris/workforce-management/attendance': 'Attendance',
   '/hris/payroll-management/salary-management': 'Salary Management',
