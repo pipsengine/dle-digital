@@ -541,32 +541,99 @@ const payrollExportRows = (records: any[]) => records.map((r) => [
   (r.exceptions || []).join('; '),
 ]);
 
+const reportTitle = (report: string) => ({
+  'payroll-summary': 'Payroll Summary Report',
+  'payroll-register': 'Payroll Register',
+  'salary-analysis': 'Salary Analysis Report',
+  'tax-report': 'PAYE Tax Report',
+  'pension-report': 'Pension Report',
+  'deduction-report': 'Deduction Report',
+  'bank-payment-report': 'Bank Payment Report',
+  'compliance-report': 'Compliance Report',
+  'audit-report': 'Payroll Audit Report',
+  'executive-analytics': 'Executive Payroll Analytics',
+}[report] || 'Payroll Register');
+
+const filterExportRecords = (records: any[], status: string | null) =>
+  status && status !== 'All' ? records.filter((record) => record.payrollStatus === status) : records;
+
+const reportExport = (records: any[], report: string) => {
+  if (report === 'payroll-summary' || report === 'executive-analytics') {
+    return {
+      columns: ['Metric', 'Value'],
+      rows: [
+        ['Employees', records.length],
+        ['Ready Employees', records.filter((r) => r.payrollStatus === 'Ready').length],
+        ['Review Employees', records.filter((r) => r.payrollStatus === 'Review').length],
+        ['Blocked Employees', records.filter((r) => r.payrollStatus === 'Blocked').length],
+        ['Gross Pay', roundMoney(records.reduce((sum, r) => sum + Number(r.grossPay || 0), 0))],
+        ['Deductions', roundMoney(records.reduce((sum, r) => sum + Number(r.deductions || 0), 0))],
+        ['Net Pay', roundMoney(records.reduce((sum, r) => sum + Number(r.netPay || 0), 0))],
+      ],
+    };
+  }
+  if (report === 'tax-report') {
+    return {
+      columns: ['Employee ID', 'Name', 'Department', 'Taxable Pay', 'PAYE', 'Payroll Status', 'Exceptions'],
+      rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.taxablePay ?? '', r.paye ?? 0, r.payrollStatus, (r.exceptions || []).join('; ')]),
+    };
+  }
+  if (report === 'pension-report') {
+    return {
+      columns: ['Employee ID', 'Name', 'Department', 'Gross Pay', 'Pension EE', 'Pension ER Estimate', 'Payroll Status'],
+      rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.grossPay ?? 0, r.pension ?? 0, roundMoney(Number(r.pension || 0) * 1.25), r.payrollStatus]),
+    };
+  }
+  if (report === 'deduction-report' || report === 'compliance-report') {
+    return {
+      columns: ['Employee ID', 'Name', 'Department', 'PAYE', 'Pension', 'Other / NHF / Union', 'Total Deductions', 'Payroll Status'],
+      rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.paye ?? 0, r.pension ?? 0, r.otherDeductions ?? 0, r.deductions ?? 0, r.payrollStatus]),
+    };
+  }
+  if (report === 'bank-payment-report') {
+    return {
+      columns: ['Employee ID', 'Name', 'Department', 'Location', 'Payment Type', 'Currency', 'Net Payment', 'Payroll Status', 'Exceptions'],
+      rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.location, r.paymentType, r.payCurrency, r.netPay ?? 0, r.payrollStatus, (r.exceptions || []).join('; ')]),
+    };
+  }
+  if (report === 'salary-analysis') {
+    return {
+      columns: ['Employee ID', 'Name', 'Department', 'Employment Type', 'Salary Structure', 'Base Pay', 'Allowances', 'Gross Pay', 'Net Pay', 'Payroll Status'],
+      rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.employmentType, r.salaryStructure || r.salaryGrade, r.basePay ?? 0, r.allowances ?? 0, r.grossPay ?? 0, r.netPay ?? 0, r.payrollStatus]),
+    };
+  }
+  return { columns: payrollExportColumns, rows: payrollExportRows(records) };
+};
+
 export async function GET(request: Request) {
   try {
     const payload = await buildPayload(request);
     const url = new URL(request.url);
+    const report = compact(url.searchParams.get('report')) || 'payroll-register';
+    const exportRecords = filterExportRecords(payload.records, url.searchParams.get('status'));
     if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: auditStore.slice(0, 200) });
     if (url.searchParams.get('format') === 'csv') {
       if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
-      return new Response(csv(payload.records), {
+      return new Response(csv(exportRecords), {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
-          'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
+          'content-disposition': `attachment; filename="${report}-${payload.period}.csv"`,
         },
       });
     }
     if (url.searchParams.get('format') === 'xls' || url.searchParams.get('format') === 'excel') {
       if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      const reportData = reportExport(exportRecords, report);
       return new Response(buildExcelHtml({
-        title: `Payroll Register - ${payload.periodLabel}`,
-        subtitle: `${payload.summary.payrollEligible} eligible employees / ${payload.summary.exceptionCount} exceptions`,
-        sheetName: 'Payroll Register',
-        columns: payrollExportColumns,
-        rows: payrollExportRows(payload.records),
+        title: `${reportTitle(report)} - ${payload.periodLabel}`,
+        subtitle: `${exportRecords.length} records / ${payload.summary.exceptionCount} total payroll exceptions`,
+        sheetName: reportTitle(report).slice(0, 31),
+        columns: reportData.columns,
+        rows: reportData.rows,
       }), {
         headers: {
           'content-type': excelMimeType,
-          'content-disposition': `attachment; filename="payroll-${payload.period}.xls"`,
+          'content-disposition': `attachment; filename="${report}-${payload.period}.xls"`,
         },
       });
     }

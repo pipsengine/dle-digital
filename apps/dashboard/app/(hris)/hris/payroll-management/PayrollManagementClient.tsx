@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
   AlertTriangle,
   ArrowRight,
   BadgeCheck,
@@ -164,6 +176,8 @@ type PayrollAuditEntry = {
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 type SectionId = 'dashboard' | 'payroll-computation-workflow' | 'salary-management' | 'earnings-management' | 'deductions-management' | 'payroll-processing' | 'compliance-statutory-management' | 'finance-integration' | 'reports-analytics';
+type DashboardPanelId = 'ready' | 'gross' | 'deductions' | 'issues' | 'status' | 'approvals';
+type WorkflowStageId = 'data' | 'validation' | 'computation' | 'approval' | 'release' | 'lock';
 
 type TabConfig = {
   id: string;
@@ -579,6 +593,8 @@ const sectionAliases: Record<string, SectionId> = {
   'payroll-workflow-status': 'payroll-computation-workflow',
   'payroll-computation-and-approval-workflow': 'payroll-computation-workflow',
   'pay-setup': 'salary-management',
+  deductions: 'deductions-management',
+  'deductions-management': 'deductions-management',
   statutory: 'compliance-statutory-management',
   'compliance-and-statutory-management': 'compliance-statutory-management',
   'process-payroll': 'payroll-processing',
@@ -619,10 +635,15 @@ const canRunAction = (actionItem: PayrollAction, role: Role, payload: PayrollPay
   return { allowed: true, reason: '' };
 };
 
-function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: any; tone: Tone }) {
+function MetricCard({ label, value, detail, icon: Icon, tone, onClick, active = false }: { label: string; value: string; detail: string; icon: any; tone: Tone; onClick?: () => void; active?: boolean }) {
   const styles = toneStyles[tone];
+  const Component = onClick ? 'button' : 'div';
   return (
-    <div className={`relative overflow-hidden rounded-lg border p-4 ${styles.card}`}>
+    <Component
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-lg border p-4 text-left transition ${styles.card} ${onClick ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/40' : ''} ${active ? 'ring-2 ring-blue-600 ring-offset-2' : ''}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-extrabold uppercase tracking-normal text-slate-600">{label}</p>
@@ -634,17 +655,22 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
         </span>
       </div>
       <div className={`absolute bottom-0 left-0 h-1 w-full ${styles.bar}`} />
-    </div>
+    </Component>
   );
 }
 
-function MiniDashboardCard({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+function MiniDashboardCard({ label, value, tone, onClick, active = false }: { label: string; value: string; tone: Tone; onClick?: () => void; active?: boolean }) {
   const styles = toneStyles[tone];
+  const Component = onClick ? 'button' : 'div';
   return (
-    <div className={`rounded-lg border bg-white p-3 ${styles.card}`}>
+    <Component
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`rounded-lg border bg-white p-3 text-left transition ${styles.card} ${onClick ? 'cursor-pointer hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/40' : ''} ${active ? 'ring-2 ring-blue-600 ring-offset-1' : ''}`}
+    >
       <p className={`text-[10px] font-black uppercase ${styles.text}`}>{label}</p>
       <p className="mt-2 truncate text-lg font-black text-slate-950">{value}</p>
-    </div>
+    </Component>
   );
 }
 
@@ -793,11 +819,15 @@ function FeaturePanel({ tab, section, payload, canViewMoney }: { tab: TabConfig;
 
 function PaySetupWorkspace({ activeTab, payload, canViewMoney }: { activeTab: TabConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
   const records = payload?.records || [];
+  const permanentRows = records.filter((record) => /permanent/i.test(`${record.employmentType} ${record.payrollGroup}`));
+  const lumpSumRows = records.filter((record) => /lump|gross/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`));
+  const dailyRateRows = records.filter((record) => record.isDailyRate || /daily|day/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`));
+  const contractRows = records.filter((record) => /contract/i.test(`${record.employmentType} ${record.payrollGroup}`) && !dailyRateRows.includes(record));
   const categoryRows = [
-    { label: 'Permanent', count: records.filter((record) => /permanent/i.test(`${record.employmentType} ${record.payrollGroup}`)).length, tone: 'blue' as Tone },
-    { label: 'Lumpsum', count: records.filter((record) => /lump|gross/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`)).length, tone: 'violet' as Tone },
-    { label: 'Daily Rate', count: records.filter((record) => record.isDailyRate || /daily|day/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`)).length, tone: 'amber' as Tone },
-    { label: 'Contract', count: records.filter((record) => /contract/i.test(`${record.employmentType} ${record.payrollGroup}`)).length, tone: 'cyan' as Tone },
+    { label: 'Permanent', rows: permanentRows, tone: 'blue' as Tone },
+    { label: 'Lumpsum', rows: lumpSumRows, tone: 'violet' as Tone },
+    { label: 'Daily Rate', rows: dailyRateRows, tone: 'amber' as Tone },
+    { label: 'Contract', rows: contractRows, tone: 'cyan' as Tone },
   ];
   const setupCards = [
     { title: 'Salary Structure', detail: 'Grade bands, pay ranges, and earning profiles.', href: '/hris/payroll/salary-structure', icon: GitBranch, tone: 'blue' as Tone },
@@ -806,6 +836,7 @@ function PaySetupWorkspace({ activeTab, payload, canViewMoney }: { activeTab: Ta
     { title: 'Sage Migration Review', detail: 'Compare migrated Sage payroll setup against HRIS values.', href: '/hris/payroll/sage-migration-review', icon: DatabaseZap, tone: 'amber' as Tone },
   ];
   const issues = (payload?.exceptions || []).filter((item) => /salary|grade|setup|bank|pension|tax|nhf/i.test(item.issue)).slice(0, 5);
+  const readyPct = (rows: PayrollRecord[]) => rows.length ? Math.round((rows.filter((record) => record.payrollStatus === 'Ready').length / rows.length) * 100) : 0;
   return (
     <div className="space-y-4">
       <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
@@ -838,16 +869,18 @@ function PaySetupWorkspace({ activeTab, payload, canViewMoney }: { activeTab: Ta
         })}
       </section>
 
+      <PaySetupCharts payload={payload} records={records} categoryRows={categoryRows} canViewMoney={canViewMoney} />
+
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_0.8fr]">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-black text-slate-950">Employee Category Readiness</h3>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {categoryRows.map((item) => {
-              const ready = records.length ? Math.round((records.filter((record) => record.payrollStatus === 'Ready').length / records.length) * 100) : 0;
+              const ready = readyPct(item.rows);
               return (
                 <div key={item.label} className={`rounded-lg border p-4 ${toneStyles[item.tone].card}`}>
                   <div className="flex items-start justify-between gap-3">
-                    <div><p className="text-sm font-black text-slate-950">{item.label}</p><p className="mt-1 text-xs font-semibold text-slate-600">{number(item.count)} employees</p></div>
+                    <div><p className="text-sm font-black text-slate-950">{item.label}</p><p className="mt-1 text-xs font-semibold text-slate-600">{number(item.rows.length)} employees</p></div>
                     <span className={`rounded-full px-2.5 py-1 text-xs font-black ${toneStyles[item.tone].chip}`}>{ready}% ready</span>
                   </div>
                   <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/80"><div className={`h-full ${toneStyles[item.tone].bar}`} style={{ width: `${ready}%` }} /></div>
@@ -887,6 +920,550 @@ function PaySetupWorkspace({ activeTab, payload, canViewMoney }: { activeTab: Ta
   );
 }
 
+function EarningsWorkspace({ activeTab, payload, canViewMoney }: { activeTab: TabConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
+  const records = payload?.records || [];
+  const dailyRateRows = records.filter((record) => record.isDailyRate || /daily|day/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`));
+  const allowanceRows = records.filter((record) => (record.allowances || 0) > 0);
+  const earningsExceptions = (payload?.exceptions || []).filter((item) => /salary|gross|earning|allowance|overtime|daily|rate|pay amount/i.test(item.issue));
+  const earningCards = [
+    { title: 'Allowances', href: '/hris/payroll/allowances', icon: WalletCards, tone: 'cyan' as Tone, value: money(payload?.summary.allowances, canViewMoney), detail: `${number(allowanceRows.length)} employees with allowance values` },
+    { title: 'Overtime Pay', href: '/hris/payroll/overtime-pay', icon: CalendarClock, tone: 'amber' as Tone, value: number(records.filter((record) => /overtime|ot/i.test(record.exceptions.join(' '))).length), detail: 'Overtime rules, approvals, and payroll impact' },
+    { title: 'Daily Rate Pay', href: '/hris/payroll/daily-rate-pay', icon: Users, tone: 'blue' as Tone, value: number(dailyRateRows.length), detail: 'Attendance-driven daily-rate earnings' },
+    { title: 'Bonus Inputs', href: '/hris/payroll/payroll-processing', icon: Sparkles, tone: 'violet' as Tone, value: number(0), detail: 'Bonus and arrears controls before payroll run' },
+  ];
+  const componentData = [
+    { name: 'Base Pay', value: payload?.summary.basePay || 0, fill: '#2563eb' },
+    { name: 'Allowances', value: payload?.summary.allowances || 0, fill: '#0891b2' },
+  ];
+  const categoryData = payload?.breakdowns.byEmploymentType.slice(0, 6).map((row, index) => ({
+    name: row.label,
+    grossPay: row.grossPay,
+    employees: row.employees,
+    fill: ['#2563eb', '#7c3aed', '#f59e0b', '#0891b2', '#16a34a', '#0f172a'][index % 6],
+  })) || [];
+  const departmentData = payload?.breakdowns.byDepartment.slice(0, 8).map((row) => ({
+    name: row.label.length > 16 ? `${row.label.slice(0, 15)}...` : row.label,
+    grossPay: row.grossPay,
+    allowances: records.filter((record) => record.department === row.label).reduce((sum, record) => sum + (record.allowances || 0), 0),
+    employees: row.employees,
+  })) || [];
+  const exceptionData = [
+    { name: 'High', value: earningsExceptions.filter((item) => item.severity === 'High').length, fill: '#dc2626' },
+    { name: 'Medium', value: earningsExceptions.filter((item) => item.severity === 'Medium').length, fill: '#f59e0b' },
+    { name: 'Low', value: earningsExceptions.filter((item) => item.severity === 'Low').length, fill: '#64748b' },
+  ].filter((row) => row.value > 0);
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('pay') || label.toLowerCase().includes('allowance') || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-cyan-200 bg-cyan-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-cyan-800">Earnings Management</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Control payroll earnings before computation</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Review basic pay, allowances, overtime, daily-rate pay, bonuses, arrears, and earning exceptions from live HRIS payroll records.</p>
+          </div>
+          {activeTab.legacyHref ? (
+            <Link href={activeTab.legacyHref} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">
+              Open {activeTab.label}
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {earningCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <Link key={card.title} href={card.href} className={`rounded-lg border p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[card.tone].card}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{card.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{card.detail}</p>
+                </div>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneStyles[card.tone].icon}`}><Icon className="h-5 w-5" /></span>
+              </div>
+              <p className="mt-4 truncate text-2xl font-black text-slate-950">{card.value}</p>
+              <p className={`mt-2 inline-flex items-center gap-1 text-xs font-black ${toneStyles[card.tone].text}`}>Open detail <ChevronRight className="h-3.5 w-3.5" /></p>
+            </Link>
+          );
+        })}
+      </section>
+
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-4">
+        <ChartShell title="Earnings Mix" detail="Base pay versus allowances" onClick={() => undefined}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={componentData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                {componentData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Pie>
+              <Tooltip formatter={chartTooltip} />
+            </PieChart>
+          </ResponsiveContainer>
+          <ChartLegend rows={componentData.map((row) => ({ label: row.name, value: money(row.value, canViewMoney), color: row.fill }))} />
+        </ChartShell>
+
+        <ChartShell title="Category Earnings" detail="Gross payroll by employee category" onClick={() => undefined}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={categoryData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} height={42} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="grossPay" name="Gross Pay" radius={[5, 5, 0, 0]}>
+                {categoryData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Department Earnings" detail="Top gross exposure by department" onClick={() => undefined}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={departmentData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="grossPay" name="Gross Pay" fill="#0891b2" radius={[0, 5, 5, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Earning Exceptions" detail="Issues affecting earning accuracy" onClick={() => undefined}>
+          {exceptionData.length ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={exceptionData} dataKey="value" nameKey="name" outerRadius={74}>
+                    {exceptionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              <ChartLegend rows={exceptionData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+            </>
+          ) : (
+            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800">No earning exceptions</div>
+          )}
+        </ChartShell>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-sm font-black text-slate-950">Top Earnings Records</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Employee-level gross, base, allowance, and earning profile review.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[900px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                <tr>{['Employee', 'Type', 'Base Pay', 'Allowances', 'Gross Pay', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {records.slice().sort((a, b) => (b.grossPay || 0) - (a.grossPay || 0)).slice(0, 12).map((record) => (
+                  <tr key={record.employeeId} className="hover:bg-slate-50">
+                    <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</p></td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.employmentType}<br /><span className="text-slate-400">{record.isDailyRate ? 'Daily Rate' : record.salaryGrade || 'No grade'}</span></td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.basePay, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.allowances, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">{activeTab.label}</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">{activeTab.description}</p>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {activeTab.items.map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-cyan-700" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Earning Issues</h3>
+            <div className="mt-3 space-y-2">
+              {earningsExceptions.slice(0, 6).map((item) => (
+                <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
+                  <p className="mt-1 text-xs font-semibold text-amber-800">{item.issue}</p>
+                </div>
+              ))}
+              {!earningsExceptions.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-black text-emerald-800">No earning issues detected.</div> : null}
+            </div>
+          </section>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function DeductionsWorkspace({ activeTab, payload, canViewMoney }: { activeTab: TabConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
+  const [deductionView, setDeductionView] = useState<'all' | 'paye' | 'pension' | 'other' | 'issues'>('all');
+  const records = payload?.records || [];
+  const payeTotal = records.reduce((sum, record) => sum + (record.paye || 0), 0);
+  const pensionTotal = records.reduce((sum, record) => sum + (record.pension || 0), 0);
+  const otherTotal = records.reduce((sum, record) => sum + (record.otherDeductions || 0), 0);
+  const grossPay = payload?.summary.grossPay || 0;
+  const deductionIssues = (payload?.exceptions || []).filter((item) => /deduction|paye|tax|pension|nhf|loan|union|cooperative|suspension|refund|statutory/i.test(item.issue));
+  const employeesWithOther = records.filter((record) => (record.otherDeductions || 0) > 0);
+  const employeesWithPaye = records.filter((record) => (record.paye || 0) > 0);
+  const employeesWithPension = records.filter((record) => (record.pension || 0) > 0);
+  const deductionCards = [
+    { id: 'paye' as const, title: 'PAYE Tax', value: money(payeTotal, canViewMoney), detail: `${number(employeesWithPaye.length)} employees with PAYE`, icon: Landmark, tone: 'red' as Tone },
+    { id: 'pension' as const, title: 'Pension EE', value: money(pensionTotal, canViewMoney), detail: `${number(employeesWithPension.length)} employees with pension`, icon: ShieldCheck, tone: 'violet' as Tone },
+    { id: 'other' as const, title: 'NHF, Union, Loans', value: money(otherTotal, canViewMoney), detail: `${number(employeesWithOther.length)} employees with other deductions`, icon: ReceiptText, tone: 'amber' as Tone },
+    { id: 'issues' as const, title: 'Deduction Issues', value: number(deductionIssues.length), detail: 'Rules, setup, and statutory exceptions', icon: AlertTriangle, tone: deductionIssues.length ? 'red' as Tone : 'green' as Tone },
+  ];
+  const deductionMix = [
+    { name: 'PAYE', value: payeTotal, fill: '#dc2626' },
+    { name: 'Pension', value: pensionTotal, fill: '#7c3aed' },
+    { name: 'Other', value: otherTotal, fill: '#f59e0b' },
+  ].filter((row) => row.value > 0);
+  const categoryData = (payload?.breakdowns.byEmploymentType || []).slice(0, 6).map((row, index) => {
+    const rows = records.filter((record) => (record.employmentType || 'Unassigned') === row.label);
+    return {
+      name: row.label,
+      deductions: rows.reduce((sum, record) => sum + (record.deductions || 0), 0),
+      employees: row.employees,
+      fill: ['#dc2626', '#7c3aed', '#f59e0b', '#0891b2', '#2563eb', '#16a34a'][index % 6],
+    };
+  });
+  const departmentData = (payload?.breakdowns.byDepartment || []).slice(0, 8).map((row) => {
+    const rows = records.filter((record) => (record.department || 'Unassigned') === row.label);
+    return {
+      name: row.label.length > 16 ? `${row.label.slice(0, 15)}...` : row.label,
+      deductions: rows.reduce((sum, record) => sum + (record.deductions || 0), 0),
+      paye: rows.reduce((sum, record) => sum + (record.paye || 0), 0),
+      employees: row.employees,
+    };
+  });
+  const issueData = [
+    { name: 'High', value: deductionIssues.filter((item) => item.severity === 'High').length, fill: '#dc2626' },
+    { name: 'Medium', value: deductionIssues.filter((item) => item.severity === 'Medium').length, fill: '#f59e0b' },
+    { name: 'Low', value: deductionIssues.filter((item) => item.severity === 'Low').length, fill: '#64748b' },
+  ].filter((row) => row.value > 0);
+  const visibleRecords = records
+    .filter((record) => {
+      if (deductionView === 'paye') return (record.paye || 0) > 0;
+      if (deductionView === 'pension') return (record.pension || 0) > 0;
+      if (deductionView === 'other') return (record.otherDeductions || 0) > 0;
+      if (deductionView === 'issues') return record.exceptions.some((item) => /deduction|paye|tax|pension|nhf|loan|union|statutory/i.test(item));
+      return true;
+    })
+    .sort((a, b) => (b.deductions || 0) - (a.deductions || 0));
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('deduction') || label.toLowerCase().includes('paye') || label.toLowerCase().includes('pension') || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-violet-800">Deductions Management</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Validate statutory and employee deductions</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Review PAYE, pension, NHF, union dues, loans, other deductions, employee exceptions, and the deduction impact before payroll approval.</p>
+          </div>
+          {activeTab.legacyHref ? (
+            <Link href={activeTab.legacyHref} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">
+              Open {activeTab.label}
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {deductionCards.map((card) => {
+          const Icon = card.icon;
+          const active = deductionView === card.id;
+          return (
+            <button key={card.id} type="button" onClick={() => setDeductionView(active ? 'all' : card.id)} className={`rounded-lg border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[card.tone].card} ${active ? 'ring-2 ring-slate-900 ring-offset-2' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{card.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{card.detail}</p>
+                </div>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneStyles[card.tone].icon}`}><Icon className="h-5 w-5" /></span>
+              </div>
+              <p className="mt-4 truncate text-2xl font-black text-slate-950">{card.value}</p>
+              <p className={`mt-2 text-xs font-black ${toneStyles[card.tone].text}`}>{active ? 'Filtered below' : 'Click to drill down'}</p>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-4">
+        <ChartShell title="Deduction Mix" detail="PAYE, pension, and other deductions" active={deductionView !== 'all'} onClick={() => setDeductionView('all')}>
+          {deductionMix.length ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={deductionMix} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                    {deductionMix.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              <ChartLegend rows={deductionMix.map((row) => ({ label: row.name, value: money(row.value, canViewMoney), color: row.fill }))} />
+            </>
+          ) : (
+            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-700">No deductions available</div>
+          )}
+        </ChartShell>
+
+        <ChartShell title="Category Liability" detail="Deductions by employment type" onClick={() => setDeductionView('all')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={categoryData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} height={42} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="deductions" name="Deductions" radius={[5, 5, 0, 0]}>
+                {categoryData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Department Liability" detail="Highest deduction exposure" onClick={() => setDeductionView('all')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={departmentData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="deductions" name="Deductions" fill="#7c3aed" radius={[0, 5, 5, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Deduction Issues" detail="Exception severity" active={deductionView === 'issues'} onClick={() => setDeductionView('issues')}>
+          {issueData.length ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={issueData} dataKey="value" nameKey="name" outerRadius={74}>
+                    {issueData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              <ChartLegend rows={issueData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+            </>
+          ) : (
+            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800">No deduction issues</div>
+          )}
+        </ChartShell>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Employee Deduction Register</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{deductionView === 'all' ? 'Showing all employee deduction values.' : `Filtered by ${deductionView}.`} {number(visibleRecords.length)} records visible.</p>
+            </div>
+            <button type="button" onClick={() => setDeductionView('all')} className="inline-flex min-h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50">Clear filter</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                <tr>{['Employee', 'Department', 'PAYE', 'Pension', 'Other', 'Total Deductions', 'Net Pay', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visibleRecords.slice(0, 16).map((record) => (
+                  <tr key={record.employeeId} className="hover:bg-slate-50">
+                    <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.salaryGrade || record.payrollGroup}</p></td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.location || 'No location'}</span></td>
+                    <td className="px-4 py-3 text-sm font-black text-red-700">{money(record.paye, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.pension, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-amber-700">{money(record.otherDeductions, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.deductions, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                  </tr>
+                ))}
+                {!visibleRecords.length ? <tr><td colSpan={8} className="px-4 py-6 text-sm font-black text-slate-700">No employee deduction records match this view.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Deduction Controls</h3>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {activeTab.items.map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-violet-700" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Deduction Health</h3>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              <InfoTile label="Deduction to Gross" value={pctFmt.format(grossPay ? ((payeTotal + pensionTotal + otherTotal) / grossPay) * 100 : 0)} detail="Total deductions as a share of gross payroll" tone="violet" />
+              <InfoTile label="PAYE Share" value={pctFmt.format(grossPay ? (payeTotal / grossPay) * 100 : 0)} detail="PAYE as a share of gross payroll" tone="red" />
+              <InfoTile label="Pension Share" value={pctFmt.format(grossPay ? (pensionTotal / grossPay) * 100 : 0)} detail="Pension EE as a share of gross payroll" tone="blue" />
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Issues Requiring Review</h3>
+            <div className="mt-3 space-y-2">
+              {deductionIssues.slice(0, 6).map((item) => (
+                <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
+                  <p className="mt-1 text-xs font-semibold text-amber-800">{item.issue}</p>
+                  <p className="mt-1 text-[11px] font-black uppercase text-slate-500">{item.owner} / {item.severity}</p>
+                </div>
+              ))}
+              {!deductionIssues.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-black text-emerald-800">No deduction issues detected.</div> : null}
+            </div>
+          </section>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function PaySetupCharts({
+  payload,
+  records,
+  categoryRows,
+  canViewMoney,
+}: {
+  payload: PayrollPayload | null;
+  records: PayrollRecord[];
+  categoryRows: { label: string; rows: PayrollRecord[]; tone: Tone }[];
+  canViewMoney: boolean;
+}) {
+  const categoryColors: Record<string, string> = {
+    Permanent: '#2563eb',
+    Lumpsum: '#7c3aed',
+    'Daily Rate': '#f59e0b',
+    Contract: '#0891b2',
+  };
+  const coverageData = [
+    { name: 'Ready', value: payload?.summary.readyEmployees || 0, fill: '#16a34a' },
+    { name: 'Review', value: payload?.summary.reviewEmployees || 0, fill: '#f59e0b' },
+    { name: 'Blocked', value: payload?.summary.blockedEmployees || 0, fill: '#dc2626' },
+  ];
+  const categoryData = categoryRows.map((row) => ({
+    name: row.label,
+    employees: row.rows.length,
+    ready: row.rows.filter((record) => record.payrollStatus === 'Ready').length,
+    grossPay: row.rows.reduce((sum, record) => sum + (record.grossPay || 0), 0),
+    fill: categoryColors[row.label] || '#64748b',
+  }));
+  const gradeMap = new Map<string, { grade: string; employees: number; grossPay: number; exceptions: number }>();
+  records.forEach((record) => {
+    const grade = record.isDailyRate ? 'Daily Rate' : record.salaryGrade || record.salaryStructure || 'Unassigned';
+    const current = gradeMap.get(grade) || { grade, employees: 0, grossPay: 0, exceptions: 0 };
+    current.employees += 1;
+    current.grossPay += record.grossPay || 0;
+    current.exceptions += record.exceptionCount || 0;
+    gradeMap.set(grade, current);
+  });
+  const gradeData = Array.from(gradeMap.values())
+    .sort((a, b) => b.grossPay - a.grossPay)
+    .slice(0, 8)
+    .map((row) => ({ ...row, name: row.grade.length > 14 ? `${row.grade.slice(0, 13)}...` : row.grade }));
+  const exceptionData = [
+    { name: 'High', value: payload?.exceptions?.filter((item) => item.severity === 'High').length || 0, fill: '#dc2626' },
+    { name: 'Medium', value: payload?.exceptions?.filter((item) => item.severity === 'Medium').length || 0, fill: '#f59e0b' },
+    { name: 'Low', value: payload?.exceptions?.filter((item) => item.severity === 'Low').length || 0, fill: '#64748b' },
+  ].filter((row) => row.value > 0);
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('pay') || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+
+  return (
+    <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-4">
+      <ChartShell title="Setup Coverage" detail="Ready, review, and blocked employee setup" onClick={() => undefined}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={coverageData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+              {coverageData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+            </Pie>
+            <Tooltip formatter={chartTooltip} />
+          </PieChart>
+        </ResponsiveContainer>
+        <ChartLegend rows={coverageData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+      </ChartShell>
+
+      <ChartShell title="Employee Categories" detail="Setup population by payroll category" onClick={() => undefined}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={categoryData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+            <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} height={42} />
+            <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+            <Tooltip formatter={chartTooltip} />
+            <Bar dataKey="employees" name="Employees" radius={[5, 5, 0, 0]}>
+              {categoryData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <ChartShell title="Grade Pay Exposure" detail="Top salary grades by gross payroll" onClick={() => undefined}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={gradeData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+            <XAxis type="number" hide />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={86} />
+            <Tooltip formatter={chartTooltip} />
+            <Bar dataKey="grossPay" name="Gross Pay" fill="#16a34a" radius={[0, 5, 5, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <ChartShell title="Setup Exceptions" detail="Exception severity from payroll setup checks" onClick={() => undefined}>
+        {exceptionData.length ? (
+          <>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={exceptionData} dataKey="value" nameKey="name" outerRadius={74}>
+                  {exceptionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                </Pie>
+                <Tooltip formatter={chartTooltip} />
+              </PieChart>
+            </ResponsiveContainer>
+            <ChartLegend rows={exceptionData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+          </>
+        ) : (
+          <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800">No setup exceptions</div>
+        )}
+      </ChartShell>
+    </section>
+  );
+}
+
 function ProcessPayrollWorkspace({
   activeTab,
   payload,
@@ -900,8 +1477,14 @@ function ProcessPayrollWorkspace({
   runAction: (action: string, reason?: string) => void;
   busyAction: string;
 }) {
+  const [processView, setProcessView] = useState<'ready' | 'issues' | 'outputs' | 'audit'>('ready');
   const currentRun = payload?.runs[0] || null;
   const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+  const records = payload?.records || [];
+  const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
+  const issueRows = records.filter((record) => record.payrollStatus !== 'Ready' || record.exceptionCount > 0);
+  const readiness = payload?.summary.payrollEligible ? Math.round(((payload?.summary.readyEmployees || 0) / payload.summary.payrollEligible) * 100) : 0;
+  const canProcess = (payload?.summary.blockedEmployees || 0) === 0 && (payload?.summary.exceptionCount || 0) === 0;
   const steps = [
     { label: 'Validate', detail: 'Check master data and exceptions', action: 'validate-payroll', done: Boolean(currentRun?.validatedAt) || ['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'blue' as Tone },
     { label: 'Run Payroll', detail: 'Compute gross, deductions and net pay', action: 'create-run', done: ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'green' as Tone },
@@ -916,31 +1499,84 @@ function ProcessPayrollWorkspace({
     { label: 'Statutory Schedules', done: Boolean(currentRun?.statutorySchedulesGeneratedAt), icon: FileCheck2 },
     { label: 'Journal Posted', done: Boolean(currentRun?.postedAt), icon: Send },
   ];
+  const readinessData = [
+    { name: 'Ready', value: payload?.summary.readyEmployees || 0, fill: '#16a34a' },
+    { name: 'Review', value: payload?.summary.reviewEmployees || 0, fill: '#f59e0b' },
+    { name: 'Blocked', value: payload?.summary.blockedEmployees || 0, fill: '#dc2626' },
+  ].filter((item) => item.value > 0);
+  const valueData = [
+    { name: 'Gross', value: payload?.summary.grossPay || 0, fill: '#2563eb' },
+    { name: 'Deductions', value: payload?.summary.deductions || 0, fill: '#7c3aed' },
+    { name: 'Net', value: payload?.summary.netPay || 0, fill: '#16a34a' },
+  ];
+  const categoryData = (payload?.breakdowns.byEmploymentType || []).slice(0, 6).map((row, index) => ({
+    name: row.label,
+    employees: row.employees,
+    netPay: row.netPay,
+    fill: ['#2563eb', '#7c3aed', '#f59e0b', '#0891b2', '#16a34a', '#0f172a'][index % 6],
+  }));
+  const outputRows = [
+    { label: 'Payslip Publication', date: currentRun?.payslipsGeneratedAt, owner: currentRun?.payslipsGeneratedBy || 'Payroll Officer', done: Boolean(currentRun?.payslipsGeneratedAt) },
+    { label: 'Bank Schedule', date: currentRun?.bankScheduleGeneratedAt, owner: currentRun?.bankScheduleGeneratedBy || 'Finance', done: Boolean(currentRun?.bankScheduleGeneratedAt) },
+    { label: 'Statutory Schedules', date: currentRun?.statutorySchedulesGeneratedAt, owner: currentRun?.statutorySchedulesGeneratedBy || 'Payroll Officer', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
+    { label: 'Payroll Posting', date: currentRun?.postedAt, owner: currentRun?.postedBy || 'Finance', done: Boolean(currentRun?.postedAt) },
+  ];
+  const visibleRows = processView === 'issues' ? issueRows : processView === 'outputs' ? records.filter((record) => record.payrollStatus === 'Ready').slice(0, 20) : readyRows;
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('pay') || ['Gross', 'Deductions', 'Net'].includes(label) || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+  const runStep = (step: typeof steps[number]) => {
+    if (step.done || busyAction === step.action) return;
+    if (step.action !== 'validate-payroll' && !canProcess && ['create-run', 'submit-run', 'approve-run', 'release-run', 'generate-payslips'].includes(step.action)) {
+      setProcessView('issues');
+      return;
+    }
+    runAction(step.action);
+  };
   return (
     <div className="space-y-4">
       <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-black uppercase text-amber-800">Process Payroll</p>
-            <h3 className="mt-1 text-2xl font-black text-slate-950">Run payroll step by step</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-600">Use this page only for payroll execution: validation, computation, approval, release, posting, and payslip publication.</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Run payroll with controlled gates</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Validate readiness, compute payroll, submit approvals, release outputs, post finance records, and publish payslips from one simple processing desk.</p>
           </div>
-          <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>{status}</span>
+          <div className="flex flex-wrap gap-2">
+            <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>{status}</span>
+            <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${canProcess ? toneStyles.green.chip : toneStyles.red.chip}`}>{canProcess ? 'Ready to process' : 'Issues must be resolved'}</span>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <InfoTile label="Readiness" value={`${number(readiness)}%`} detail={`${number(payload?.summary.readyEmployees)} of ${number(payload?.summary.payrollEligible)} employees ready`} tone={readiness >= 95 ? 'green' : 'amber'} />
+          <InfoTile label="Gross Payroll" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net`} tone="blue" />
+          <InfoTile label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension, statutory and other deductions" tone="violet" />
+          <InfoTile label="Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked`} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
         </div>
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-black text-slate-950">Payroll Run Sequence</h3>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Payroll Run Sequence</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Each action updates the payroll run, audit trail, and workflow status.</p>
+            </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Run: {currentRun?.id || 'Not started'}</span>
+          </div>
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {steps.map((step, index) => (
-              <button key={step.label} type="button" onClick={() => runAction(step.action)} disabled={busyAction === step.action || step.done} className={`rounded-lg border p-4 text-left transition ${step.done ? 'border-emerald-200 bg-emerald-50' : `${toneStyles[step.tone].card} hover:shadow-md`}`}>
+              <button key={step.label} type="button" onClick={() => runStep(step)} disabled={busyAction === step.action || step.done} className={`rounded-lg border p-4 text-left transition ${step.done ? 'border-emerald-200 bg-emerald-50' : `${toneStyles[step.tone].card} hover:shadow-md`} ${!step.done && !canProcess && step.action !== 'validate-payroll' ? 'opacity-75' : ''}`}>
                 <div className="flex items-start justify-between gap-3">
                   <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${step.done ? toneStyles.green.icon : toneStyles[step.tone].icon}`}>{step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{step.done ? 'Done' : 'Open'}</span>
                 </div>
                 <p className="mt-3 text-sm font-black text-slate-950">{step.label}</p>
                 <p className="mt-1 text-xs font-semibold text-slate-600">{step.detail}</p>
+                {!step.done && !canProcess && step.action !== 'validate-payroll' ? <p className="mt-2 text-[11px] font-black text-red-700">Resolve exceptions first</p> : null}
               </button>
             ))}
           </div>
@@ -953,11 +1589,70 @@ function ProcessPayrollWorkspace({
             <InfoTile label="Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked`} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
             <InfoTile label="Next Owner" value={payload?.workflow?.nextOwner || 'Payroll Officer'} detail={payload?.workflow?.approvalStage || activeTab.label} tone="blue" />
           </div>
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-black uppercase text-slate-500">Current Focus</p>
+            <p className="mt-1 text-sm font-black text-slate-950">{activeTab.label}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{activeTab.description}</p>
+          </div>
         </aside>
       </section>
 
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+        <ChartShell title="Payroll Readiness" detail="Ready, review, and blocked employees" active={processView === 'ready'} onClick={() => setProcessView('ready')}>
+          {readinessData.length ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={readinessData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                    {readinessData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              <ChartLegend rows={readinessData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+            </>
+          ) : (
+            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-700">No readiness data</div>
+          )}
+        </ChartShell>
+
+        <ChartShell title="Payroll Value" detail="Gross, deductions, and net pay" active={processView === 'outputs'} onClick={() => setProcessView('outputs')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={valueData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="value" name="Amount" radius={[5, 5, 0, 0]}>
+                {valueData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Category Processing" detail="Employees by payroll category" onClick={() => setProcessView('ready')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={categoryData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="employees" name="Employees" radius={[0, 5, 5, 0]}>
+                {categoryData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+      </section>
+
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-sm font-black text-slate-950">Required Outputs</h3>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Required Outputs</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Release artifacts required before payroll can be closed or posted.</p>
+          </div>
+          <button type="button" onClick={() => setProcessView('outputs')} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">View output details</button>
+        </div>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
           {outputs.map((item) => {
             const Icon = item.icon;
@@ -970,6 +1665,965 @@ function ProcessPayrollWorkspace({
             );
           })}
         </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Payroll Processing Register</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{processView === 'issues' ? 'Records requiring correction before processing.' : 'Payroll-ready employee records for the current run.'}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: 'ready' as const, label: 'Ready' },
+                { id: 'issues' as const, label: 'Issues' },
+                { id: 'outputs' as const, label: 'Outputs' },
+                { id: 'audit' as const, label: 'Audit' },
+              ].map((item) => (
+                <button key={item.id} type="button" onClick={() => setProcessView(item.id)} className={`rounded-lg px-3 py-2 text-xs font-black ${processView === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                <tr>{['Employee', 'Category', 'Gross', 'Deductions', 'Net', 'Status', 'Detail'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {visibleRows.slice(0, 18).map((record) => (
+                  <tr key={record.employeeId} className="hover:bg-slate-50">
+                    <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</p></td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.employmentType || 'Unassigned'}<br /><span className="text-slate-400">{record.payrollGroup || record.salaryGrade || 'No group'}</span></td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.deductions, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-600">{record.exceptions.length ? record.exceptions.slice(0, 2).join('; ') : 'Ready for payroll'}</td>
+                  </tr>
+                ))}
+                {!visibleRows.length ? <tr><td colSpan={7} className="px-4 py-6 text-sm font-black text-slate-700">No records match this processing view.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          {processView === 'outputs' ? (
+            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-black text-slate-950">Output Status</h3>
+              <div className="mt-3 space-y-2">
+                {outputRows.map((row) => (
+                  <div key={row.label} className={`rounded-lg border p-3 ${row.done ? toneStyles.green.card : toneStyles.slate.card}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black text-slate-950">{row.label}</p>
+                        <p className="mt-1 text-xs font-semibold text-slate-600">{row.date ? new Date(row.date).toLocaleString('en-GB') : 'Pending'}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${row.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{row.done ? 'Done' : 'Waiting'}</span>
+                    </div>
+                    <p className="mt-2 text-[11px] font-bold text-slate-500">Owner: {row.owner}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : processView === 'audit' ? (
+            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-black text-slate-950">Audit Trail</h3>
+              <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto">
+                {(payload?.auditTrail || []).slice(0, 10).map((item) => (
+                  <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs font-black text-slate-950">{item.action}</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-600">{item.user} / {item.role}</p>
+                    <p className="mt-1 text-[11px] font-bold text-slate-500">{new Date(item.at).toLocaleString('en-GB')}</p>
+                  </div>
+                ))}
+                {!payload?.auditTrail?.length ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-black text-slate-700">No payroll action has been logged yet.</div> : null}
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-black text-slate-950">Exception Focus</h3>
+              <div className="mt-3 space-y-2">
+                {(payload?.exceptions || []).slice(0, 8).map((item) => (
+                  <div key={item.id} className={`rounded-lg border p-3 ${item.severity === 'High' ? toneStyles.red.card : item.severity === 'Medium' ? toneStyles.amber.card : toneStyles.slate.card}`}>
+                    <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-700">{item.issue}</p>
+                    <p className="mt-1 text-[11px] font-black uppercase text-slate-500">{item.owner} / {item.severity}</p>
+                  </div>
+                ))}
+                {!payload?.exceptions?.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-black text-emerald-800">No processing exceptions detected.</div> : null}
+              </div>
+            </section>
+          )}
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Processing Controls</h3>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {activeTab.items.map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-amber-600" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function StatutoryWorkspace({
+  activeTab,
+  payload,
+  canViewMoney,
+  runAction,
+  busyAction,
+}: {
+  activeTab: TabConfig;
+  payload: PayrollPayload | null;
+  canViewMoney: boolean;
+  runAction: (action: string, reason?: string) => void;
+  busyAction: string;
+}) {
+  const [statutoryView, setStatutoryView] = useState<'overview' | 'paye' | 'pension' | 'schedules' | 'issues'>('overview');
+  const records = payload?.records || [];
+  const currentRun = payload?.runs[0] || null;
+  const payeTotal = records.reduce((sum, record) => sum + (record.paye || 0), 0);
+  const pensionEeTotal = records.reduce((sum, record) => sum + (record.pension || 0), 0);
+  const pensionErTotal = pensionEeTotal ? pensionEeTotal * 1.25 : 0;
+  const otherStatutoryTotal = records.reduce((sum, record) => sum + (record.otherDeductions || 0), 0);
+  const nsitfEstimate = (payload?.summary.grossPay || 0) * 0.01;
+  const itfEstimate = (payload?.summary.grossPay || 0) * 0.01;
+  const statutoryIssues = (payload?.exceptions || []).filter((item) => /paye|tax|pension|nhf|nsitf|itf|statutory|remittance|tin|tax number|pension number/i.test(item.issue));
+  const canGenerateSchedules = ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(currentRun?.status || '');
+  const statutoryCards = [
+    { id: 'paye' as const, title: 'PAYE Liability', value: money(payeTotal, canViewMoney), detail: `${number(records.filter((record) => (record.paye || 0) > 0).length)} employees with PAYE`, icon: Landmark, tone: 'red' as Tone },
+    { id: 'pension' as const, title: 'Pension Liability', value: money(pensionEeTotal + pensionErTotal, canViewMoney), detail: `${money(pensionEeTotal, canViewMoney)} EE / ${money(pensionErTotal, canViewMoney)} ER`, icon: ShieldCheck, tone: 'violet' as Tone },
+    { id: 'schedules' as const, title: 'Schedules', value: currentRun?.statutorySchedulesGeneratedAt ? 'Generated' : 'Pending', detail: currentRun?.statutorySchedulesGeneratedAt ? new Date(currentRun.statutorySchedulesGeneratedAt).toLocaleString('en-GB') : 'Awaiting approved payroll', icon: FileCheck2, tone: currentRun?.statutorySchedulesGeneratedAt ? 'green' as Tone : 'amber' as Tone },
+    { id: 'issues' as const, title: 'Compliance Issues', value: number(statutoryIssues.length), detail: 'Tax, pension, NHF, NSITF, ITF setup checks', icon: AlertTriangle, tone: statutoryIssues.length ? 'red' as Tone : 'green' as Tone },
+  ];
+  const statutoryMix = [
+    { name: 'PAYE', value: payeTotal, fill: '#dc2626' },
+    { name: 'Pension EE', value: pensionEeTotal, fill: '#7c3aed' },
+    { name: 'Pension ER', value: pensionErTotal, fill: '#2563eb' },
+    { name: 'Other / NHF', value: otherStatutoryTotal, fill: '#f59e0b' },
+    { name: 'NSITF Estimate', value: nsitfEstimate, fill: '#0891b2' },
+    { name: 'ITF Estimate', value: itfEstimate, fill: '#16a34a' },
+  ].filter((row) => row.value > 0);
+  const departmentData = (payload?.breakdowns.byDepartment || []).slice(0, 8).map((row) => {
+    const departmentRows = records.filter((record) => (record.department || 'Unassigned') === row.label);
+    return {
+      name: row.label.length > 16 ? `${row.label.slice(0, 15)}...` : row.label,
+      paye: departmentRows.reduce((sum, record) => sum + (record.paye || 0), 0),
+      pension: departmentRows.reduce((sum, record) => sum + (record.pension || 0), 0),
+      employees: row.employees,
+    };
+  });
+  const severityData = [
+    { name: 'High', value: statutoryIssues.filter((item) => item.severity === 'High').length, fill: '#dc2626' },
+    { name: 'Medium', value: statutoryIssues.filter((item) => item.severity === 'Medium').length, fill: '#f59e0b' },
+    { name: 'Low', value: statutoryIssues.filter((item) => item.severity === 'Low').length, fill: '#64748b' },
+  ].filter((row) => row.value > 0);
+  const scheduleRows = [
+    { label: 'PAYE Schedule', amount: payeTotal, owner: 'Payroll Officer', due: 'Monthly remittance', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
+    { label: 'Pension Schedule', amount: pensionEeTotal + pensionErTotal, owner: 'Payroll / Finance', due: 'Monthly remittance', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
+    { label: 'NHF Schedule', amount: otherStatutoryTotal, owner: 'Payroll Officer', due: 'Employee setup dependent', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
+    { label: 'NSITF Schedule', amount: nsitfEstimate, owner: 'HR / Finance', due: 'Employer statutory', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
+    { label: 'ITF Schedule', amount: itfEstimate, owner: 'Finance', due: 'Employer statutory', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
+  ];
+  const visibleRecords = records
+    .filter((record) => {
+      if (statutoryView === 'paye') return (record.paye || 0) > 0;
+      if (statutoryView === 'pension') return (record.pension || 0) > 0;
+      if (statutoryView === 'issues') return record.exceptions.some((issue) => /paye|tax|pension|nhf|nsitf|itf|statutory/i.test(issue));
+      return true;
+    })
+    .sort((a, b) => ((b.paye || 0) + (b.pension || 0)) - ((a.paye || 0) + (a.pension || 0)));
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('paye') || label.toLowerCase().includes('pension') || label.toLowerCase().includes('estimate') || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-red-800">Statutory Compliance</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Control PAYE, pension, NHF, NSITF and ITF schedules</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Generate statutory schedules from approved payroll values, review remittance exposure, verify setup exceptions, and keep compliance evidence audit-ready.</p>
+          </div>
+          <button type="button" onClick={() => runAction('generate-statutory-schedules')} disabled={busyAction === 'generate-statutory-schedules' || !canGenerateSchedules} className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-3 text-xs font-black transition ${canGenerateSchedules ? 'bg-slate-900 text-white hover:bg-slate-800' : 'cursor-not-allowed bg-slate-100 text-slate-400'}`}>
+            <FileCheck2 className="h-4 w-4" />
+            {busyAction === 'generate-statutory-schedules' ? 'Generating...' : 'Generate Schedules'}
+          </button>
+        </div>
+        {!canGenerateSchedules ? <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Payroll approval is required before statutory schedules can be generated.</p> : null}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {statutoryCards.map((card) => {
+          const Icon = card.icon;
+          const active = statutoryView === card.id;
+          return (
+            <button key={card.id} type="button" onClick={() => setStatutoryView(active ? 'overview' : card.id)} className={`rounded-lg border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[card.tone].card} ${active ? 'ring-2 ring-slate-900 ring-offset-2' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{card.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{card.detail}</p>
+                </div>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneStyles[card.tone].icon}`}><Icon className="h-5 w-5" /></span>
+              </div>
+              <p className="mt-4 truncate text-2xl font-black text-slate-950">{card.value}</p>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+        <ChartShell title="Statutory Mix" detail="PAYE, pension, NHF/other, NSITF and ITF" active={statutoryView === 'overview'} onClick={() => setStatutoryView('overview')}>
+          {statutoryMix.length ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={statutoryMix} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
+                    {statutoryMix.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              <ChartLegend rows={statutoryMix.map((row) => ({ label: row.name, value: money(row.value, canViewMoney), color: row.fill }))} />
+            </>
+          ) : (
+            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-700">No statutory values available</div>
+          )}
+        </ChartShell>
+
+        <ChartShell title="Department Statutory Exposure" detail="PAYE and pension by department" onClick={() => setStatutoryView('overview')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={departmentData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="paye" name="PAYE" stackId="a" fill="#dc2626" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="pension" name="Pension" stackId="a" fill="#7c3aed" radius={[0, 5, 5, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Compliance Issues" detail="Statutory exception severity" active={statutoryView === 'issues'} onClick={() => setStatutoryView('issues')}>
+          {severityData.length ? (
+            <>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={severityData} dataKey="value" nameKey="name" outerRadius={74}>
+                    {severityData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+              <ChartLegend rows={severityData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+            </>
+          ) : (
+            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800">No statutory issues</div>
+          )}
+        </ChartShell>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Statutory Schedule Register</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">PAYE, pension, NHF, NSITF, and ITF schedule readiness for the payroll period.</p>
+            </div>
+            <button type="button" onClick={() => setStatutoryView('schedules')} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">Review schedules</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[840px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                <tr>{['Schedule', 'Amount', 'Owner', 'Due / Basis', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {scheduleRows.map((row) => (
+                  <tr key={row.label} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-sm font-black text-slate-950">{row.label}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(row.amount, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{row.owner}</td>
+                    <td className="px-4 py-3 text-xs font-semibold text-slate-600">{row.due}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${row.done ? toneStyles.green.chip : toneStyles.amber.chip}`}>{row.done ? 'Generated' : 'Pending'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Compliance Controls</h3>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {activeTab.items.map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-red-700" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Statutory Issues</h3>
+            <div className="mt-3 space-y-2">
+              {statutoryIssues.slice(0, 6).map((item) => (
+                <div key={item.id} className={`rounded-lg border p-3 ${item.severity === 'High' ? toneStyles.red.card : item.severity === 'Medium' ? toneStyles.amber.card : toneStyles.slate.card}`}>
+                  <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-700">{item.issue}</p>
+                  <p className="mt-1 text-[11px] font-black uppercase text-slate-500">{item.owner} / {item.severity}</p>
+                </div>
+              ))}
+              {!statutoryIssues.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-black text-emerald-800">No statutory compliance issues detected.</div> : null}
+            </div>
+          </section>
+        </aside>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Employee Statutory Detail</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">{number(visibleRecords.length)} records visible for the selected statutory view.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'overview' as const, label: 'All' },
+              { id: 'paye' as const, label: 'PAYE' },
+              { id: 'pension' as const, label: 'Pension' },
+              { id: 'issues' as const, label: 'Issues' },
+            ].map((item) => (
+              <button key={item.id} type="button" onClick={() => setStatutoryView(item.id)} className={`rounded-lg px-3 py-2 text-xs font-black ${statutoryView === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[1000px] w-full text-left">
+            <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+              <tr>{['Employee', 'Department', 'PAYE', 'Pension EE', 'Pension ER Est.', 'Other / NHF', 'Gross', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visibleRecords.slice(0, 18).map((record) => (
+                <tr key={record.employeeId} className="hover:bg-slate-50">
+                  <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.salaryGrade || record.payrollGroup}</p></td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.location || 'No location'}</span></td>
+                  <td className="px-4 py-3 text-sm font-black text-red-700">{money(record.paye, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.pension, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-blue-700">{money((record.pension || 0) * 1.25, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-amber-700">{money(record.otherDeductions, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
+                  <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                </tr>
+              ))}
+              {!visibleRecords.length ? <tr><td colSpan={8} className="px-4 py-6 text-sm font-black text-slate-700">No statutory records match this view.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BankFinanceWorkspace({
+  activeTab,
+  payload,
+  canViewMoney,
+  runAction,
+  busyAction,
+}: {
+  activeTab: TabConfig;
+  payload: PayrollPayload | null;
+  canViewMoney: boolean;
+  runAction: (action: string, reason?: string) => void;
+  busyAction: string;
+}) {
+  const [financeView, setFinanceView] = useState<'payments' | 'bank-file' | 'journal' | 'reconciliation' | 'issues'>('payments');
+  const records = payload?.records || [];
+  const currentRun = payload?.runs[0] || null;
+  const netPay = payload?.summary.netPay || 0;
+  const grossPay = payload?.summary.grossPay || 0;
+  const deductions = payload?.summary.deductions || 0;
+  const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
+  const issueRows = records.filter((record) => record.payrollStatus !== 'Ready' || record.exceptionCount > 0 || record.exceptions.some((issue) => /bank|account|payment|finance|journal|gl|cost/i.test(issue)));
+  const canGenerateBankSchedule = ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(currentRun?.status || '');
+  const canPostJournal = ['Released', 'Locked', 'Published'].includes(currentRun?.status || '') || Boolean(currentRun?.bankScheduleGeneratedAt);
+  const financeCards = [
+    { id: 'payments' as const, title: 'Payment Value', value: money(netPay, canViewMoney), detail: `${number(readyRows.length)} payroll-ready employees`, icon: Banknote, tone: 'green' as Tone },
+    { id: 'bank-file' as const, title: 'Bank Schedule', value: currentRun?.bankScheduleGeneratedAt ? 'Generated' : 'Pending', detail: currentRun?.bankScheduleGeneratedAt ? new Date(currentRun.bankScheduleGeneratedAt).toLocaleString('en-GB') : 'Requires approved payroll', icon: CreditCard, tone: currentRun?.bankScheduleGeneratedAt ? 'green' as Tone : 'amber' as Tone },
+    { id: 'journal' as const, title: 'Payroll Journal', value: currentRun?.postedAt ? 'Posted' : 'Not Posted', detail: currentRun?.postedAt ? new Date(currentRun.postedAt).toLocaleString('en-GB') : 'Awaiting finance posting', icon: Landmark, tone: currentRun?.postedAt ? 'green' as Tone : 'slate' as Tone },
+    { id: 'issues' as const, title: 'Finance Issues', value: number(issueRows.length), detail: 'Bank, payment, journal, and reconciliation checks', icon: AlertTriangle, tone: issueRows.length ? 'red' as Tone : 'green' as Tone },
+  ];
+  const valueData = [
+    { name: 'Gross', value: grossPay, fill: '#2563eb' },
+    { name: 'Deductions', value: deductions, fill: '#7c3aed' },
+    { name: 'Net Pay', value: netPay, fill: '#16a34a' },
+  ];
+  const departmentData = (payload?.breakdowns.byDepartment || []).slice(0, 8).map((row) => ({
+    name: row.label.length > 16 ? `${row.label.slice(0, 15)}...` : row.label,
+    netPay: row.netPay,
+    grossPay: row.grossPay,
+    employees: row.employees,
+  }));
+  const locationRows = groupPayrollRows(records, 'location').slice(0, 8);
+  const locationData = locationRows.map((row, index) => ({
+    name: row.label.length > 16 ? `${row.label.slice(0, 15)}...` : row.label,
+    netPay: row.netPay,
+    employees: row.employees,
+    fill: ['#0f172a', '#2563eb', '#0891b2', '#16a34a', '#f59e0b', '#7c3aed', '#dc2626', '#64748b'][index % 8],
+  }));
+  const bankBatches = [
+    { label: 'Main Salary Batch', employees: readyRows.length, value: netPay, status: currentRun?.bankScheduleGeneratedAt ? 'Generated' : 'Pending', owner: 'Finance Manager' },
+    { label: 'Statutory Remittance Batch', employees: records.length, value: deductions, status: currentRun?.statutorySchedulesGeneratedAt ? 'Ready' : 'Waiting', owner: 'Payroll / Finance' },
+    { label: 'Journal Posting Batch', employees: records.length, value: grossPay, status: currentRun?.postedAt ? 'Posted' : 'Not Posted', owner: 'Finance Controller' },
+  ];
+  const outputRows = [
+    { label: 'Bank Schedule Generated', done: Boolean(currentRun?.bankScheduleGeneratedAt), date: currentRun?.bankScheduleGeneratedAt, owner: currentRun?.bankScheduleGeneratedBy || 'Finance Manager' },
+    { label: 'Bank File Exported', done: Boolean(currentRun?.bankScheduleGeneratedAt), date: currentRun?.bankScheduleGeneratedAt, owner: 'Finance Officer' },
+    { label: 'Payroll Journal Posted', done: Boolean(currentRun?.postedAt), date: currentRun?.postedAt, owner: currentRun?.postedBy || 'Finance Controller' },
+    { label: 'Payment Reconciled', done: ['Posted', 'Closed'].includes(currentRun?.status || ''), date: currentRun?.postedAt, owner: 'Finance / Audit' },
+  ];
+  const visibleRows = financeView === 'issues' ? issueRows : readyRows.length ? readyRows : records;
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('pay') || label.toLowerCase().includes('gross') || label.toLowerCase().includes('deduction') || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+  const runFinanceAction = (actionId: string) => {
+    if (actionId === 'generate-bank-schedule' && !canGenerateBankSchedule) {
+      setFinanceView('issues');
+      return;
+    }
+    if (actionId === 'post-run' && !canPostJournal) {
+      setFinanceView('journal');
+      return;
+    }
+    runAction(actionId);
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-slate-300 bg-slate-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-slate-700">Bank & Finance</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Control payroll payments, journals and reconciliation</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Generate bank schedules, export payment batches, post payroll journals, monitor GL allocation, and reconcile finance outputs with payroll approvals.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => runFinanceAction('generate-bank-schedule')} disabled={busyAction === 'generate-bank-schedule' || !canGenerateBankSchedule} className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-black ${canGenerateBankSchedule ? 'bg-slate-900 text-white hover:bg-slate-800' : 'cursor-not-allowed bg-slate-100 text-slate-400'}`}>
+              <CreditCard className="h-4 w-4" />
+              {busyAction === 'generate-bank-schedule' ? 'Generating...' : 'Generate Bank Schedule'}
+            </button>
+            <button type="button" onClick={() => runFinanceAction('post-run')} disabled={busyAction === 'post-run' || !canPostJournal} className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-black ${canPostJournal ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'cursor-not-allowed bg-slate-100 text-slate-400'}`}>
+              <Send className="h-4 w-4" />
+              {busyAction === 'post-run' ? 'Posting...' : 'Post Journal'}
+            </button>
+          </div>
+        </div>
+        {!canGenerateBankSchedule ? <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Payroll approval is required before finance can generate the bank payment schedule.</p> : null}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {financeCards.map((card) => {
+          const Icon = card.icon;
+          const active = financeView === card.id;
+          return (
+            <button key={card.id} type="button" onClick={() => setFinanceView(active ? 'payments' : card.id)} className={`rounded-lg border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[card.tone].card} ${active ? 'ring-2 ring-slate-900 ring-offset-2' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{card.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{card.detail}</p>
+                </div>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneStyles[card.tone].icon}`}><Icon className="h-5 w-5" /></span>
+              </div>
+              <p className="mt-4 truncate text-2xl font-black text-slate-950">{card.value}</p>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+        <ChartShell title="Payroll Value Flow" detail="Gross to deductions to net payment" active={financeView === 'payments'} onClick={() => setFinanceView('payments')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={valueData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="value" name="Amount" radius={[5, 5, 0, 0]}>
+                {valueData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Department Payment Exposure" detail="Net payroll by department" onClick={() => setFinanceView('payments')}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={departmentData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="netPay" name="Net Pay" fill="#16a34a" radius={[0, 5, 5, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title="Location Payment Exposure" detail="Bank payment value by site" onClick={() => setFinanceView('payments')}>
+          <div className="grid h-full min-h-0 grid-rows-[1fr_auto] gap-2 overflow-hidden">
+            <div className="min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={locationData} dataKey="netPay" nameKey="name" innerRadius={44} outerRadius={66} paddingAngle={2}>
+                    {locationData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={chartTooltip} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid max-h-16 grid-cols-1 gap-1 overflow-hidden">
+              {locationData.slice(0, 3).map((row) => (
+                <div key={row.name} className="flex min-w-0 items-center justify-between gap-2 text-[11px] font-bold text-slate-600">
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.fill }} />
+                    <span className="truncate">{row.name}</span>
+                  </span>
+                  <span className="shrink-0 font-black text-slate-900">{money(row.netPay, canViewMoney)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </ChartShell>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Finance Batch Control</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Payment, statutory remittance, and journal batches generated from approved payroll data.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { id: 'payments' as const, label: 'Payments' },
+                { id: 'bank-file' as const, label: 'Bank File' },
+                { id: 'journal' as const, label: 'Journal' },
+                { id: 'reconciliation' as const, label: 'Reconciliation' },
+                { id: 'issues' as const, label: 'Issues' },
+              ].map((item) => (
+                <button key={item.id} type="button" onClick={() => setFinanceView(item.id)} className={`rounded-lg px-3 py-2 text-xs font-black ${financeView === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[860px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                <tr>{['Batch', 'Employees', 'Value', 'Owner', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {bankBatches.map((row) => (
+                  <tr key={row.label} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 text-sm font-black text-slate-950">{row.label}</td>
+                    <td className="px-4 py-3 text-sm font-bold text-slate-700">{number(row.employees)}</td>
+                    <td className="px-4 py-3 text-sm font-black text-slate-900">{money(row.value, canViewMoney)}</td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{row.owner}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${/generated|ready|posted/i.test(row.status) ? toneStyles.green.chip : toneStyles.amber.chip}`}>{row.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Finance Output Status</h3>
+            <div className="mt-3 space-y-2">
+              {outputRows.map((row) => (
+                <div key={row.label} className={`rounded-lg border p-3 ${row.done ? toneStyles.green.card : toneStyles.slate.card}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black text-slate-950">{row.label}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-600">{row.date ? new Date(row.date).toLocaleString('en-GB') : 'Pending'}</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${row.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{row.done ? 'Done' : 'Waiting'}</span>
+                  </div>
+                  <p className="mt-2 text-[11px] font-bold text-slate-500">Owner: {row.owner}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Control Coverage</h3>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {activeTab.items.map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-slate-700" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-4">
+          <h3 className="text-sm font-black text-slate-950">Employee Payment Register</h3>
+          <p className="mt-1 text-xs font-semibold text-slate-500">{financeView === 'issues' ? 'Records requiring payment or finance review.' : 'Payroll-ready employee payment lines for bank schedule generation.'}</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[1040px] w-full text-left">
+            <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+              <tr>{['Employee', 'Department / Location', 'Gross', 'Deductions', 'Net Payment', 'Payment Type', 'Status', 'Finance Note'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visibleRows.slice(0, 18).map((record) => (
+                <tr key={record.employeeId} className="hover:bg-slate-50">
+                  <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.salaryGrade || record.payrollGroup}</p></td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.location || 'No location'}</span></td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.deductions, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.paymentType || 'Cash'}<br /><span className="text-slate-400">{record.payCurrency || 'NGN'}</span></td>
+                  <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                  <td className="px-4 py-3 text-xs font-semibold text-slate-600">{record.exceptions.length ? record.exceptions.slice(0, 2).join('; ') : currentRun?.bankScheduleGeneratedAt ? 'Included in bank schedule' : 'Ready for schedule'}</td>
+                </tr>
+              ))}
+              {!visibleRows.length ? <tr><td colSpan={8} className="px-4 py-6 text-sm font-black text-slate-700">No finance records match this view.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReportsWorkspace({ activeTab, payload, canViewMoney }: { activeTab: TabConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
+  const [activeReport, setActiveReport] = useState('payroll-register');
+  const [groupBy, setGroupBy] = useState<'department' | 'employmentType' | 'payrollGroup' | 'location'>('department');
+  const [reportStatus, setReportStatus] = useState<'All' | 'Ready' | 'Review' | 'Blocked'>('All');
+  const [selectedColumns, setSelectedColumns] = useState<Record<string, boolean>>({
+    gross: true,
+    deductions: true,
+    net: true,
+    paye: true,
+    pension: true,
+    status: true,
+  });
+  const records = payload?.records || [];
+  const reportCatalog = [
+    { id: 'payroll-summary', title: 'Payroll Summary', detail: 'Period totals, readiness, exceptions, approvals and values.', icon: FileBarChart, tone: 'blue' as Tone },
+    { id: 'payroll-register', title: 'Payroll Register', detail: 'Employee-level gross, deductions, net pay and status.', icon: ClipboardCheck, tone: 'green' as Tone },
+    { id: 'salary-analysis', title: 'Salary Analysis', detail: 'Grade, category, department and gross pay analysis.', icon: TrendingUp, tone: 'violet' as Tone },
+    { id: 'tax-report', title: 'PAYE Report', detail: 'PAYE schedule, tax exposure and employee tax lines.', icon: Landmark, tone: 'red' as Tone },
+    { id: 'pension-report', title: 'Pension Report', detail: 'Employee and employer pension schedule analysis.', icon: ShieldCheck, tone: 'cyan' as Tone },
+    { id: 'deduction-report', title: 'Deduction Report', detail: 'PAYE, pension, NHF, union, loans and other deductions.', icon: ReceiptText, tone: 'amber' as Tone },
+    { id: 'bank-payment-report', title: 'Bank Payment Report', detail: 'Net payment values, bank schedule and finance readiness.', icon: CreditCard, tone: 'slate' as Tone },
+    { id: 'compliance-report', title: 'Compliance Report', detail: 'PAYE, pension, NHF, NSITF, ITF and statutory readiness.', icon: ShieldCheck, tone: 'red' as Tone },
+    { id: 'audit-report', title: 'Audit Report', detail: 'Actions, approvals, exports, modifications and workflow evidence.', icon: FileCheck2, tone: 'blue' as Tone },
+    { id: 'executive-analytics', title: 'Executive Analytics', detail: 'Visual payroll KPIs, category trends and exception posture.', icon: BarChart3, tone: 'violet' as Tone },
+  ];
+  const reportPresets: Record<string, { groupBy: typeof groupBy; columns: Record<string, boolean>; status?: typeof reportStatus }> = {
+    'payroll-summary': { groupBy: 'department', columns: { gross: true, deductions: true, net: true, paye: false, pension: false, status: true } },
+    'payroll-register': { groupBy: 'department', columns: { gross: true, deductions: true, net: true, paye: true, pension: true, status: true } },
+    'salary-analysis': { groupBy: 'payrollGroup', columns: { gross: true, deductions: false, net: true, paye: false, pension: false, status: true } },
+    'tax-report': { groupBy: 'department', columns: { gross: true, deductions: false, net: false, paye: true, pension: false, status: true } },
+    'pension-report': { groupBy: 'employmentType', columns: { gross: true, deductions: false, net: false, paye: false, pension: true, status: true } },
+    'deduction-report': { groupBy: 'department', columns: { gross: false, deductions: true, net: true, paye: true, pension: true, status: true } },
+    'bank-payment-report': { groupBy: 'location', columns: { gross: false, deductions: false, net: true, paye: false, pension: false, status: true }, status: 'Ready' },
+    'compliance-report': { groupBy: 'department', columns: { gross: true, deductions: true, net: false, paye: true, pension: true, status: true } },
+    'audit-report': { groupBy: 'department', columns: { gross: false, deductions: false, net: false, paye: false, pension: false, status: true } },
+    'executive-analytics': { groupBy: 'employmentType', columns: { gross: true, deductions: true, net: true, paye: false, pension: false, status: true } },
+  };
+  const selectReport = (id: string) => {
+    setActiveReport(id);
+    const preset = reportPresets[id];
+    if (!preset) return;
+    setGroupBy(preset.groupBy);
+    setSelectedColumns(preset.columns);
+    if (preset.status) setReportStatus(preset.status);
+  };
+  const filteredRecords = records.filter((record) => reportStatus === 'All' || record.payrollStatus === reportStatus);
+  const groupField = groupBy === 'employmentType' ? 'employmentType' : groupBy;
+  const groupedRows = groupPayrollRows(filteredRecords, groupField as keyof PayrollRecord).slice(0, 10);
+  const activeMeta = reportCatalog.find((item) => item.id === activeReport) || reportCatalog[1];
+  const payeTotal = filteredRecords.reduce((sum, record) => sum + (record.paye || 0), 0);
+  const pensionTotal = filteredRecords.reduce((sum, record) => sum + (record.pension || 0), 0);
+  const otherTotal = filteredRecords.reduce((sum, record) => sum + (record.otherDeductions || 0), 0);
+  const reportValueData = [
+    { name: 'Gross', value: filteredRecords.reduce((sum, record) => sum + (record.grossPay || 0), 0), fill: '#2563eb' },
+    { name: 'Deductions', value: filteredRecords.reduce((sum, record) => sum + (record.deductions || 0), 0), fill: '#7c3aed' },
+    { name: 'Net', value: filteredRecords.reduce((sum, record) => sum + (record.netPay || 0), 0), fill: '#16a34a' },
+  ];
+  const deductionData = [
+    { name: 'PAYE', value: payeTotal, fill: '#dc2626' },
+    { name: 'Pension', value: pensionTotal, fill: '#7c3aed' },
+    { name: 'Other', value: otherTotal, fill: '#f59e0b' },
+  ].filter((row) => row.value > 0);
+  const statusData = [
+    { name: 'Ready', value: filteredRecords.filter((record) => record.payrollStatus === 'Ready').length, fill: '#16a34a' },
+    { name: 'Review', value: filteredRecords.filter((record) => record.payrollStatus === 'Review').length, fill: '#f59e0b' },
+    { name: 'Blocked', value: filteredRecords.filter((record) => record.payrollStatus === 'Blocked').length, fill: '#dc2626' },
+  ].filter((row) => row.value > 0);
+  const exportReport = (format: 'csv' | 'xls') => {
+    const params = new URLSearchParams({ format, report: activeReport, groupBy, status: reportStatus });
+    window.location.href = `/api/hris/payroll-management?${params.toString()}`;
+  };
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('pay') || ['Gross', 'Deductions', 'Net', 'PAYE', 'Pension', 'Other'].includes(label) || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+  const reportFocus = {
+    'payroll-summary': { label: 'Report Focus', value: 'Executive totals', detail: 'Period totals, status posture, and readiness overview.' },
+    'payroll-register': { label: 'Report Focus', value: 'Employee register', detail: 'Employee-by-employee payroll values and processing status.' },
+    'salary-analysis': { label: 'Report Focus', value: 'Salary exposure', detail: 'Gross pay distribution by grade, group, and employee category.' },
+    'tax-report': { label: 'Report Focus', value: 'PAYE schedule', detail: 'Employee PAYE values for tax review and remittance.' },
+    'pension-report': { label: 'Report Focus', value: 'Pension schedule', detail: 'Employee pension deductions and employer estimate.' },
+    'deduction-report': { label: 'Report Focus', value: 'Deduction schedule', detail: 'PAYE, pension, NHF, union dues, loans, and other deductions.' },
+    'bank-payment-report': { label: 'Report Focus', value: 'Bank payment', detail: 'Net payment lines ready for bank schedule and payment file.' },
+    'compliance-report': { label: 'Report Focus', value: 'Compliance evidence', detail: 'Statutory readiness, remittance values, and exception posture.' },
+    'audit-report': { label: 'Report Focus', value: 'Audit trail', detail: 'Payroll status, exceptions, workflow controls, and evidence pack.' },
+    'executive-analytics': { label: 'Report Focus', value: 'Executive dashboard', detail: 'High-level payroll value, risk, and category analytics.' },
+  }[activeReport] || { label: 'Report Focus', value: 'Payroll report', detail: activeMeta.detail };
+  const previewRows = filteredRecords
+    .slice()
+    .sort((a, b) => {
+      if (activeReport === 'tax-report') return (b.paye || 0) - (a.paye || 0);
+      if (activeReport === 'pension-report') return (b.pension || 0) - (a.pension || 0);
+      if (activeReport === 'deduction-report' || activeReport === 'compliance-report') return (b.deductions || 0) - (a.deductions || 0);
+      if (activeReport === 'salary-analysis') return (b.grossPay || 0) - (a.grossPay || 0);
+      if (activeReport === 'audit-report') return (b.exceptionCount || 0) - (a.exceptionCount || 0);
+      return (b.netPay || 0) - (a.netPay || 0);
+    })
+    .slice(0, 18);
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-blue-800">Payroll Reports & Analytics</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Build, preview and export payroll reports</h3>
+            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Standard reports, executive analytics, statutory schedules, payroll registers, custom columns, grouping, filtering, and formatted Excel/CSV exports from live HRIS payroll data.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => exportReport('xls')} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-black text-white hover:bg-emerald-700"><FileSpreadsheet className="h-4 w-4" /> Export Excel</button>
+            <button type="button" onClick={() => exportReport('csv')} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800"><Download className="h-4 w-4" /> Export CSV</button>
+            <button type="button" onClick={() => window.print()} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50"><Printer className="h-4 w-4" /> Print</button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {reportCatalog.map((report) => {
+          const Icon = report.icon;
+          const active = activeReport === report.id;
+          return (
+            <button key={report.id} type="button" onClick={() => selectReport(report.id)} className={`rounded-lg border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[report.tone].card} ${active ? 'border-slate-950 ring-2 ring-slate-900 ring-offset-2' : ''}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{report.title}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{report.detail}</p>
+                </div>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${toneStyles[report.tone].icon}`}><Icon className="h-5 w-5" /></span>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${active ? 'bg-slate-950 text-white' : toneStyles[report.tone].chip}`}>{active ? 'Selected' : 'Click to view'}</span>
+                <ChevronRight className={`h-4 w-4 ${active ? 'text-slate-950' : 'text-slate-400'}`} />
+              </div>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase text-blue-700">Selected Report</p>
+              <h3 className="mt-1 text-xl font-black text-slate-950">{activeMeta.title}</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{activeMeta.detail}</p>
+            </div>
+            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">{number(filteredRecords.length)} records in preview</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+            <InfoTile label={reportFocus.label} value={reportFocus.value} detail={reportFocus.detail} tone={activeMeta.tone} />
+            <InfoTile label={activeReport === 'tax-report' ? 'PAYE' : activeReport === 'pension-report' ? 'Pension' : activeReport === 'bank-payment-report' ? 'Net Payment' : 'Gross'} value={activeReport === 'tax-report' ? money(payeTotal, canViewMoney) : activeReport === 'pension-report' ? money(pensionTotal, canViewMoney) : activeReport === 'bank-payment-report' ? money(reportValueData[2].value, canViewMoney) : money(reportValueData[0].value, canViewMoney)} detail="Primary report amount" tone="blue" />
+            <InfoTile label="Records" value={number(filteredRecords.length)} detail={`${reportStatus} status filter`} tone="green" />
+            <InfoTile label="Exceptions" value={number(filteredRecords.reduce((sum, record) => sum + (record.exceptionCount || 0), 0))} detail="Visible exception count" tone={filteredRecords.some((record) => record.exceptionCount) ? 'red' : 'green'} />
+          </div>
+        </div>
+
+        <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Custom Report Builder</h3>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-1">
+            <label className="grid gap-1 text-xs font-black text-slate-600">Group By
+              <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as typeof groupBy)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 outline-none">
+                <option value="department">Department</option>
+                <option value="employmentType">Employment Type</option>
+                <option value="payrollGroup">Payroll Group</option>
+                <option value="location">Location</option>
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-black text-slate-600">Status
+              <select value={reportStatus} onChange={(event) => setReportStatus(event.target.value as typeof reportStatus)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 outline-none">
+                <option value="All">All payroll states</option>
+                <option value="Ready">Ready</option>
+                <option value="Review">Review</option>
+                <option value="Blocked">Blocked</option>
+              </select>
+            </label>
+          </div>
+          <div className="mt-4">
+            <p className="text-xs font-black uppercase text-slate-500">Columns</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {Object.entries({ gross: 'Gross', deductions: 'Deductions', net: 'Net', paye: 'PAYE', pension: 'Pension', status: 'Status' }).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
+                  <input type="checkbox" checked={selectedColumns[key]} onChange={(event) => setSelectedColumns((prev) => ({ ...prev, [key]: event.target.checked }))} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+        <ChartShell title={`${activeMeta.title} Value Summary`} detail="Report-specific payroll values" onClick={() => undefined}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={reportValueData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} />
+              <YAxis tick={{ fontSize: 10 }} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="value" name="Amount" radius={[5, 5, 0, 0]}>
+                {reportValueData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title={`${activeMeta.title} Grouping`} detail={`Grouped by ${groupBy}`} onClick={() => undefined}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={groupedRows} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="label" tick={{ fontSize: 10, fontWeight: 700 }} width={96} />
+              <Tooltip formatter={chartTooltip} />
+              <Bar dataKey="netPay" name="Net Pay" fill="#2563eb" radius={[0, 5, 5, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartShell>
+
+        <ChartShell title={`${activeMeta.title} Mix`} detail="Report-ready visual split" onClick={() => undefined}>
+          <div className="grid h-full min-h-0 grid-cols-2 gap-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={deductionData} dataKey="value" nameKey="name" innerRadius={32} outerRadius={54} paddingAngle={2}>
+                  {deductionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                </Pie>
+                <Tooltip formatter={chartTooltip} />
+              </PieChart>
+            </ResponsiveContainer>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={32} outerRadius={54} paddingAngle={2}>
+                  {statusData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                </Pie>
+                <Tooltip formatter={chartTooltip} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartShell>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-4">
+            <h3 className="text-sm font-black text-slate-950">{activeMeta.title} Preview Table</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">This table changes when you click a report card. It applies the selected report preset, grouping, status filter, and visible columns.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[1080px] w-full text-left">
+              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Employee</th>
+                  <th className="px-4 py-3">Department / Type</th>
+                  {selectedColumns.gross ? <th className="px-4 py-3">Gross</th> : null}
+                  {selectedColumns.deductions ? <th className="px-4 py-3">Deductions</th> : null}
+                  {selectedColumns.net ? <th className="px-4 py-3">Net</th> : null}
+                  {selectedColumns.paye ? <th className="px-4 py-3">PAYE</th> : null}
+                  {selectedColumns.pension ? <th className="px-4 py-3">Pension</th> : null}
+                  {selectedColumns.status ? <th className="px-4 py-3">Status</th> : null}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {previewRows.map((record) => (
+                  <tr key={record.employeeId} className="hover:bg-slate-50">
+                    <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.salaryGrade || record.payrollGroup}</p></td>
+                    <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.employmentType || 'No type'}</span></td>
+                    {selectedColumns.gross ? <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td> : null}
+                    {selectedColumns.deductions ? <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.deductions, canViewMoney)}</td> : null}
+                    {selectedColumns.net ? <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td> : null}
+                    {selectedColumns.paye ? <td className="px-4 py-3 text-sm font-black text-red-700">{money(record.paye, canViewMoney)}</td> : null}
+                    {selectedColumns.pension ? <td className="px-4 py-3 text-sm font-black text-blue-700">{money(record.pension, canViewMoney)}</td> : null}
+                    {selectedColumns.status ? <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td> : null}
+                  </tr>
+                ))}
+                {!previewRows.length ? <tr><td colSpan={8} className="px-4 py-6 text-sm font-black text-slate-700">No records match this report view.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Grouped Summary</h3>
+            <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto">
+              {groupedRows.map((row) => (
+                <div key={row.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-black text-slate-950">{row.label}</p>
+                      <p className="mt-1 text-[11px] font-bold text-slate-500">{number(row.employees)} employees / {number(row.exceptions)} exceptions</p>
+                    </div>
+                    <p className="shrink-0 text-xs font-black text-emerald-700">{money(row.netPay, canViewMoney)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Report Distribution</h3>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              {['Save custom report view', 'Schedule monthly distribution', 'Email report to approvers', 'Attach audit evidence', 'Export Excel with formatted headers', 'Print executive pack'].map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-700" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
       </section>
     </div>
   );
@@ -1162,6 +2816,7 @@ function SalaryManagementWorkspace({ activeTab, payload, canViewMoney }: { activ
 }
 
 function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction, busyAction, onAudit, exportCsv, exportExcel }: { payload: PayrollPayload | null; canViewMoney: boolean; role: Role; runAction: (action: string, reason?: string) => Promise<void>; busyAction: string; onAudit: () => void; exportCsv: () => void; exportExcel: () => void }) {
+  const [activeStage, setActiveStage] = useState<WorkflowStageId>('data');
   const currentRun = payload?.runs[0] || null;
   const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
   const payrollEligible = payload?.summary.payrollEligible || 0;
@@ -1212,12 +2867,12 @@ function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction
     ['Notifications Sent', Boolean(currentRun?.payslipsGeneratedAt), currentRun?.payslipsGeneratedAt, Bell],
   ] as const;
   const summaryStages = [
-    { label: 'Draft', owner: currentRun?.createdBy || 'Payroll Officer', done: Boolean(currentRun?.createdAt) || completed(['Draft', 'Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), targetId: 'payroll-stage-data' },
-    { label: 'Pre-Validation', owner: 'Payroll Supervisor', done: completed(['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.validatedAt), targetId: 'payroll-stage-validation' },
-    { label: 'Payroll Computation', owner: 'Payroll Officer', done: completed(['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), targetId: 'payroll-stage-computation' },
-    { label: 'Approval Workflow', owner: payload?.workflow?.nextOwner || 'HR / Finance / CFO', done: completed(['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.approvedAt), targetId: 'payroll-stage-approval' },
-    { label: 'Payroll Release', owner: 'Payroll / Finance', done: completed(['Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.releasedAt), targetId: 'payroll-stage-release' },
-    { label: 'Payroll Lock', owner: 'System Control', done: completed(['Locked', 'Posted', 'Published', 'Closed'], currentRun?.lockedAt), targetId: 'payroll-stage-lock' },
+    { id: 'data' as WorkflowStageId, label: 'Draft', owner: currentRun?.createdBy || 'Payroll Officer', done: Boolean(currentRun?.createdAt) || completed(['Draft', 'Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), targetId: 'payroll-stage-data' },
+    { id: 'validation' as WorkflowStageId, label: 'Pre-Validation', owner: 'Payroll Supervisor', done: completed(['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.validatedAt), targetId: 'payroll-stage-validation' },
+    { id: 'computation' as WorkflowStageId, label: 'Payroll Computation', owner: 'Payroll Officer', done: completed(['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), targetId: 'payroll-stage-computation' },
+    { id: 'approval' as WorkflowStageId, label: 'Approval Workflow', owner: payload?.workflow?.nextOwner || 'HR / Finance / CFO', done: completed(['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.approvedAt), targetId: 'payroll-stage-approval' },
+    { id: 'release' as WorkflowStageId, label: 'Payroll Release', owner: 'Payroll / Finance', done: completed(['Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.releasedAt), targetId: 'payroll-stage-release' },
+    { id: 'lock' as WorkflowStageId, label: 'Payroll Lock', owner: 'System Control', done: completed(['Locked', 'Posted', 'Published', 'Closed'], currentRun?.lockedAt), targetId: 'payroll-stage-lock' },
   ];
   let firstOpenStageFound = false;
   const workflowSummary = summaryStages.map((stage) => {
@@ -1226,6 +2881,8 @@ function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction
     return { ...stage, current };
   });
   const jumpToStage = (targetId: string) => {
+    const stage = workflowSummary.find((item) => item.targetId === targetId);
+    if (stage) setActiveStage(stage.id);
     document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
   };
   const outputs = {
@@ -1256,6 +2913,20 @@ function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction
         </div>
         <WorkflowSummaryTracker stages={workflowSummary} onSelect={jumpToStage} />
       </section>
+
+      <WorkflowStageInsightPanel
+        activeStage={activeStage}
+        setActiveStage={setActiveStage}
+        stages={workflowSummary}
+        payload={payload}
+        currentRun={currentRun}
+        canViewMoney={canViewMoney}
+        checks={checks.map(([label, ok]) => ({ label, ok }))}
+        approvalCards={approvalCards}
+        releaseSteps={releaseSteps.map(([label, done, date]) => ({ label, done, date }))}
+        quickAction={quickAction}
+        onAudit={onAudit}
+      />
 
       <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
         <div className="min-w-[1420px]">
@@ -1431,7 +3102,7 @@ function WorkflowSummaryTracker({
   stages,
   onSelect,
 }: {
-  stages: { label: string; owner: string; done: boolean; current: boolean; targetId: string }[];
+  stages: { id: WorkflowStageId; label: string; owner: string; done: boolean; current: boolean; targetId: string }[];
   onSelect: (targetId: string) => void;
 }) {
   return (
@@ -1475,6 +3146,172 @@ function WorkflowSummaryTracker({
         </div>
       </div>
     </div>
+  );
+}
+
+function WorkflowStageInsightPanel({
+  activeStage,
+  setActiveStage,
+  stages,
+  payload,
+  currentRun,
+  canViewMoney,
+  checks,
+  approvalCards,
+  releaseSteps,
+  quickAction,
+  onAudit,
+}: {
+  activeStage: WorkflowStageId;
+  setActiveStage: (stage: WorkflowStageId) => void;
+  stages: { id: WorkflowStageId; label: string; owner: string; done: boolean; current: boolean; targetId: string }[];
+  payload: PayrollPayload | null;
+  currentRun: PayrollRun | null;
+  canViewMoney: boolean;
+  checks: { label: string; ok: boolean }[];
+  approvalCards: { code: string; title: string; tone: Tone; owner: string; statusText: string; done: boolean; date?: string | null; actions: string[] }[];
+  releaseSteps: { label: string; done: boolean; date?: string | null }[];
+  quickAction: (id: string, label: string, tone: Tone, sensitive?: boolean) => React.ReactNode;
+  onAudit: () => void;
+}) {
+  const selected = stages.find((stage) => stage.id === activeStage) || stages[0];
+  const issueRows = payload?.exceptions || [];
+  const records = payload?.records || [];
+  const stageActions: Record<WorkflowStageId, React.ReactNode[]> = {
+    data: [
+      quickAction('create-period', 'Create Period', 'blue'),
+      quickAction('open-period', 'Open Period', 'green'),
+    ],
+    validation: [
+      quickAction('validate-payroll', 'Run Validation', 'blue'),
+      quickAction('view-exceptions', 'Review Exceptions', issueRows.length ? 'red' : 'green'),
+    ],
+    computation: [
+      quickAction('create-run', 'Run Payroll', 'green'),
+      quickAction('submit-run', 'Submit for Approval', 'violet', true),
+    ],
+    approval: [
+      quickAction('approve-run', 'Approve', 'green', true),
+      quickAction('request-revision', 'Return', 'amber', true),
+      quickAction('reject-run', 'Reject', 'red', true),
+    ],
+    release: [
+      quickAction('release-run', 'Release Payroll', 'cyan', true),
+      quickAction('generate-bank-schedule', 'Bank Schedule', 'slate', true),
+      quickAction('generate-payslips', 'Publish Payslips', 'cyan', true),
+      quickAction('post-run', 'Post Payroll', 'slate', true),
+    ],
+    lock: [
+      quickAction('close-period', 'Close Period', 'violet', true),
+      quickAction('reopen-period', 'Reopen Period', 'red', true),
+    ],
+  };
+  const stageMetrics: Record<WorkflowStageId, { label: string; value: string; detail: string; tone: Tone }[]> = {
+    data: [
+      { label: 'Employees Loaded', value: number(payload?.summary.totalEmployees), detail: payload?.dataSource?.source || 'DLE_Enterprise HRIS', tone: 'blue' },
+      { label: 'Payroll Eligible', value: number(payload?.summary.payrollEligible), detail: `${number(payload?.summary.readyEmployees)} ready`, tone: 'green' },
+      { label: 'Source Health', value: payload?.dataSource?.databaseAvailable ? 'Available' : 'Unavailable', detail: payload?.dataSource?.warning || 'HRIS DB connected', tone: payload?.dataSource?.databaseAvailable ? 'green' : 'red' },
+    ],
+    validation: [
+      { label: 'Validation Checks', value: `${number(checks.filter((item) => item.ok).length)}/${number(checks.length)}`, detail: 'Pre-payroll checks passed', tone: checks.every((item) => item.ok) ? 'green' : 'amber' },
+      { label: 'Exceptions', value: number(payload?.summary.exceptionCount), detail: `${number(payload?.summary.blockedEmployees)} blocked`, tone: payload?.summary.exceptionCount ? 'red' : 'green' },
+      { label: 'Coverage', value: `${pctFmt.format(payload?.summary.payrollCoveragePct || 0)}%`, detail: 'Payroll setup coverage', tone: (payload?.summary.payrollCoveragePct || 0) >= 95 ? 'green' : 'amber' },
+    ],
+    computation: [
+      { label: 'Gross Payroll', value: money(payload?.summary.grossPay, canViewMoney), detail: `${money(payload?.summary.basePay, canViewMoney)} base pay`, tone: 'green' },
+      { label: 'Deductions', value: money(payload?.summary.deductions, canViewMoney), detail: 'PAYE, pension, statutory', tone: 'violet' },
+      { label: 'Net Payroll', value: money(payload?.summary.netPay, canViewMoney), detail: 'Estimated payout', tone: 'cyan' },
+    ],
+    approval: [
+      { label: 'Current Owner', value: payload?.workflow?.nextOwner || 'Payroll Officer', detail: payload?.workflow?.approvalStage || 'Draft', tone: 'blue' },
+      { label: 'Pending Approvals', value: number(['Ready for Approval', 'Submitted', 'Under Review'].includes(currentRun?.status || '') ? 1 : 0), detail: currentRun?.submittedAt ? new Date(currentRun.submittedAt).toLocaleString('en-GB') : 'Not submitted', tone: 'amber' },
+      { label: 'Approved By', value: currentRun?.approvedBy || 'Pending', detail: currentRun?.approvedAt ? new Date(currentRun.approvedAt).toLocaleString('en-GB') : 'Awaiting approval', tone: currentRun?.approvedAt ? 'green' : 'amber' },
+    ],
+    release: [
+      { label: 'Release Status', value: currentRun?.releasedAt ? 'Released' : 'Pending', detail: currentRun?.releasedAt ? new Date(currentRun.releasedAt).toLocaleString('en-GB') : 'Awaiting release', tone: currentRun?.releasedAt ? 'green' : 'amber' },
+      { label: 'Bank Schedule', value: currentRun?.bankScheduleGeneratedAt ? 'Generated' : 'Pending', detail: currentRun?.bankScheduleGeneratedAt ? new Date(currentRun.bankScheduleGeneratedAt).toLocaleString('en-GB') : 'Not generated', tone: currentRun?.bankScheduleGeneratedAt ? 'green' : 'slate' },
+      { label: 'Payslips', value: currentRun?.payslipsGeneratedAt ? 'Published' : 'Pending', detail: currentRun?.payslipsGeneratedAt ? new Date(currentRun.payslipsGeneratedAt).toLocaleString('en-GB') : 'Not published', tone: currentRun?.payslipsGeneratedAt ? 'green' : 'slate' },
+    ],
+    lock: [
+      { label: 'Lock Status', value: currentRun?.lockedAt ? 'Locked' : 'Open', detail: currentRun?.lockedAt ? new Date(currentRun.lockedAt).toLocaleString('en-GB') : 'Changes still allowed', tone: currentRun?.lockedAt ? 'green' : 'amber' },
+      { label: 'Journal Posted', value: currentRun?.postedAt ? 'Posted' : 'Pending', detail: currentRun?.postedAt ? new Date(currentRun.postedAt).toLocaleString('en-GB') : 'Not posted', tone: currentRun?.postedAt ? 'green' : 'slate' },
+      { label: 'Audit Entries', value: number(payload?.auditTrail?.length), detail: 'Workflow audit log', tone: 'blue' },
+    ],
+  };
+  const statusRows = activeStage === 'validation'
+    ? checks.map((item) => ({ label: item.label, status: item.ok ? 'Passed' : 'Review', tone: item.ok ? 'green' as Tone : 'red' as Tone }))
+    : activeStage === 'approval'
+      ? approvalCards.map((item) => ({ label: `${item.code} ${item.title}`, status: item.done ? item.statusText : 'Pending', tone: item.done ? item.tone : 'slate' as Tone }))
+      : activeStage === 'release'
+        ? releaseSteps.map((item) => ({ label: item.label, status: item.done ? 'Complete' : 'Pending', tone: item.done ? 'green' as Tone : 'slate' as Tone }))
+        : records.slice(0, 6).map((item) => ({ label: `${item.employeeId} - ${item.fullName}`, status: item.payrollStatus, tone: statusTone(item.payrollStatus) }));
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">Workflow Stage Detail</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Click a stage to see live status, owner, blockers, actions, and audit evidence.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {stages.map((stage) => (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => {
+                  setActiveStage(stage.id);
+                  document.getElementById(stage.targetId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }}
+                className={`rounded-lg border px-3 py-2 text-[11px] font-black transition ${activeStage === stage.id ? `${toneStyles[stage.done ? 'green' : stage.current ? 'amber' : 'blue'].button} border-transparent` : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                {stage.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className={`rounded-lg border p-4 ${selected.done ? toneStyles.green.card : selected.current ? toneStyles.amber.card : toneStyles.slate.card}`}>
+          <p className="text-xs font-black uppercase text-slate-500">Selected Stage</p>
+          <h4 className="mt-1 text-xl font-black text-slate-950">{selected.label}</h4>
+          <p className="mt-1 text-sm font-semibold text-slate-700">Owner: {selected.owner}</p>
+          <p className="mt-1 text-xs font-bold text-slate-500">Status: {selected.done ? 'Complete' : selected.current ? 'Current' : 'Pending'}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {stageActions[activeStage]}
+            <button type="button" onClick={onAudit} className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-700 hover:bg-slate-50">Audit Trail</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {stageMetrics[activeStage].map((item) => <InfoTile key={item.label} label={item.label} value={item.value} detail={item.detail} tone={item.tone} />)}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-4 border-t border-slate-100 p-4 xl:grid-cols-[1fr_1fr]">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-black text-slate-950">Stage checklist</h4>
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            {statusRows.slice(0, 10).map((item) => (
+              <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2">
+                <span className="min-w-0 truncate text-xs font-bold text-slate-700">{item.label}</span>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${toneStyles[item.tone].chip}`}>{item.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <h4 className="text-sm font-black text-slate-950">Current blockers</h4>
+          <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+            {issueRows.slice(0, 8).map((item) => (
+              <div key={item.id} className="rounded-lg border border-red-100 bg-red-50 p-3">
+                <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
+                <p className="mt-1 text-xs font-semibold text-red-800">{item.issue}</p>
+              </div>
+            ))}
+            {!issueRows.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-black text-emerald-800">No blockers currently recorded for this payroll workflow.</div> : null}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1807,6 +3644,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
   const [confirmAction, setConfirmAction] = useState<PayrollAction | null>(null);
   const [actionReason, setActionReason] = useState('');
   const [auditOpen, setAuditOpen] = useState(false);
+  const [dashboardPanel, setDashboardPanel] = useState<DashboardPanelId>('ready');
 
   const section = sectionById(sectionId);
   const activeTabId = activeTabs[section.id] || section.tabs[0].id;
@@ -1959,10 +3797,10 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
       {toast ? <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Ready Employees" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees loaded`} icon={Users} tone="blue" />
-        <MetricCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net pay`} icon={Banknote} tone="green" />
-        <MetricCard label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension and statutory items" icon={ReceiptText} tone="violet" />
-        <MetricCard label="Issues" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked, ${number(payload?.summary.reviewEmployees)} to review`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) > 0 ? 'red' : 'green'} />
+        <MetricCard label="Ready Employees" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees loaded`} icon={Users} tone="blue" active={section.id === 'dashboard' && dashboardPanel === 'ready'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('ready'); }} />
+        <MetricCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net pay`} icon={Banknote} tone="green" active={section.id === 'dashboard' && dashboardPanel === 'gross'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('gross'); }} />
+        <MetricCard label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension and statutory items" icon={ReceiptText} tone="violet" active={section.id === 'dashboard' && dashboardPanel === 'deductions'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('deductions'); }} />
+        <MetricCard label="Issues" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked, ${number(payload?.summary.reviewEmployees)} to review`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) > 0 ? 'red' : 'green'} active={section.id === 'dashboard' && dashboardPanel === 'issues'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('issues'); }} />
       </div>
 
       {section.id === 'dashboard' ? (
@@ -2038,13 +3876,23 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
 
           <div className="mt-4">
             {section.id === 'dashboard' ? (
-              <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} />
+              <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} activePanel={dashboardPanel} setActivePanel={setDashboardPanel} />
             ) : section.id === 'payroll-computation-workflow' ? (
               <PayrollComputationWorkflowPage payload={payload} canViewMoney={canViewMoney} role={role} runAction={runAction} busyAction={busyAction} onAudit={() => setAuditOpen(true)} exportCsv={exportCsv} exportExcel={exportExcel} />
             ) : section.id === 'salary-management' ? (
               <PaySetupWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
+            ) : section.id === 'earnings-management' ? (
+              <EarningsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
+            ) : section.id === 'deductions-management' ? (
+              <DeductionsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
             ) : section.id === 'payroll-processing' ? (
               <ProcessPayrollWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
+            ) : section.id === 'compliance-statutory-management' ? (
+              <StatutoryWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
+            ) : section.id === 'finance-integration' ? (
+              <BankFinanceWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
+            ) : section.id === 'reports-analytics' ? (
+              <ReportsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
             ) : (
               <FeaturePanel tab={activeTab} section={section} payload={payload} canViewMoney={canViewMoney} />
             )}
@@ -2090,6 +3938,8 @@ function DashboardWorkspace({
   setQuery,
   status,
   setStatus,
+  activePanel,
+  setActivePanel,
 }: {
   payload: PayrollPayload | null;
   canViewMoney: boolean;
@@ -2101,7 +3951,10 @@ function DashboardWorkspace({
   setQuery: (value: string) => void;
   status: string;
   setStatus: (value: string) => void;
+  activePanel: DashboardPanelId;
+  setActivePanel: (value: DashboardPanelId) => void;
 }) {
+  const records = payload?.records || [];
   const runStatus = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
   const issues = payload?.exceptions || [];
   const readiness = payload?.summary.totalEmployees ? Math.round(((payload?.summary.readyEmployees || 0) / payload.summary.totalEmployees) * 100) : 0;
@@ -2126,6 +3979,14 @@ function DashboardWorkspace({
     { label: `Status is ${runStatus}`, detail: payload?.workflow?.nextOwner ? `Next owner: ${payload.workflow.nextOwner}` : 'No workflow owner assigned' },
     { label: `${number(payload?.summary.readyEmployees)} records ready`, detail: `${number(payload?.summary.reviewEmployees)} review, ${number(payload?.summary.blockedEmployees)} blocked` },
     { label: 'Audit trail active', detail: `${number(payload?.auditTrail?.length)} logged payroll actions` },
+  ];
+  const panelOptions: { id: DashboardPanelId; label: string; tone: Tone; icon: any }[] = [
+    { id: 'ready', label: 'Ready employees', tone: 'blue', icon: Users },
+    { id: 'gross', label: 'Gross payroll', tone: 'green', icon: Banknote },
+    { id: 'deductions', label: 'Deductions', tone: 'violet', icon: ReceiptText },
+    { id: 'issues', label: 'Issues', tone: issues.length ? 'red' : 'green', icon: AlertTriangle },
+    { id: 'status', label: 'Workflow status', tone: statusTone(runStatus), icon: ShieldCheck },
+    { id: 'approvals', label: 'Approvals & audit', tone: 'amber', icon: ClipboardCheck },
   ];
 
   return (
@@ -2154,10 +4015,10 @@ function DashboardWorkspace({
               <p className="mt-1 text-sm font-semibold text-slate-600">{number(payload?.summary.readyEmployees)} ready, {number(payload?.summary.reviewEmployees)} to review, {number(payload?.summary.blockedEmployees)} blocked.</p>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
-              <MiniDashboardCard label="Ready Employees" value={number(payload?.summary.readyEmployees)} tone="blue" />
-              <MiniDashboardCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} tone="green" />
-              <MiniDashboardCard label="Net Pay" value={money(payload?.summary.netPay, canViewMoney)} tone="cyan" />
-              <MiniDashboardCard label="Issues" value={number(issues.length)} tone={issues.length ? 'red' : 'green'} />
+              <MiniDashboardCard label="Ready Employees" value={number(payload?.summary.readyEmployees)} tone="blue" active={activePanel === 'ready'} onClick={() => setActivePanel('ready')} />
+              <MiniDashboardCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} tone="green" active={activePanel === 'gross'} onClick={() => setActivePanel('gross')} />
+              <MiniDashboardCard label="Net Pay" value={money(payload?.summary.netPay, canViewMoney)} tone="cyan" active={activePanel === 'gross'} onClick={() => setActivePanel('gross')} />
+              <MiniDashboardCard label="Issues" value={number(issues.length)} tone={issues.length ? 'red' : 'green'} active={activePanel === 'issues'} onClick={() => setActivePanel('issues')} />
             </div>
           </div>
           <div className="mt-5 overflow-x-auto">
@@ -2182,8 +4043,15 @@ function DashboardWorkspace({
           <div className="mt-3 grid grid-cols-1 gap-2">
             {quickActions.map((item) => {
               const Icon = item.icon;
+              const handleClick = () => {
+                if (item.action === 'view-exceptions') {
+                  setActivePanel('issues');
+                  return;
+                }
+                runAction(item.action);
+              };
               return (
-                <button key={item.action} type="button" disabled={item.disabled || busyAction === item.action} onClick={() => runAction(item.action)} className={`flex min-h-11 items-center justify-between rounded-lg px-3 text-left text-xs font-black ${item.disabled || busyAction === item.action ? 'cursor-not-allowed bg-slate-100 text-slate-400' : toneStyles[item.tone].button}`}>
+                <button key={item.action} type="button" disabled={item.disabled || busyAction === item.action} onClick={handleClick} className={`flex min-h-11 items-center justify-between rounded-lg px-3 text-left text-xs font-black ${item.disabled || busyAction === item.action ? 'cursor-not-allowed bg-slate-100 text-slate-400' : toneStyles[item.tone].button}`}>
                   <span className="inline-flex items-center gap-2"><Icon className="h-4 w-4" />{item.label}</span>
                   <ChevronRight className="h-4 w-4" />
                 </button>
@@ -2191,6 +4059,48 @@ function DashboardWorkspace({
             })}
           </div>
         </aside>
+      </section>
+
+      <PayrollDashboardCharts
+        payload={payload}
+        records={records}
+        canViewMoney={canViewMoney}
+        activePanel={activePanel}
+        setActivePanel={setActivePanel}
+        setStatus={setStatus}
+      />
+
+      <section id="payroll-dashboard-details" className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Dashboard Detail</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Click any card to see the employees, values, workflow stage, and audit evidence behind the number.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {panelOptions.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button key={item.id} type="button" onClick={() => setActivePanel(item.id)} className={`inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-[11px] font-black transition ${activePanel === item.id ? `${toneStyles[item.tone].button} border-transparent` : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <DashboardDetailPanel
+          panel={activePanel}
+          payload={payload}
+          records={filteredRecords}
+          workflow={workflow}
+          currentRun={currentRun}
+          canViewMoney={canViewMoney}
+          setQuery={setQuery}
+          setStatus={setStatus}
+          setActivePanel={setActivePanel}
+        />
       </section>
 
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
@@ -2289,6 +4199,298 @@ function DashboardWorkspace({
           </table>
         </div>
       </details>
+    </div>
+  );
+}
+
+function PayrollDashboardCharts({
+  payload,
+  records,
+  canViewMoney,
+  activePanel,
+  setActivePanel,
+  setStatus,
+}: {
+  payload: PayrollPayload | null;
+  records: PayrollRecord[];
+  canViewMoney: boolean;
+  activePanel: DashboardPanelId;
+  setActivePanel: (value: DashboardPanelId) => void;
+  setStatus: (value: string) => void;
+}) {
+  const readinessData = [
+    { name: 'Ready', value: payload?.summary.readyEmployees || 0, fill: '#2563eb', panel: 'ready' as DashboardPanelId, status: 'Ready' },
+    { name: 'Review', value: payload?.summary.reviewEmployees || 0, fill: '#f59e0b', panel: 'issues' as DashboardPanelId, status: 'Review' },
+    { name: 'Blocked', value: payload?.summary.blockedEmployees || 0, fill: '#dc2626', panel: 'issues' as DashboardPanelId, status: 'Blocked' },
+  ];
+  const employmentData = (payload?.breakdowns.byEmploymentType || []).slice(0, 6).map((row, index) => ({
+    name: row.label,
+    employees: row.employees,
+    grossPay: row.grossPay,
+    fill: ['#0891b2', '#7c3aed', '#16a34a', '#f59e0b', '#0f172a', '#2563eb'][index % 6],
+  }));
+  const departmentData = (payload?.breakdowns.byDepartment || []).slice(0, 8).map((row) => ({
+    name: row.label.length > 16 ? `${row.label.slice(0, 15)}...` : row.label,
+    grossPay: row.grossPay,
+    employees: row.employees,
+    exceptions: row.exceptions,
+  }));
+  const deductionData = [
+    { name: 'PAYE', value: records.reduce((sum, record) => sum + (record.paye || 0), 0), fill: '#dc2626' },
+    { name: 'Pension', value: records.reduce((sum, record) => sum + (record.pension || 0), 0), fill: '#7c3aed' },
+    { name: 'Other', value: records.reduce((sum, record) => sum + (record.otherDeductions || 0), 0), fill: '#f59e0b' },
+  ].filter((row) => row.value > 0);
+  const chartTooltip = (value: unknown, name: unknown) => {
+    const label = String(name || '');
+    const numeric = Number(value || 0);
+    if (label.toLowerCase().includes('pay') || numeric > 100000) return [money(numeric, canViewMoney), label];
+    return [number(numeric), label];
+  };
+
+  return (
+    <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-4">
+      <ChartShell title="Payroll Readiness" detail="Ready, review, and blocked records" active={['ready', 'issues'].includes(activePanel)} onClick={() => setActivePanel('ready')}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={readinessData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2} onClick={(entry) => {
+              const row = entry as unknown as { panel?: DashboardPanelId; status?: string };
+              setActivePanel(row.panel || 'ready');
+              setStatus(row.status || 'All');
+            }}>
+              {readinessData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+            </Pie>
+            <Tooltip formatter={chartTooltip} />
+          </PieChart>
+        </ResponsiveContainer>
+        <ChartLegend rows={readinessData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+      </ChartShell>
+
+      <ChartShell title="Employee Categories" detail="Headcount by payroll type" active={activePanel === 'ready'} onClick={() => setActivePanel('ready')}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={employmentData} margin={{ top: 10, right: 6, left: -24, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+            <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} interval={0} height={42} />
+            <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+            <Tooltip formatter={chartTooltip} />
+            <Bar dataKey="employees" name="Employees" radius={[5, 5, 0, 0]}>
+              {employmentData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <ChartShell title="Department Payroll" detail="Top gross payroll exposure" active={activePanel === 'gross'} onClick={() => setActivePanel('gross')}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={departmentData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+            <XAxis type="number" hide />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
+            <Tooltip formatter={chartTooltip} />
+            <Bar dataKey="grossPay" name="Gross Pay" fill="#16a34a" radius={[0, 5, 5, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <ChartShell title="Deduction Mix" detail="PAYE, pension, and other deductions" active={activePanel === 'deductions'} onClick={() => setActivePanel('deductions')}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={deductionData} dataKey="value" nameKey="name" outerRadius={74} onClick={() => setActivePanel('deductions')}>
+              {deductionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+            </Pie>
+            <Tooltip formatter={chartTooltip} />
+          </PieChart>
+        </ResponsiveContainer>
+        <ChartLegend rows={deductionData.map((row) => ({ label: row.name, value: money(row.value, canViewMoney), color: row.fill }))} />
+      </ChartShell>
+    </section>
+  );
+}
+
+function ChartShell({ title, detail, active, onClick, children }: { title: string; detail: string; active?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <section className={`min-w-0 rounded-lg border bg-white p-4 shadow-sm transition hover:shadow-md ${active ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'}`}>
+      <button type="button" onClick={onClick} className="block w-full text-left">
+        <h3 className="text-sm font-black text-slate-950">{title}</h3>
+        <p className="mt-1 text-xs font-semibold text-slate-500">{detail}</p>
+      </button>
+      <div className="mt-3 h-52 min-h-52 w-full min-w-0">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function ChartLegend({ rows }: { rows: { label: string; value: string; color: string }[] }) {
+  return (
+    <div className="mt-2 grid grid-cols-1 gap-1">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-600">
+          <span className="inline-flex min-w-0 items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color }} /><span className="truncate">{row.label}</span></span>
+          <span className="font-black text-slate-900">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DashboardDetailPanel({
+  panel,
+  payload,
+  records,
+  workflow,
+  currentRun,
+  canViewMoney,
+  setQuery,
+  setStatus,
+  setActivePanel,
+}: {
+  panel: DashboardPanelId;
+  payload: PayrollPayload | null;
+  records: PayrollRecord[];
+  workflow: { label: string; done: boolean }[];
+  currentRun: PayrollRun | null;
+  canViewMoney: boolean;
+  setQuery: (value: string) => void;
+  setStatus: (value: string) => void;
+  setActivePanel: (value: DashboardPanelId) => void;
+}) {
+  const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
+  const issueRows = records.filter((record) => record.exceptionCount > 0 || record.payrollStatus !== 'Ready');
+  const deductionTotals = [
+    { label: 'PAYE', value: records.reduce((sum, record) => sum + (record.paye || 0), 0), tone: 'red' as Tone },
+    { label: 'Pension', value: records.reduce((sum, record) => sum + (record.pension || 0), 0), tone: 'violet' as Tone },
+    { label: 'Other statutory / deductions', value: records.reduce((sum, record) => sum + (record.otherDeductions || 0), 0), tone: 'amber' as Tone },
+  ];
+  const grossGroups = [
+    { label: 'Base pay', value: payload?.summary.basePay || 0, detail: 'Basic, daily-rate base, and structured base salary' },
+    { label: 'Allowances', value: payload?.summary.allowances || 0, detail: 'Monthly taxable and non-taxable allowance components' },
+    { label: 'Gross payroll', value: payload?.summary.grossPay || 0, detail: `${number(payload?.summary.payrollEligible)} payroll eligible employees` },
+    { label: 'Net payroll', value: payload?.summary.netPay || 0, detail: 'Expected employee payout before release' },
+  ];
+  const tableRows = panel === 'ready' ? readyRows : panel === 'issues' ? issueRows : records;
+  const heading = {
+    ready: 'Payroll-ready employees',
+    gross: 'Gross payroll composition',
+    deductions: 'Deduction and statutory liability',
+    issues: 'Payroll issues and exceptions',
+    status: 'Workflow status detail',
+    approvals: 'Approvals and audit evidence',
+  }[panel];
+  const subtitle = {
+    ready: `${number(readyRows.length)} ready records from ${number(payload?.summary.totalEmployees)} HRIS employees.`,
+    gross: 'Gross, base, allowance, net, and category-level payroll amounts.',
+    deductions: 'PAYE, pension, NHF/union/other statutory lines by employee and total.',
+    issues: `${number(issueRows.length)} records require review or blocking action.`,
+    status: `Current stage: ${payload?.workflow?.approvalStage || currentRun?.status || 'Draft'}.`,
+    approvals: `${number(payload?.auditTrail?.length)} audit entries currently available for this payroll workspace.`,
+  }[panel];
+
+  if (panel === 'status') {
+    return (
+      <div className="p-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {workflow.map((step, index) => (
+            <button key={step.label} type="button" onClick={() => setActivePanel('approvals')} className={`rounded-lg border p-4 text-left transition hover:shadow-md ${step.done ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${step.done ? 'bg-blue-600 text-white' : 'bg-white text-slate-500'}`}>{step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.blue.chip : toneStyles.slate.chip}`}>{step.done ? 'Complete' : 'Pending'}</span>
+              </div>
+              <p className="mt-3 text-sm font-black text-slate-950">{step.label}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Owner: {payload?.workflow?.nextOwner || 'Payroll Officer'}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Run: {currentRun?.id || 'Not started'}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (panel === 'approvals') {
+    return (
+      <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h4 className="text-sm font-black text-slate-950">Current approval position</h4>
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            <InfoTile label="Status" value={currentRun?.status || payload?.workflow?.currentStatus || 'Draft'} detail={payload?.workflow?.approvalStage || 'Draft'} tone={statusTone(currentRun?.status || payload?.workflow?.currentStatus || 'Draft')} />
+            <InfoTile label="Next Owner" value={payload?.workflow?.nextOwner || 'Payroll Officer'} detail="Current workflow responsibility" tone="blue" />
+            <InfoTile label="Approved By" value={currentRun?.approvedBy || 'Pending'} detail={currentRun?.approvedAt ? new Date(currentRun.approvedAt).toLocaleString('en-GB') : 'No final approval yet'} tone="amber" />
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 p-4">
+            <h4 className="text-sm font-black text-slate-950">Audit trail</h4>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Submission, approval, release, export, and payroll action history.</p>
+          </div>
+          <div className="max-h-[340px] divide-y divide-slate-100 overflow-y-auto">
+            {(payload?.auditTrail || []).slice(0, 12).map((item) => (
+              <div key={item.id} className="p-4">
+                <p className="text-sm font-black text-slate-950">{item.action}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">{item.user} / {item.role} / {new Date(item.at).toLocaleString('en-GB')}</p>
+                {item.comment || item.reason ? <p className="mt-1 text-xs font-bold text-slate-700">{item.comment || item.reason}</p> : null}
+              </div>
+            ))}
+            {!payload?.auditTrail?.length ? <div className="p-4 text-sm font-black text-slate-700">No payroll workflow action has been logged yet.</div> : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h4 className="text-base font-black text-slate-950">{heading}</h4>
+          <p className="mt-1 text-xs font-semibold text-slate-500">{subtitle}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => { setQuery(''); setStatus('All'); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Clear filters</button>
+          <button type="button" onClick={() => setStatus(panel === 'issues' ? 'Blocked' : 'Ready')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800">Show in register</button>
+        </div>
+      </div>
+
+      {panel === 'gross' ? (
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {grossGroups.map((item) => <InfoTile key={item.label} label={item.label} value={money(item.value, canViewMoney)} detail={item.detail} tone={item.label === 'Net payroll' ? 'cyan' : 'green'} />)}
+        </div>
+      ) : null}
+
+      {panel === 'deductions' ? (
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {deductionTotals.map((item) => <InfoTile key={item.label} label={item.label} value={money(item.value, canViewMoney)} detail={`${pctFmt.format(payload?.summary.grossPay ? (item.value / payload.summary.grossPay) * 100 : 0)}% of gross payroll`} tone={item.tone} />)}
+        </div>
+      ) : null}
+
+      {panel === 'issues' ? (
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <InfoTile label="Blocked" value={number(payload?.summary.blockedEmployees)} detail="Cannot proceed without correction" tone="red" />
+          <InfoTile label="Review" value={number(payload?.summary.reviewEmployees)} detail="Payroll officer review required" tone="amber" />
+          <InfoTile label="Exception Lines" value={number(payload?.summary.exceptionCount)} detail="Total detected issues" tone={payload?.summary.exceptionCount ? 'red' : 'green'} />
+        </div>
+      ) : null}
+
+      <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
+        <table className="min-w-[1040px] w-full text-left">
+          <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+            <tr>{['Employee', 'Department', 'Type', 'Gross', 'Deductions', 'Net', 'Status', 'Detail'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {tableRows.slice(0, 18).map((record) => (
+              <tr key={record.employeeId} className="hover:bg-slate-50">
+                <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} / {record.jobTitle || 'No job title'}</p></td>
+                <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.location || 'No location'}</span></td>
+                <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.employmentType || 'Not set'}<br /><span className="text-slate-400">{record.payrollGroup || 'No group'}</span></td>
+                <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
+                <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.deductions, canViewMoney)}</td>
+                <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.netPay, canViewMoney)}</td>
+                <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                <td className="px-4 py-3 text-xs font-semibold text-slate-600">{record.exceptions.length ? record.exceptions.slice(0, 2).join('; ') : panel === 'deductions' ? `PAYE ${money(record.paye, canViewMoney)} / Pension ${money(record.pension, canViewMoney)}` : 'Clear'}</td>
+              </tr>
+            ))}
+            {!tableRows.length ? <tr><td colSpan={8} className="px-4 py-6 text-sm font-black text-slate-700">No records match this dashboard view.</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
