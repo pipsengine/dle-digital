@@ -55,7 +55,28 @@ export type WorkforceRecord = {
   productivityStatus: string;
   hoursWorked: number;
   overtimeHours: number;
+  timeIn: string | null;
+  timeOut: string | null;
   exceptions: string[];
+};
+export type WorkforceShiftSchedule = {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  department: string;
+  location: string;
+  site: string;
+  shift: string;
+  startDate: string;
+  endDate: string;
+  scheduledStart: string;
+  scheduledEnd: string;
+  supervisor: string;
+  status: 'Draft' | 'Published' | 'Conflict' | 'Cancelled';
+  notes: string;
+  createdAt: string;
+  createdBy: string;
+  publishedAt?: string;
 };
 export type WorkforceSection = { id: string; label: string; description: string; tabs: Array<{ id: string; label: string; controls: string[] }>; actions: WorkforceActionId[] };
 export type WorkforcePayload = {
@@ -95,6 +116,7 @@ export type WorkforcePayload = {
   sections: WorkforceSection[];
   actions: WorkforceAction[];
   records: WorkforceRecord[];
+  shiftSchedules: WorkforceShiftSchedule[];
   auditTrail: WorkforceAuditEntry[];
 };
 
@@ -113,6 +135,7 @@ const resolveDashboardRoot = () => {
 
 const DATA_DIR = path.join(resolveDashboardRoot(), 'data', 'hris');
 const AUDIT_PATH = path.join(DATA_DIR, 'workforce-management-audit.json');
+const SHIFT_SCHEDULE_PATH = path.join(DATA_DIR, 'workforce-shift-schedules.json');
 
 const ensureAuditStore = async () => {
   await mkdir(DATA_DIR, { recursive: true });
@@ -136,6 +159,21 @@ const readAuditTrail = async (): Promise<WorkforceAuditEntry[]> => {
 const writeAuditTrail = async (items: WorkforceAuditEntry[]) => {
   await ensureAuditStore();
   await writeFile(AUDIT_PATH, JSON.stringify(items.slice(0, 500), null, 2), 'utf8');
+};
+
+const readShiftSchedules = async (): Promise<WorkforceShiftSchedule[]> => {
+  await mkdir(DATA_DIR, { recursive: true });
+  try {
+    const parsed = JSON.parse(await readFile(SHIFT_SCHEDULE_PATH, 'utf8'));
+    return Array.isArray(parsed) ? parsed as WorkforceShiftSchedule[] : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeShiftSchedules = async (items: WorkforceShiftSchedule[]) => {
+  await mkdir(DATA_DIR, { recursive: true });
+  await writeFile(SHIFT_SCHEDULE_PATH, JSON.stringify(items.slice(0, 2000), null, 2), 'utf8');
 };
 
 const action = (id: WorkforceActionId, label: string, roles: WorkforceRole[] = allRoles, requiresReason = false, sensitive = false): WorkforceAction => ({ id, label, roles, requiresReason, sensitive });
@@ -188,7 +226,7 @@ export const workforceSections: WorkforceSection[] = [
     id: 'shift-and-scheduling',
     label: 'Shift & Scheduling',
     description: 'Shift management, schedules, rosters, rotations, calendars, swaps, holidays, weekends, and intelligent workforce balancing.',
-    actions: ['export', 'view-audit-trail'],
+    actions: ['schedule-shift', 'publish-roster', 'export', 'view-audit-trail'],
     tabs: [
       { id: 'shifts', label: 'Shifts', controls: ['Day shift', 'Night shift', 'Rotational shift'] },
       { id: 'assignment', label: 'Assignment', controls: ['Shift assignment', 'Conflict detection'] },
@@ -361,6 +399,8 @@ const buildRecords = async (employees: PayrollEmployeeSource['employees'], timeP
       productivityStatus: attendanceStatus === 'Present' || attendanceStatus === 'Remote' ? 'Productive' : attendanceStatus === 'Late' ? 'Review' : 'Exception',
       hoursWorked: round(time?.hoursWorked || (record?.checkInTime ? 8 + record.overtimeHours : 0)),
       overtimeHours: round(time?.overtimeHours || record?.overtimeHours || 0),
+      timeIn: record?.checkInTime || null,
+      timeOut: record?.checkOutTime || null,
       exceptions,
     };
   });
@@ -370,7 +410,7 @@ export async function readWorkforceManagementPayload(sectionInput = 'attendance'
   const role = normalizeRole(roleInput);
   const section = workforceSections.find((item) => item.id === sectionInput) || workforceSections[0];
   const tab = section.tabs.find((item) => item.id === tabInput) || section.tabs[0];
-  const [employees, timePayload, attendanceSource, auditTrail] = await Promise.all([readPayrollEmployees(), readTimeAndLogsPayload('timesheet-entry', 'HR Manager'), readAttendanceSource(), readAuditTrail()]);
+  const [employees, timePayload, attendanceSource, auditTrail, shiftSchedules] = await Promise.all([readPayrollEmployees(), readTimeAndLogsPayload('timesheet-entry', 'HR Manager'), readAttendanceSource(), readAuditTrail(), readShiftSchedules()]);
   const records = await buildRecords(employees.employees, timePayload, attendanceSource);
   const presentToday = records.filter((item) => ['Present', 'Remote'].includes(item.attendanceStatus)).length;
   const absentToday = records.filter((item) => item.attendanceStatus === 'Absent').length;
@@ -422,8 +462,59 @@ export async function readWorkforceManagementPayload(sectionInput = 'attendance'
     sections: workforceSections,
     actions,
     records,
+    shiftSchedules,
     auditTrail: auditTrail.slice(0, 50),
   };
+}
+
+export async function scheduleWorkforceShift(input: {
+  actor: string;
+  role: WorkforceRole;
+  employeeId: string;
+  employeeName?: string;
+  department?: string;
+  location?: string;
+  site?: string;
+  shift: string;
+  startDate: string;
+  endDate: string;
+  scheduledStart: string;
+  scheduledEnd: string;
+  supervisor?: string;
+  notes?: string;
+  publish?: boolean;
+}) {
+  const schedules = await readShiftSchedules();
+  const record: WorkforceShiftSchedule = {
+    id: `shift-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    employeeId: input.employeeId,
+    employeeName: input.employeeName || input.employeeId,
+    department: input.department || 'Unassigned',
+    location: input.location || 'Unassigned',
+    site: input.site || input.location || 'Unassigned',
+    shift: input.shift,
+    startDate: input.startDate,
+    endDate: input.endDate,
+    scheduledStart: input.scheduledStart,
+    scheduledEnd: input.scheduledEnd,
+    supervisor: input.supervisor || 'Unassigned',
+    status: input.publish ? 'Published' : 'Draft',
+    notes: input.notes || '',
+    createdAt: nowIso(),
+    createdBy: input.actor,
+    publishedAt: input.publish ? nowIso() : undefined,
+  };
+  schedules.unshift(record);
+  await writeShiftSchedules(schedules);
+  return record;
+}
+
+export async function publishWorkforceRoster(actor: string) {
+  const schedules = await readShiftSchedules();
+  const now = nowIso();
+  const updated = schedules.map((item) => item.status === 'Draft' ? { ...item, status: 'Published' as const, publishedAt: now, createdBy: item.createdBy || actor } : item);
+  await writeShiftSchedules(updated);
+  return updated.filter((item) => item.status === 'Published').length;
 }
 
 export async function auditWorkforceAction(input: Omit<WorkforceAuditEntry, 'id' | 'at'>) {
@@ -440,6 +531,6 @@ export function validateWorkforceAction(actionId: WorkforceActionId, roleInput: 
   if (actionDef.requiresReason && !String(body.reason || '').trim()) return { ok: false, status: 400, message: 'Reason is required for this workforce action.' };
   if (['approve', 'post-to-payroll', 'lock'].includes(actionId) && payload.summary.attendanceExceptions > 0) return { ok: false, status: 409, message: 'Resolve workforce exceptions before approval, payroll posting, or locking.' };
   if (actionId === 'post-to-payroll' && payload.summary.pendingApprovals > 0) return { ok: false, status: 409, message: 'Payroll posting requires all workforce approvals to be completed.' };
-  if (['schedule-shift', 'publish-roster'].includes(actionId) && payload.summary.shiftConflicts > 0) return { ok: false, status: 409, message: 'Resolve shift or roster conflicts before publishing.' };
+  if (actionId === 'publish-roster' && payload.summary.shiftConflicts > 0) return { ok: false, status: 409, message: 'Resolve shift or roster conflicts before publishing.' };
   return { ok: true, status: 200, message: `${actionDef.label} completed and audit logged.` };
 }

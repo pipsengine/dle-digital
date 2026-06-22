@@ -247,40 +247,6 @@ const buildRecords = (headers: TimesheetHeader[], lines: TimesheetLine[]): TimeO
   });
 };
 
-const fallbackRecords = async (): Promise<TimeOperationalRecord[]> => {
-  const source = await readPayrollEmployees();
-  return source.employees.slice(0, 80).map((employee, index) => {
-    const overtimeHours = index % 7 === 0 ? 3 : index % 5 === 0 ? 1 : 0;
-    const exceptions = [
-      ...(index % 8 === 0 ? ['Missing timesheet hours'] : []),
-      ...(index % 9 === 0 ? ['Attendance vs timesheet variance detected'] : []),
-      ...(overtimeHours > 2 ? ['Overtime threshold requires approval'] : []),
-    ];
-    return {
-      id: `TL-${index + 1}`,
-      employeeId: employee.employeeId,
-      employeeName: employee.fullName,
-      department: employee.department || 'Unassigned',
-      projectCode: employee.projectSite || 'OPS',
-      projectName: employee.projectSite || 'Operations',
-      workPackage: employee.jobTitle || 'General',
-      costCenter: employee.costCenter || employee.department || 'Unassigned',
-      site: employee.location || employee.workLocation || 'Unassigned',
-      task: employee.jobTitle || 'Work assignment',
-      hoursWorked: index % 8 === 0 ? 0 : 8 + overtimeHours,
-      overtimeHours,
-      billableHours: index % 4 === 0 ? 6 : 8,
-      nonBillableHours: index % 4 === 0 ? 2 : 0,
-      status: index % 6 === 0 ? 'Submitted' : index % 5 === 0 ? 'Approved' : 'Draft',
-      workflowStage: index % 6 === 0 ? 'Supervisor' : 'Employee',
-      approvalStatus: index % 5 === 0 ? 'Approved' : 'Pending',
-      payrollStatus: index % 5 === 0 ? 'Payroll Ready' : 'Not Ready',
-      validationStatus: exceptions.some((item) => item.includes('Missing')) ? 'Blocked' : exceptions.length ? 'Warning' : 'Valid',
-      exceptions,
-    };
-  });
-};
-
 const permissionsFor = (role: TimeRole): TimePayload['permissions'] => ({
   canCreate: role !== 'Finance Team',
   canSubmit: role !== 'Finance Team',
@@ -299,7 +265,8 @@ export async function readTimeAndLogsPayload(section = 'timesheet-entry', roleIn
     readTimesheetPeriodSummaries(6).catch(() => []),
     readTimesheetData().catch(() => ({ headers: [], lines: [] })),
   ]);
-  const records = data.lines.length ? buildRecords(data.headers, data.lines) : await fallbackRecords();
+  const employeeSource = await readPayrollEmployees().catch(() => ({ employees: [] as Awaited<ReturnType<typeof readPayrollEmployees>>['employees'] }));
+  const records = data.lines.length ? buildRecords(data.headers, data.lines) : [];
   const currentSection = sections.find((item) => item.id === section) || sections[0];
   const availableActions = actions.filter((item) => currentSection.actions.includes(item.id) && item.roles.includes(role));
   const blocked = records.filter((item) => item.validationStatus === 'Blocked');
@@ -308,7 +275,7 @@ export async function readTimeAndLogsPayload(section = 'timesheet-entry', roleIn
   const overtimeHours = round(records.reduce((total, item) => total + item.overtimeHours, 0));
   const approved = records.filter((item) => item.approvalStatus === 'Approved');
   const pendingApprovals = records.filter((item) => item.approvalStatus === 'Pending' && item.status !== 'Draft').length;
-  const sourceText = data.lines.length ? 'DLE Timesheet database' : 'DLE employee source fallback with time workflow controls';
+  const sourceText = data.lines.length ? 'DLE Timesheet database' : 'DLE Timesheet database: no timesheet transactions found';
 
   return {
     generatedAt: nowIso(),
@@ -318,7 +285,7 @@ export async function readTimeAndLogsPayload(section = 'timesheet-entry', roleIn
     period,
     permissions: permissionsFor(role),
     summary: {
-      totalEmployees: new Set(records.map((item) => item.employeeId)).size,
+      totalEmployees: data.lines.length ? new Set(records.map((item) => item.employeeId)).size : employeeSource.employees.length,
       timesheets: data.headers.length || records.length,
       submittedTimesheets: records.filter((item) => item.status === 'Submitted').length,
       approvedTimesheets: approved.length,

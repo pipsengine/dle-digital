@@ -289,7 +289,7 @@ const bool = (v: string | undefined, fallback: boolean) => {
 };
 
 export const loadWorkspaceEnv = () => {
-  if (workspaceEnvLoaded || process.env.DLE_ENTERPRISE_DB_HOST) return;
+  if (workspaceEnvLoaded) return;
   workspaceEnvLoaded = true;
   const candidates = [
     path.join(process.cwd(), '.env'),
@@ -309,7 +309,6 @@ export const loadWorkspaceEnv = () => {
         if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
         process.env[key] = value;
       }
-      if (process.env.DLE_ENTERPRISE_DB_HOST) return;
     } catch {
       // Try the next workspace root candidate.
     }

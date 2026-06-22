@@ -10,6 +10,7 @@ import {
   readTimesheetData,
   readTimesheetPayrollUpdates,
   readTimesheetPeriod,
+  writeTimesheetPayrollUpdates,
   writeTimesheetHeaderLines,
   type TimesheetHeader,
   type TimesheetLine,
@@ -23,11 +24,12 @@ const err = (status: number, error: string) => NextResponse.json({ status: 'erro
 const round = (value: number, dp = 1) => Math.round(value * (10 ** dp)) / (10 ** dp);
 const lower = (value: unknown) => String(value || '').trim().toLowerCase();
 const includesAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
-const isSuperAdministrator = (role: string) => /\bsuper\b.*\badmin/i.test(role);
+const isSuperAdministrator = (role: string) => /\bsuper\b.*\badmin/i.test(role) || ['organizationadmin', 'hrbusinesspartner'].includes(lower(role));
 
 type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN' | 'PROCESS_PAYROLL' | 'POST_PAYROLL';
 type ProjectApprovalStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR' | 'Payroll';
 type BulkMode = 'HEADER' | 'PROJECT';
+const activeApprovalStatuses = new Set<TimesheetStatus>(['Submitted', 'Supervisor_Reviewed', 'Cost_Control_Reviewed', 'Project_Manager_Reviewed', 'HR_Acknowledged']);
 
 const statusLabel = (status: TimesheetStatus) => normalizeTimesheetStatus(status).replace(/_/g, ' ');
 
@@ -80,6 +82,10 @@ const requireHeaderStageAccess = (header: TimesheetHeader, action: ApprovalActio
 
   if (action === 'PROCESS_PAYROLL' || action === 'POST_PAYROLL') {
     if (!includesAny(actorRole, ['payroll', 'hr', 'human resources'])) throw new Error('Only HR or Payroll can process payroll-ready timesheets.');
+    return;
+  }
+  if (stage === 'Payroll Processing') {
+    if (!includesAny(actorRole, ['payroll', 'hr', 'human resources'])) throw new Error('Only HR or Payroll can return or reject payroll-ready timesheets.');
     return;
   }
 
@@ -269,7 +275,10 @@ const buildPayload = async (request: Request) => {
     };
   }));
 
-  const pendingTimesheets = summaries.filter(Boolean).sort((a, b) => new Date(b!.timesheetDate).getTime() - new Date(a!.timesheetDate).getTime());
+  const allTimesheets = summaries.filter(Boolean).sort((a, b) => new Date(b!.timesheetDate).getTime() - new Date(a!.timesheetDate).getTime());
+  const pendingTimesheets = allTimesheets.filter((item) => activeApprovalStatuses.has(item!.status));
+  const historyTimesheets = allTimesheets.filter((item) => !activeApprovalStatuses.has(item!.status));
+  const activeOrHistoryTimesheets = [...pendingTimesheets, ...historyTimesheets];
   const stats = {
     pendingSubmission: headers.filter((header) => normalizeTimesheetStatus(header.status) === 'Draft').length,
     pendingSupervisorApproval: pendingTimesheets.filter((item) => item!.status === 'Submitted').length,
@@ -278,10 +287,10 @@ const buildPayload = async (request: Request) => {
     pendingHrApproval: pendingTimesheets.filter((item) => item!.status === 'Project_Manager_Reviewed').length,
     pendingPayrollProcessing: pendingTimesheets.filter((item) => item!.status === 'HR_Acknowledged' && !item!.payrollProcessed).length,
     payrollReady: pendingTimesheets.filter((item) => item!.payrollReady).length,
-    payrollProcessed: pendingTimesheets.filter((item) => item!.payrollProcessed).length,
-    payrollPosted: pendingTimesheets.filter((item) => item!.payrollPosted).length,
-    returned: pendingTimesheets.filter((item) => item!.status === 'Returned').length,
-    rejected: pendingTimesheets.filter((item) => item!.status === 'Rejected').length,
+    payrollProcessed: activeOrHistoryTimesheets.filter((item) => item!.payrollProcessed).length,
+    payrollPosted: historyTimesheets.filter((item) => item!.payrollPosted).length,
+    returned: historyTimesheets.filter((item) => item!.status === 'Returned').length,
+    rejected: historyTimesheets.filter((item) => item!.status === 'Rejected').length,
     totalHoursWorked: round(pendingTimesheets.reduce((sum, item) => sum + item!.totalHours, 0)),
     overtimeHours: round(pendingTimesheets.reduce((sum, item) => sum + item!.overtimeHours, 0)),
     labourCost: round(pendingTimesheets.reduce((sum, item) => sum + item!.labourCost, 0), 0),
@@ -305,6 +314,7 @@ const buildPayload = async (request: Request) => {
       canExport: true,
     },
     pendingTimesheets,
+    historyTimesheets,
     stats,
     filterOptions: {
       workCenters: Array.from(new Set(headers.map((header) => header.workCenterName))).sort(),
@@ -331,6 +341,45 @@ const processPayroll = async (headerId: string, actor: string, post = false) => 
   if (!header) throw new Error('Timesheet header not found.');
   const status = normalizeTimesheetStatus(header.status);
   if (status !== 'HR_Acknowledged' && status !== 'Locked') throw new Error('Only HR-approved timesheets can be processed by Payroll.');
+  const updates = await readTimesheetPayrollUpdates();
+  const existingPeriodUpdate = updates.find((update) => update.periodId === header.periodId);
+  const mergedHeaderIds = Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), headerId]));
+  const totals = new Map<string, {
+    employeeId: string;
+    employeeName: string;
+    daysWorked: number;
+    attendanceHours: number;
+    bookedHours: number;
+    idleHours: number;
+  }>();
+  for (const line of lines.filter((item) => mergedHeaderIds.includes(item.headerId))) {
+    const current = totals.get(line.employeeId) || {
+      employeeId: line.employeeId,
+      employeeName: line.employeeName,
+      daysWorked: 0,
+      attendanceHours: 0,
+      bookedHours: 0,
+      idleHours: 0,
+    };
+    current.daysWorked += line.clockIn ? 1 : 0;
+    current.attendanceHours = round(current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration));
+    current.bookedHours = round(current.bookedHours + normalizePaidWorkHours(line.totalHours));
+    current.idleHours = round(current.idleHours + line.idleHours);
+    totals.set(line.employeeId, current);
+  }
+  const period = await readTimesheetPeriod(new Date(header.timesheetDate));
+  await writeTimesheetPayrollUpdates([
+    {
+      id: existingPeriodUpdate?.id || `payroll-${header.periodId}-${Date.now()}`,
+      periodId: header.periodId,
+      periodName: period.name,
+      acknowledgedAt: new Date().toISOString(),
+      acknowledgedBy: actor,
+      headerIds: mergedHeaderIds,
+      employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+    },
+    ...updates.filter((update) => update.periodId !== header.periodId),
+  ]);
   if (post) header.status = 'Locked';
   header.currentApprovalStage = null;
   header.currentApprover = null;
@@ -374,6 +423,17 @@ export async function PATCH(request: Request) {
     };
     if (!payload.action || !['APPROVE', 'REJECT', 'RETURN', 'PROCESS_PAYROLL', 'POST_PAYROLL'].includes(payload.action)) return err(400, 'Invalid approval action.');
     const { headers } = await readTimesheetData();
+    const requireProjectSegmentSequence = (segment: { headerId: string; projectCode: string; stage: ProjectApprovalStage }) => {
+      const header = headers.find((item) => item.id === segment.headerId);
+      if (!header) throw new Error(`Timesheet ${segment.headerId} was not found.`);
+      const status = normalizeTimesheetStatus(header.status);
+      if (segment.stage === 'Cost Control' && status !== 'Supervisor_Reviewed') {
+        throw new Error(`Cost Control can only approve ${segment.projectCode} while the timesheet is at Cost Control review.`);
+      }
+      if (segment.stage === 'Project Manager' && status !== 'Cost_Control_Reviewed') {
+        throw new Error(`Project Manager can only approve ${segment.projectCode} after Cost Control review is complete.`);
+      }
+    };
     const applyHeader = async (headerId: string) => {
       const header = headers.find((item) => item.id === headerId);
       if (!header) throw new Error(`Timesheet ${headerId} was not found.`);
@@ -385,6 +445,7 @@ export async function PATCH(request: Request) {
 
     if (payload.projectSegments?.length) {
       for (const segment of payload.projectSegments) {
+        requireProjectSegmentSequence(segment);
         requireProjectStageAccess(segment.stage, access.actor, access.role);
         await advanceProjectTimesheetApproval(segment.headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, {
           projectCode: segment.projectCode,
@@ -393,8 +454,11 @@ export async function PATCH(request: Request) {
           bypassAssigneeCheck: isSuperAdministrator(access.role),
         });
       }
-    } else if (payload.projectCode && payload.stage && payload.stage !== 'HR' && payload.stage !== 'Payroll') {
+    }
+
+    if (payload.projectCode && payload.stage && payload.stage !== 'HR' && payload.stage !== 'Payroll') {
       if (!payload.headerId) return err(400, 'Timesheet header ID is required.');
+      requireProjectSegmentSequence({ headerId: payload.headerId, projectCode: payload.projectCode, stage: payload.stage });
       requireProjectStageAccess(payload.stage, access.actor, access.role);
       await advanceProjectTimesheetApproval(payload.headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, {
         projectCode: payload.projectCode,
@@ -402,9 +466,13 @@ export async function PATCH(request: Request) {
         comment: payload.comment,
         bypassAssigneeCheck: isSuperAdministrator(access.role),
       });
-    } else {
+    }
+
+    const handledSingleProjectAction = Boolean(payload.projectCode && payload.stage && payload.stage !== 'HR' && payload.stage !== 'Payroll');
+    const hasHeaderAction = Boolean(payload.headerIds?.length || payload.headerId);
+    if ((!payload.projectSegments?.length && !handledSingleProjectAction) || hasHeaderAction) {
       const headerIds = payload.headerIds?.length ? payload.headerIds : payload.headerId ? [payload.headerId] : [];
-      if (!headerIds.length) return err(400, 'Timesheet header ID is required.');
+      if (!headerIds.length && !payload.projectSegments?.length) return err(400, 'Timesheet header ID is required.');
       for (const headerId of headerIds) await applyHeader(headerId);
     }
 

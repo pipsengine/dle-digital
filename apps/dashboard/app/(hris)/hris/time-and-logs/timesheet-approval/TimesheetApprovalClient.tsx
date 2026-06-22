@@ -148,6 +148,7 @@ type ApprovalPayload = {
     canExport: boolean;
   };
   pendingTimesheets: TimesheetSummary[];
+  historyTimesheets: TimesheetSummary[];
   stats: Record<string, number>;
   filterOptions: {
     workCenters: string[];
@@ -228,7 +229,7 @@ function SelectFilter({ label, value, values, onChange }: { label: string; value
   );
 }
 
-export default function TimesheetApprovalClient() {
+export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'active' | 'history' }) {
   const [payload, setPayload] = useState<ApprovalPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
@@ -268,7 +269,7 @@ export default function TimesheetApprovalClient() {
     try {
       const res = await fetch('/api/hris/time-and-logs/timesheet-approval', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-hris-role': payload?.permissions.role || 'OrganizationAdmin', 'x-hris-actor': payload?.permissions.actor || 'HRIS Administrator' },
         body: JSON.stringify(input),
       });
       const json = await res.json();
@@ -282,9 +283,10 @@ export default function TimesheetApprovalClient() {
     }
   };
 
+  const workspaceRows = mode === 'history' ? (payload?.historyTimesheets || []) : (payload?.pendingTimesheets || []);
   const filteredTimesheets = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return (payload?.pendingTimesheets || []).filter((item) => {
+    return workspaceRows.filter((item) => {
       const searchable = [
         item.supervisorName,
         item.workCenterName,
@@ -304,23 +306,53 @@ export default function TimesheetApprovalClient() {
       if (costFilter !== 'All' && !item.projectApprovals.some((project) => project.costCenter === costFilter)) return false;
       return true;
     });
-  }, [costFilter, payload, periodFilter, pmFilter, projectFilter, query, stageFilter, statusFilter]);
+  }, [costFilter, periodFilter, pmFilter, projectFilter, query, stageFilter, statusFilter, workspaceRows]);
 
   const selectedRows = filteredTimesheets.filter((item) => selected.includes(item.id));
   const toggleExpanded = (id: string) => setExpanded((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const canApprove = Boolean(payload?.permissions.canApprove);
+  const selectedSupervisorOrHrIds = selectedRows.filter((item) => item.currentStage === 'Supervisor' || item.currentStage === 'HR').map((item) => item.id);
+  const selectedPayrollProcessIds = selectedRows.filter((item) => item.currentStage === 'Payroll Processing' && item.payrollReady && !item.payrollProcessed && !item.payrollPosted).map((item) => item.id);
+  const selectedPayrollPostIds = selectedRows.filter((item) => item.currentStage === 'Payroll Processing' && item.payrollProcessed && !item.payrollPosted).map((item) => item.id);
+  const selectedHeaderDecisionIds = selectedRows.filter((item) => item.currentStage === 'Supervisor' || item.currentStage === 'HR' || item.currentStage === 'Payroll Processing').map((item) => item.id);
+  const selectedCostSegments = selectedRows.flatMap((item) =>
+    item.currentStage === 'Cost Control'
+      ? item.projectApprovals
+        .filter((project) => project.costControlStatus === 'Pending')
+        .map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage: 'Cost Control' as ProjectStage }))
+      : [],
+  );
+  const selectedPmSegments = selectedRows.flatMap((item) =>
+    item.currentStage === 'Project Manager'
+      ? item.projectApprovals
+        .filter((project) => project.costControlStatus === 'Approved' && project.projectManagerStatus === 'Pending')
+        .map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage: 'Project Manager' as ProjectStage }))
+      : [],
+  );
+  const smartApprovalCount = selectedSupervisorOrHrIds.length + selectedCostSegments.length + selectedPmSegments.length;
 
-  const bulkHeaderAction = (action: ApprovalAction, comment: string) => {
+  const bulkSmartApproval = () => {
+    if (!smartApprovalCount) return;
+    void act({
+      action: 'APPROVE',
+      headerIds: selectedSupervisorOrHrIds,
+      projectSegments: [...selectedCostSegments, ...selectedPmSegments],
+      comment: 'Bulk stage-aware approval completed.',
+    });
+  };
+
+  const bulkSmartDecision = (action: 'RETURN' | 'REJECT', comment: string) => {
     if (!selectedRows.length) return;
-    void act({ action, headerIds: selectedRows.map((item) => item.id), comment });
+    void act({
+      action,
+      headerIds: selectedHeaderDecisionIds,
+      projectSegments: [...selectedCostSegments, ...selectedPmSegments],
+      comment,
+    });
   };
 
   const bulkProjectAction = (stage: ProjectStage, action: ApprovalAction) => {
-    const projectSegments = selectedRows.flatMap((item) =>
-      item.projectApprovals
-        .filter((project) => stage === 'Cost Control' ? project.costControlStatus === 'Pending' : project.projectManagerStatus === 'Pending')
-        .map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage })),
-    );
+    const projectSegments = stage === 'Cost Control' ? selectedCostSegments : selectedPmSegments;
     if (!projectSegments.length) return;
     void act({ action, projectSegments, comment: `${stage} bulk ${action.toLowerCase()} completed.` });
   };
@@ -379,8 +411,8 @@ export default function TimesheetApprovalClient() {
 
   return (
     <PageTemplate
-      title="Timesheet Approval Workspace"
-      description="Supervisor, Cost Control, Project Manager, HR, and Payroll approval control for project-based timesheets."
+      title={mode === 'history' ? 'Timesheet Approval History' : 'Timesheet Approval Workspace'}
+      description={mode === 'history' ? 'Completed, posted, returned, and rejected timesheet approvals with full workflow evidence.' : 'Supervisor, Cost Control, Project Manager, HR, and Payroll approval control for project-based timesheets.'}
       breadcrumbs={[{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Approvals' }]}
       primaryAction={{ label: 'Refresh', onClick: load, icon: RefreshCcw }}
     >
@@ -420,33 +452,48 @@ export default function TimesheetApprovalClient() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{mode === 'history' ? 'History View' : 'Active Approval Queue'}</p>
+            <h3 className="mt-1 text-sm font-black text-slate-900">{filteredTimesheets.length} {mode === 'history' ? 'completed record(s)' : 'active approval record(s)'}</h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/hris/workforce-management/timesheet-approval" className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-widest ${mode === 'active' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Active Queue</Link>
+            <Link href="/hris/workforce-management/timesheet-approval-history" className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-widest ${mode === 'history' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Approval History</Link>
+          </div>
+        </div>
+
+        {mode === 'active' ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bulk Operations</p>
               <h3 className="mt-1 text-sm font-black text-slate-900">{selected.length} selected / {filteredTimesheets.length} visible</h3>
+              <p className="mt-1 text-xs font-bold text-slate-500">{smartApprovalCount} approval action(s), {selectedCostSegments.length} cost segment(s), {selectedPmSegments.length} PM segment(s), {selectedPayrollProcessIds.length} ready to process, {selectedPayrollPostIds.length} ready to post</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkHeaderAction('APPROVE', 'Bulk header approval completed.')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Approval</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkProjectAction('Cost Control', 'APPROVE')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Cost Approve</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkProjectAction('Project Manager', 'APPROVE')} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk PM Approve</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkHeaderAction('RETURN', 'Bulk return for correction.')} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-amber-700 disabled:opacity-40">Bulk Return</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkHeaderAction('REJECT', 'Bulk rejection completed.')} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-red-700 disabled:opacity-40">Bulk Rejection</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkHeaderAction('PROCESS_PAYROLL', 'Bulk payroll processing completed.')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Payroll</button>
+              <button type="button" onClick={() => setSelected(filteredTimesheets.map((item) => item.id))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700">Select Visible</button>
+              <button type="button" disabled={!selected.length} onClick={() => setSelected([])} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700 disabled:opacity-40">Clear</button>
+              <button type="button" disabled={!smartApprovalCount || !canApprove || submitting === 'APPROVE'} onClick={bulkSmartApproval} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-40">Bulk Approval ({smartApprovalCount})</button>
+              <button type="button" disabled={!selectedCostSegments.length || !canApprove || submitting === 'APPROVE'} onClick={() => bulkProjectAction('Cost Control', 'APPROVE')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-40">Bulk Cost Approve ({selectedCostSegments.length})</button>
+              <button type="button" disabled={!selectedPmSegments.length || !canApprove || submitting === 'APPROVE'} onClick={() => bulkProjectAction('Project Manager', 'APPROVE')} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-40">Bulk PM Approve ({selectedPmSegments.length})</button>
+              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkSmartDecision('RETURN', 'Bulk return for correction.')} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-amber-700 disabled:opacity-40">Bulk Return</button>
+              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkSmartDecision('REJECT', 'Bulk rejection completed.')} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-red-700 disabled:opacity-40">Bulk Rejection</button>
+              <button type="button" disabled={!selectedPayrollProcessIds.length || !canApprove} onClick={() => void act({ action: 'PROCESS_PAYROLL', headerIds: selectedPayrollProcessIds, comment: 'Bulk payroll processing completed.' })} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Process ({selectedPayrollProcessIds.length})</button>
+              <button type="button" disabled={!selectedPayrollPostIds.length || !canApprove} onClick={() => void act({ action: 'POST_PAYROLL', headerIds: selectedPayrollPostIds, comment: 'Bulk payroll posting completed.' })} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Post ({selectedPayrollPostIds.length})</button>
               <button type="button" onClick={() => exportRows('excel')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700"><Download className="mr-1 inline h-3.5 w-3.5" />Export</button>
               <button type="button" onClick={() => exportRows('print')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700"><Printer className="mr-1 inline h-3.5 w-3.5" />Print</button>
             </div>
           </div>
-        </div>
+        </div> : null}
 
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1500px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50">
-                  <th className="px-4 py-4">
+                  {mode === 'active' ? <th className="px-4 py-4">
                     <input type="checkbox" checked={selected.length === filteredTimesheets.length && filteredTimesheets.length > 0} onChange={(e) => setSelected(e.target.checked ? filteredTimesheets.map((item) => item.id) : [])} className="rounded border-slate-300" />
-                  </th>
+                  </th> : null}
                   {['Timesheet', 'Workflow Progress', 'Project Consolidation', 'Hours & Cost', 'Payroll', 'Actions'].map((header) => (
                     <th key={header} className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">{header}</th>
                   ))}
@@ -456,11 +503,15 @@ export default function TimesheetApprovalClient() {
                 {filteredTimesheets.map((item) => {
                   const open = expanded.includes(item.id);
                   const currentSla = item.workflowSteps.find((step) => step.stage === item.currentStage)?.slaStatus || 'On Track';
+                  const isSelected = selected.includes(item.id);
                   return (
-                    <tr key={item.id} className="align-top hover:bg-slate-50/60">
-                      <td className="px-4 py-5">
-                        <input type="checkbox" checked={selected.includes(item.id)} onChange={(e) => setSelected((current) => e.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="rounded border-slate-300" />
-                      </td>
+                    <tr key={item.id} className={`align-top transition-colors ${isSelected ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50/60'}`}>
+                      {mode === 'active' ? <td className="px-4 py-5">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 shadow-sm hover:border-blue-300 hover:text-blue-700">
+                          <input type="checkbox" checked={isSelected} onChange={(e) => setSelected((current) => e.target.checked ? Array.from(new Set([...current, item.id])) : current.filter((id) => id !== item.id))} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                          Select
+                        </label>
+                      </td> : null}
                       <td className="px-4 py-5">
                         <button type="button" onClick={() => toggleExpanded(item.id)} className="mb-2 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-blue-700">
                           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />} Drill Down
@@ -539,8 +590,8 @@ export default function TimesheetApprovalClient() {
                           {item.currentStage === 'HR' ? <button type="button" disabled={!canApprove} onClick={() => act({ action: 'APPROVE', headerId: item.id, comment: 'HR approved consolidated timesheet for payroll.' })} className="rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">HR Approve</button> : null}
                           {item.currentStage === 'Payroll Processing' ? (
                             <>
-                              <button type="button" disabled={!canApprove} onClick={() => act({ action: 'PROCESS_PAYROLL', headerId: item.id, comment: 'Payroll processed.' })} className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Process</button>
-                              <button type="button" disabled={!canApprove} onClick={() => act({ action: 'POST_PAYROLL', headerId: item.id, comment: 'Payroll posted.' })} className="rounded-lg bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Post</button>
+                              {!item.payrollProcessed ? <button type="button" disabled={!canApprove} onClick={() => act({ action: 'PROCESS_PAYROLL', headerId: item.id, comment: 'Payroll processed.' })} className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Process</button> : null}
+                              {item.payrollProcessed ? <button type="button" disabled={!canApprove} onClick={() => act({ action: 'POST_PAYROLL', headerId: item.id, comment: 'Payroll posted.' })} className="rounded-lg bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Post</button> : null}
                             </>
                           ) : null}
                           {['Supervisor', 'Cost Control', 'Project Manager', 'HR', 'Payroll Processing'].includes(item.currentStage || '') ? (
@@ -555,7 +606,7 @@ export default function TimesheetApprovalClient() {
                   );
                 })}
                 {filteredTimesheets.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-sm font-semibold text-slate-400">No timesheets match this approval workspace view.</td></tr>
+                  <tr><td colSpan={mode === 'active' ? 7 : 6} className="px-6 py-12 text-center text-sm font-semibold text-slate-400">No timesheets match this approval workspace view.</td></tr>
                 ) : null}
               </tbody>
             </table>

@@ -1029,7 +1029,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <div className="relative h-9 w-24 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white sm:h-10 sm:w-32">
-              <Image src="/brand/dorman-long-logo.jpg" alt="Dorman Long" fill className="object-contain p-1" priority />
+              <Image src="/brand/dorman-long-logo.jpg" alt="Dorman Long" fill sizes="160px" className="object-contain p-1" priority />
             </div>
             <div className="min-w-0 border-l border-slate-200 pl-2 sm:pl-3">
               <h1 className="truncate text-sm font-black text-slate-950 sm:text-lg">Employee Self-Service Portal</h1>
@@ -1105,7 +1105,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
               <div className="border-t border-blue-200 bg-white/80 p-4 sm:p-5 lg:border-l lg:border-t-0">
                 <div className="flex items-center gap-3">
                   <div className="relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
-                    <Image src="/brand/dorman-long-logo.jpg" alt="" fill className="object-contain p-2" />
+                    <Image src="/brand/dorman-long-logo.jpg" alt="" fill sizes="128px" className="object-contain p-2" />
                   </div>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-black text-slate-950">{employee?.fullName || 'Employee'}</p>

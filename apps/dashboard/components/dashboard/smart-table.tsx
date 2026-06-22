@@ -86,7 +86,7 @@ export function SmartTable() {
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-100 border border-slate-200 relative">
-                       <Image src={emp.photo} alt={emp.name} fill referrerPolicy="no-referrer" className="object-cover" />
+                       <Image src={emp.photo} alt={emp.name} fill sizes="40px" referrerPolicy="no-referrer" className="object-cover" />
                     </div>
                     <div>
                       <div className="font-medium text-slate-900">{emp.name}</div>
