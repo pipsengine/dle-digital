@@ -576,31 +576,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const payload = emptyPayload(request, error);
     if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: auditStore.slice(0, 200), warning: payload.dataSource.warning });
-    if (url.searchParams.get('format') === 'csv') {
-      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
-      return new Response(csv(payload.records), {
-        headers: {
-          'content-type': 'text/csv; charset=utf-8',
-          'content-disposition': `attachment; filename="payroll-${payload.period}.csv"`,
-        },
-      });
-    }
-    if (url.searchParams.get('format') === 'xls' || url.searchParams.get('format') === 'excel') {
-      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
-      return new Response(buildExcelHtml({
-        title: `Payroll Register - ${payload.periodLabel}`,
-        subtitle: payload.dataSource.warning || 'Payroll service fallback export',
-        sheetName: 'Payroll Register',
-        columns: payrollExportColumns,
-        rows: payrollExportRows(payload.records),
-      }), {
-        headers: {
-          'content-type': excelMimeType,
-          'content-disposition': `attachment; filename="payroll-${payload.period}.xls"`,
-        },
-      });
-    }
-    return jsonOk(payload);
+    return jsonErr(503, payload.dataSource.warning || 'Payroll employee source is unavailable. HRIS database data is required for production payroll.');
   }
 }
 

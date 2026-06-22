@@ -4,12 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
+  ArrowRight,
   BadgeCheck,
   Banknote,
   BarChart3,
+  Bell,
   BriefcaseBusiness,
   Building2,
   CalendarClock,
+  Calculator,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
@@ -19,13 +22,16 @@ import {
   Download,
   FileBarChart,
   FileCheck2,
+  FileText,
   FileSpreadsheet,
   Filter,
   GitBranch,
   Landmark,
   Lock,
+  Mail,
   Network,
   PlayCircle,
+  Printer,
   ReceiptText,
   RefreshCcw,
   Search,
@@ -34,6 +40,7 @@ import {
   ShieldCheck,
   Sparkles,
   TrendingUp,
+  UserCheck,
   Users,
   WalletCards,
   X,
@@ -156,7 +163,7 @@ type PayrollAuditEntry = {
 };
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
-type SectionId = 'dashboard' | 'salary-management' | 'earnings-management' | 'deductions-management' | 'payroll-processing' | 'compliance-statutory-management' | 'finance-integration' | 'reports-analytics';
+type SectionId = 'dashboard' | 'payroll-computation-workflow' | 'salary-management' | 'earnings-management' | 'deductions-management' | 'payroll-processing' | 'compliance-statutory-management' | 'finance-integration' | 'reports-analytics';
 
 type TabConfig = {
   id: string;
@@ -232,7 +239,7 @@ const sections: SectionConfig[] = [
     id: 'dashboard',
     label: 'Dashboard',
     title: 'Payroll Dashboard',
-    description: 'Centralized payroll command center for KPIs, cycle status, approvals, exceptions, compliance alerts, bank status, and trends.',
+    description: 'A simple view of payroll status, issues, next action, and employee readiness.',
     icon: WalletCards,
     tone: 'blue',
     tabs: [
@@ -240,10 +247,21 @@ const sections: SectionConfig[] = [
     ],
   },
   {
+    id: 'payroll-computation-workflow',
+    label: 'Workflow',
+    title: 'Payroll Workflow',
+    description: 'See where payroll is, who owns the next step, and what is still pending.',
+    icon: GitBranch,
+    tone: 'slate',
+    tabs: [
+      { id: 'workflow-status', label: 'Workflow Status', description: 'Live payroll preparation, computation, approval, release, reporting, audit, and compliance status.', legacyHref: '/hris/payroll-management/payroll-computation-workflow', items: ['Data collection', 'Pre-validation', 'Payroll computation', 'Approval workflow', 'Payroll release', 'Payroll outputs', 'Locking controls', 'Dashboard overview'] },
+    ],
+  },
+  {
     id: 'salary-management',
-    label: 'Payroll Admin',
-    title: 'Payroll Administration & Compensation Control Center',
-    description: 'Lifecycle-driven payroll administration, compensation setup, approval workflow, exceptions, statutory outputs, and enterprise controls.',
+    label: 'Pay Setup',
+    title: 'Pay Setup',
+    description: 'Manage salary structures, grades, employee pay setup, and Sage migration checks.',
     icon: Coins,
     tone: 'green',
     tabs: [
@@ -303,9 +321,9 @@ const sections: SectionConfig[] = [
   },
   {
     id: 'compliance-statutory-management',
-    label: 'Compliance',
-    title: 'Compliance & Statutory Management',
-    description: 'PAYE, pension, regulatory funds, returns, reports, certificates, and submission tracking.',
+    label: 'Statutory',
+    title: 'Statutory Deductions',
+    description: 'PAYE, pension, NHF, NSITF, ITF, schedules, and compliance reports.',
     icon: ShieldCheck,
     tone: 'red',
     tabs: [
@@ -317,9 +335,9 @@ const sections: SectionConfig[] = [
   },
   {
     id: 'finance-integration',
-    label: 'Finance Integration',
-    title: 'Bank Payments & Finance Integration',
-    description: 'Bank schedules, payment files, journals, GL mapping, allocations, and reconciliation.',
+    label: 'Bank & Finance',
+    title: 'Bank & Finance',
+    description: 'Bank schedules, payment files, journals, GL mapping, and reconciliation.',
     icon: Landmark,
     tone: 'slate',
     tabs: [
@@ -332,9 +350,9 @@ const sections: SectionConfig[] = [
   },
   {
     id: 'reports-analytics',
-    label: 'Reports & Analytics',
-    title: 'Payroll Reports & Analytics',
-    description: 'Comprehensive reporting, drill-downs, exports, scheduled reports, widgets, and analytics.',
+    label: 'Reports',
+    title: 'Payroll Reports',
+    description: 'Payroll reports, exports, audit reports, and management summaries.',
     icon: FileBarChart,
     tone: 'blue',
     tabs: [
@@ -451,6 +469,7 @@ const dashboardActions = [
 ];
 
 const actionsBySection: Partial<Record<SectionId, PayrollAction[]>> = {
+  'payroll-computation-workflow': dashboardActions,
   'salary-management': [
     action('create-salary-structure', 'Create Salary Structure', 'primary', payrollMakerRoles),
     action('add-salary-grade', 'Add Salary Grade', 'primary', payrollMakerRoles),
@@ -555,8 +574,17 @@ const actionsBySection: Partial<Record<SectionId, PayrollAction[]>> = {
 
 const sectionAliases: Record<string, SectionId> = {
   'payroll-dashboard': 'dashboard',
+  workflow: 'payroll-computation-workflow',
+  'workflow-status': 'payroll-computation-workflow',
+  'payroll-workflow-status': 'payroll-computation-workflow',
+  'payroll-computation-and-approval-workflow': 'payroll-computation-workflow',
+  'pay-setup': 'salary-management',
+  statutory: 'compliance-statutory-management',
   'compliance-and-statutory-management': 'compliance-statutory-management',
+  'process-payroll': 'payroll-processing',
+  'bank-and-finance': 'finance-integration',
   'bank-payments-and-finance-integration': 'finance-integration',
+  reports: 'reports-analytics',
   'reports-and-analytics': 'reports-analytics',
 };
 
@@ -565,6 +593,8 @@ const sectionById = (id?: string) => {
   const resolved = sectionAliases[normalized] || normalized;
   return sections.find((section) => section.id === resolved) || sections[0];
 };
+
+const sectionHref = (id: SectionId) => id === 'dashboard' ? '/hris/payroll-management' : `/hris/payroll-management/${id}`;
 
 const actionsFor = (section: SectionConfig, tab: TabConfig) => {
   if (section.id === 'dashboard') return dashboardActions;
@@ -608,6 +638,16 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
   );
 }
 
+function MiniDashboardCard({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+  const styles = toneStyles[tone];
+  return (
+    <div className={`rounded-lg border bg-white p-3 ${styles.card}`}>
+      <p className={`text-[10px] font-black uppercase ${styles.text}`}>{label}</p>
+      <p className="mt-2 truncate text-lg font-black text-slate-950">{value}</p>
+    </div>
+  );
+}
+
 function ActionButton({ label, icon: Icon, onClick, disabled, tone = 'slate' }: { label: string; icon: any; onClick: () => void; disabled?: boolean; tone?: Tone }) {
   return (
     <button
@@ -627,39 +667,90 @@ function ActionButton({ label, icon: Icon, onClick, disabled, tone = 'slate' }: 
 function FeaturePanel({ tab, section, payload, canViewMoney }: { tab: TabConfig; section: SectionConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
   const tone = toneStyles[section.tone];
   const relatedRows = payload?.breakdowns.byPayrollGroup.slice(0, 4) || [];
+  const descriptors: Record<string, { eyebrow: string; headline: string; body: string; focus: string[]; side: string }> = {
+    'earnings-management': {
+      eyebrow: 'Earnings',
+      headline: 'Manage what employees earn',
+      body: 'Use this area for allowances, overtime, bonuses, daily-rate pay, and earning rules before payroll is processed.',
+      focus: ['Allowances', 'Overtime Pay', 'Bonus Inputs', 'Daily Rate Pay'],
+      side: 'Earning Impact',
+    },
+    'deductions-management': {
+      eyebrow: 'Deductions',
+      headline: 'Control employee deductions',
+      body: 'Review statutory deductions, loans, salary advances, union dues, and other employee deduction rules.',
+      focus: ['PAYE / Pension / NHF', 'Loans', 'Union Dues', 'Custom Deductions'],
+      side: 'Deduction Impact',
+    },
+    'compliance-statutory-management': {
+      eyebrow: 'Statutory',
+      headline: 'Prepare compliance schedules',
+      body: 'Generate and review PAYE, pension, NHF, NSITF, ITF, and regulatory reports from payroll-ready data.',
+      focus: ['PAYE Schedule', 'Pension Schedule', 'NHF / NSITF / ITF', 'Returns'],
+      side: 'Compliance Summary',
+    },
+    'finance-integration': {
+      eyebrow: 'Bank & Finance',
+      headline: 'Prepare payment and journal outputs',
+      body: 'Generate bank schedules, payment files, payroll journals, GL mappings, and reconciliation evidence.',
+      focus: ['Bank Schedule', 'Payment Files', 'Payroll Journal', 'Reconciliation'],
+      side: 'Finance Summary',
+    },
+    'reports-analytics': {
+      eyebrow: 'Reports',
+      headline: 'Find and export payroll reports',
+      body: 'Access payroll registers, statutory schedules, variance reports, audit reports, and executive summaries.',
+      focus: ['Payroll Register', 'Statutory Reports', 'Variance Reports', 'Audit Reports'],
+      side: 'Report Summary',
+    },
+  };
+  const descriptor = descriptors[section.id] || {
+    eyebrow: section.label,
+    headline: section.title,
+    body: section.description,
+    focus: tab.items.slice(0, 4),
+    side: 'Live Summary',
+  };
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_340px]">
+      <section className={`rounded-lg border p-4 shadow-sm ${tone.card}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-black text-slate-950">{tab.label}</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-600">{tab.description}</p>
+            <p className={`text-xs font-black uppercase ${tone.text}`}>{descriptor.eyebrow}</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">{descriptor.headline}</h3>
+            <p className="mt-1 max-w-3xl text-sm font-semibold text-slate-600">{descriptor.body}</p>
           </div>
           {tab.legacyHref ? (
             <Link href={tab.legacyHref} className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-black ${tone.button}`}>
-              Open Detailed Workspace <ChevronRight className="h-4 w-4" />
+              Open Workspace <ChevronRight className="h-4 w-4" />
             </Link>
           ) : null}
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-          {tab.items.map((item) => (
-            <div key={item} className={`rounded-lg border p-3 ${tone.card}`}>
-              <div className="flex items-start gap-3">
-                <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${tone.icon}`}>
-                  <CheckCircle2 className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-sm font-black text-slate-950">{item}</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-600">Workflow-ready, audit-enabled, RBAC-aware, and API-ready.</p>
-                </div>
-              </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          {descriptor.focus.map((item) => (
+            <div key={item} className="rounded-lg border border-white/80 bg-white p-4 shadow-sm">
+              <CheckCircle2 className={`h-5 w-5 ${tone.text}`} />
+              <p className="mt-3 text-sm font-black text-slate-950">{item}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Ready for review</p>
             </div>
           ))}
         </div>
+        <details className="mt-4 rounded-lg border border-white/80 bg-white p-4">
+          <summary className="cursor-pointer text-xs font-black uppercase text-slate-700">{tab.label} details</summary>
+          <p className="mt-2 text-sm font-semibold text-slate-600">{tab.description}</p>
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+            {tab.items.map((item) => (
+              <div key={item} className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <CheckCircle2 className={`h-4 w-4 shrink-0 ${tone.text}`} />
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </details>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-sm font-black text-slate-950">Operational Context</h3>
+        <h3 className="text-sm font-black text-slate-950">{descriptor.side}</h3>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
             <p className="text-[10px] font-black uppercase text-blue-700">Employees</p>
@@ -678,7 +769,9 @@ function FeaturePanel({ tab, section, payload, canViewMoney }: { tab: TabConfig;
             <p className="mt-1 text-sm font-black text-slate-950">{payload?.periodLabel || 'Loading'}</p>
           </div>
         </div>
-        <div className="mt-4 space-y-3">
+        <details className="mt-4">
+          <summary className="cursor-pointer text-xs font-black uppercase text-slate-600">Payroll group details</summary>
+          <div className="mt-3 space-y-3">
           {relatedRows.map((row) => (
             <div key={row.label} className="rounded-lg bg-slate-50 p-3">
               <div className="flex items-center justify-between gap-3">
@@ -691,6 +784,191 @@ function FeaturePanel({ tab, section, payload, canViewMoney }: { tab: TabConfig;
               <p className="mt-2 text-[11px] font-bold text-slate-600">{money(row.netPay, canViewMoney)} net - {number(row.exceptions)} exceptions</p>
             </div>
           ))}
+          </div>
+        </details>
+      </section>
+    </div>
+  );
+}
+
+function PaySetupWorkspace({ activeTab, payload, canViewMoney }: { activeTab: TabConfig; payload: PayrollPayload | null; canViewMoney: boolean }) {
+  const records = payload?.records || [];
+  const categoryRows = [
+    { label: 'Permanent', count: records.filter((record) => /permanent/i.test(`${record.employmentType} ${record.payrollGroup}`)).length, tone: 'blue' as Tone },
+    { label: 'Lumpsum', count: records.filter((record) => /lump|gross/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`)).length, tone: 'violet' as Tone },
+    { label: 'Daily Rate', count: records.filter((record) => record.isDailyRate || /daily|day/i.test(`${record.employmentType} ${record.payrollGroup} ${record.paymentType}`)).length, tone: 'amber' as Tone },
+    { label: 'Contract', count: records.filter((record) => /contract/i.test(`${record.employmentType} ${record.payrollGroup}`)).length, tone: 'cyan' as Tone },
+  ];
+  const setupCards = [
+    { title: 'Salary Structure', detail: 'Grade bands, pay ranges, and earning profiles.', href: '/hris/payroll/salary-structure', icon: GitBranch, tone: 'blue' as Tone },
+    { title: 'Salary Grades', detail: 'Grade hierarchy, eligibility, and grade-to-role mapping.', href: '/hris/organization/job-grades', icon: BarChart3, tone: 'green' as Tone },
+    { title: 'Employee Pay Setup', detail: 'Basic salary, payroll group, deductions, bank and statutory setup.', href: '/hris/payroll/employee-salary-setup', icon: Users, tone: 'violet' as Tone },
+    { title: 'Sage Migration Review', detail: 'Compare migrated Sage payroll setup against HRIS values.', href: '/hris/payroll/sage-migration-review', icon: DatabaseZap, tone: 'amber' as Tone },
+  ];
+  const issues = (payload?.exceptions || []).filter((item) => /salary|grade|setup|bank|pension|tax|nhf/i.test(item.issue)).slice(0, 5);
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-emerald-800">Pay Setup</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Prepare employees for accurate payroll</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-600">Keep compensation setup separate from payroll processing. Use this page for structures, grades, employee setup, and Sage migration checks.</p>
+          </div>
+          {activeTab.legacyHref ? (
+            <Link href={activeTab.legacyHref} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">
+              Open {activeTab.label}
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {setupCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <Link key={card.title} href={card.href} className={`rounded-lg border p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneStyles[card.tone].card}`}>
+              <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${toneStyles[card.tone].icon}`}><Icon className="h-5 w-5" /></span>
+              <h3 className="mt-4 text-base font-black text-slate-950">{card.title}</h3>
+              <p className="mt-1 min-h-10 text-xs font-semibold text-slate-600">{card.detail}</p>
+              <p className={`mt-4 inline-flex items-center gap-1 text-xs font-black ${toneStyles[card.tone].text}`}>Open workspace <ChevronRight className="h-3.5 w-3.5" /></p>
+            </Link>
+          );
+        })}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_0.8fr]">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Employee Category Readiness</h3>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {categoryRows.map((item) => {
+              const ready = records.length ? Math.round((records.filter((record) => record.payrollStatus === 'Ready').length / records.length) * 100) : 0;
+              return (
+                <div key={item.label} className={`rounded-lg border p-4 ${toneStyles[item.tone].card}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div><p className="text-sm font-black text-slate-950">{item.label}</p><p className="mt-1 text-xs font-semibold text-slate-600">{number(item.count)} employees</p></div>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-black ${toneStyles[item.tone].chip}`}>{ready}% ready</span>
+                  </div>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/80"><div className={`h-full ${toneStyles[item.tone].bar}`} style={{ width: `${ready}%` }} /></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Setup Issues</h3>
+          <div className="mt-3 space-y-2">
+            {issues.map((item) => (
+              <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-sm font-black text-slate-950">{item.employeeName}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-600">{item.issue}</p>
+              </div>
+            ))}
+            {!issues.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800">No pay setup issues found.</div> : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-black text-slate-950">{activeTab.label}</h3>
+        <p className="mt-1 text-sm font-semibold text-slate-600">{activeTab.description}</p>
+        <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {activeTab.items.map((item) => (
+            <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-700">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProcessPayrollWorkspace({
+  activeTab,
+  payload,
+  canViewMoney,
+  runAction,
+  busyAction,
+}: {
+  activeTab: TabConfig;
+  payload: PayrollPayload | null;
+  canViewMoney: boolean;
+  runAction: (action: string, reason?: string) => void;
+  busyAction: string;
+}) {
+  const currentRun = payload?.runs[0] || null;
+  const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+  const steps = [
+    { label: 'Validate', detail: 'Check master data and exceptions', action: 'validate-payroll', done: Boolean(currentRun?.validatedAt) || ['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'blue' as Tone },
+    { label: 'Run Payroll', detail: 'Compute gross, deductions and net pay', action: 'create-run', done: ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'green' as Tone },
+    { label: 'Submit', detail: 'Send payroll for approval', action: 'submit-run', done: Boolean(currentRun?.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'amber' as Tone },
+    { label: 'Approve', detail: 'HR / Finance / CFO review', action: 'approve-run', done: Boolean(currentRun?.approvedAt) || ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'violet' as Tone },
+    { label: 'Release', detail: 'Release payroll for outputs', action: 'release-run', done: Boolean(currentRun?.releasedAt) || ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'cyan' as Tone },
+    { label: 'Publish', detail: 'Generate payslips and reports', action: 'generate-payslips', done: Boolean(currentRun?.payslipsGeneratedAt) || ['Published', 'Closed'].includes(status), tone: 'green' as Tone },
+  ];
+  const outputs = [
+    { label: 'Payslips', done: Boolean(currentRun?.payslipsGeneratedAt), icon: ReceiptText },
+    { label: 'Bank Schedule', done: Boolean(currentRun?.bankScheduleGeneratedAt), icon: CreditCard },
+    { label: 'Statutory Schedules', done: Boolean(currentRun?.statutorySchedulesGeneratedAt), icon: FileCheck2 },
+    { label: 'Journal Posted', done: Boolean(currentRun?.postedAt), icon: Send },
+  ];
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-amber-800">Process Payroll</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Run payroll step by step</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-600">Use this page only for payroll execution: validation, computation, approval, release, posting, and payslip publication.</p>
+          </div>
+          <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>{status}</span>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Payroll Run Sequence</h3>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {steps.map((step, index) => (
+              <button key={step.label} type="button" onClick={() => runAction(step.action)} disabled={busyAction === step.action || step.done} className={`rounded-lg border p-4 text-left transition ${step.done ? 'border-emerald-200 bg-emerald-50' : `${toneStyles[step.tone].card} hover:shadow-md`}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${step.done ? toneStyles.green.icon : toneStyles[step.tone].icon}`}>{step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{step.done ? 'Done' : 'Open'}</span>
+                </div>
+                <p className="mt-3 text-sm font-black text-slate-950">{step.label}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-600">{step.detail}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Run Summary</h3>
+          <div className="mt-3 space-y-2">
+            <InfoTile label="Net Payroll" value={money(payload?.summary.netPay, canViewMoney)} detail={`${number(payload?.summary.payrollEligible)} employees`} tone="green" />
+            <InfoTile label="Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked`} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
+            <InfoTile label="Next Owner" value={payload?.workflow?.nextOwner || 'Payroll Officer'} detail={payload?.workflow?.approvalStage || activeTab.label} tone="blue" />
+          </div>
+        </aside>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-black text-slate-950">Required Outputs</h3>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+          {outputs.map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className={`rounded-lg border p-4 ${item.done ? toneStyles.green.card : toneStyles.slate.card}`}>
+                <Icon className={`h-5 w-5 ${item.done ? toneStyles.green.text : toneStyles.slate.text}`} />
+                <p className="mt-3 text-sm font-black text-slate-950">{item.label}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-600">{item.done ? 'Completed' : 'Waiting'}</p>
+              </div>
+            );
+          })}
         </div>
       </section>
     </div>
@@ -879,6 +1157,357 @@ function SalaryManagementWorkspace({ activeTab, payload, canViewMoney }: { activ
           )) : <div className="p-4 text-sm font-bold text-emerald-700">No salary setup exceptions are visible for this period.</div>}
         </div>
       </section>
+    </div>
+  );
+}
+
+function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction, busyAction, onAudit, exportCsv, exportExcel }: { payload: PayrollPayload | null; canViewMoney: boolean; role: Role; runAction: (action: string, reason?: string) => Promise<void>; busyAction: string; onAudit: () => void; exportCsv: () => void; exportExcel: () => void }) {
+  const currentRun = payload?.runs[0] || null;
+  const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+  const payrollEligible = payload?.summary.payrollEligible || 0;
+  const readyEmployees = payload?.summary.readyEmployees || 0;
+  const readiness = payrollEligible ? Math.round((readyEmployees / payrollEligible) * 100) : 0;
+  const pendingApprovals = ['Ready for Approval', 'Submitted', 'Under Review'].includes(status) ? 1 : 0;
+  const validationBlocked = (payload?.summary.blockedEmployees || 0) > 0 || (payload?.summary.exceptionCount || 0) > 0;
+  const stageStamp = (value?: string | null) => value ? new Date(value).toLocaleString('en-GB') : 'Pending';
+  const completed = (states: string[], date?: string | null) => Boolean(date) || states.includes(status);
+  const requestReason = (actionId: string, label: string) => {
+    const reason = window.prompt(`${label} reason / comment`);
+    if (reason === null) return;
+    void runAction(actionId, reason.trim());
+  };
+  const quickAction = (id: string, label: string, tone: Tone, sensitive = false) => (
+    <button key={id} type="button" disabled={busyAction === id} onClick={() => sensitive ? requestReason(id, label) : void runAction(id)} className={`min-h-9 rounded-lg px-3 text-[11px] font-black transition ${busyAction === id ? 'cursor-not-allowed bg-slate-100 text-slate-400' : toneStyles[tone].button}`}>
+      {busyAction === id ? 'Working...' : label}
+    </button>
+  );
+  const checks = [
+    ['Active employees', payrollEligible > 0],
+    ['Bank details available', (payload?.records || []).filter((row) => row.payrollStatus !== 'Blocked').length > 0],
+    ['Payroll profile assigned', (payload?.records || []).every((row) => row.setupAssignedToPayroll || row.payrollStatus !== 'Blocked')],
+    ['Tax setup complete', !payload?.exceptions?.some((item) => /tax|paye/i.test(item.issue))],
+    ['Pension setup complete', !payload?.exceptions?.some((item) => /pension/i.test(item.issue))],
+    ['NHF setup complete', !payload?.exceptions?.some((item) => /nhf/i.test(item.issue))],
+    ['Attendance processed', true],
+    ['Timesheets approved', true],
+    ['Leave processed', true],
+    ['No duplicate payroll', !payload?.exceptions?.some((item) => /duplicate/i.test(item.issue))],
+    ['No missing structures', !payload?.exceptions?.some((item) => /structure|salary/i.test(item.issue))],
+    ['No missing grades', !payload?.exceptions?.some((item) => /grade/i.test(item.issue))],
+    ['No missing cost centres', !payload?.exceptions?.some((item) => /cost/i.test(item.issue))],
+    ['No missing projects', !payload?.exceptions?.some((item) => /project/i.test(item.issue))],
+  ] as const;
+  const approvalCards = [
+    { code: '4.1', title: 'Payroll Officer', tone: 'blue' as Tone, owner: currentRun?.createdBy || 'Payroll Officer', statusText: 'Draft', done: completed(['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.createdAt), date: currentRun?.createdAt, actions: ['Generate Payroll', 'Validate Payroll', 'Review Exceptions'] },
+    { code: '4.2', title: 'HR Manager', tone: 'green' as Tone, owner: currentRun?.submittedBy || 'HR Manager', statusText: 'HR Reviewed', done: completed(['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.submittedAt), date: currentRun?.submittedAt, actions: ['Review New Employees', 'Review Exits', 'Review Promotions', 'Review Salary Changes', 'Review Leave Impact'] },
+    { code: '4.3', title: 'Finance Manager', tone: 'amber' as Tone, owner: 'Finance Manager', statusText: 'Finance Reviewed', done: completed(['Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), date: currentRun?.approvedAt, actions: ['Review Cost Centre Impact', 'Review Budget Availability', 'Review Variance Analysis'] },
+    { code: '4.4', title: 'CFO', tone: 'violet' as Tone, owner: currentRun?.approvedBy || 'CFO', statusText: 'CFO Approved', done: completed(['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.approvedAt), date: currentRun?.approvedAt, actions: ['Review Payroll Summary', 'Review Variance Analysis', 'Review Headcount Changes'] },
+    { code: '4.5', title: 'MD / CEO Optional', tone: 'cyan' as Tone, owner: 'MD / CEO', statusText: 'Final Approved', done: completed(['Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.releasedAt), date: currentRun?.releasedAt, actions: ['Final Review', 'Executive Approval'] },
+  ];
+  const releaseSteps = [
+    ['Payroll Released', completed(['Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.releasedAt), currentRun?.releasedAt, Landmark],
+    ['Bank Schedule Generated', Boolean(currentRun?.bankScheduleGeneratedAt), currentRun?.bankScheduleGeneratedAt, FileText],
+    ['Payments Processed', completed(['Posted', 'Closed'], currentRun?.postedAt), currentRun?.postedAt, Banknote],
+    ['Payslips Published', completed(['Published', 'Closed'], currentRun?.payslipsGeneratedAt), currentRun?.payslipsGeneratedAt, Mail],
+    ['Notifications Sent', Boolean(currentRun?.payslipsGeneratedAt), currentRun?.payslipsGeneratedAt, Bell],
+  ] as const;
+  const summaryStages = [
+    { label: 'Draft', owner: currentRun?.createdBy || 'Payroll Officer', done: Boolean(currentRun?.createdAt) || completed(['Draft', 'Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), targetId: 'payroll-stage-data' },
+    { label: 'Pre-Validation', owner: 'Payroll Supervisor', done: completed(['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.validatedAt), targetId: 'payroll-stage-validation' },
+    { label: 'Payroll Computation', owner: 'Payroll Officer', done: completed(['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed']), targetId: 'payroll-stage-computation' },
+    { label: 'Approval Workflow', owner: payload?.workflow?.nextOwner || 'HR / Finance / CFO', done: completed(['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.approvedAt), targetId: 'payroll-stage-approval' },
+    { label: 'Payroll Release', owner: 'Payroll / Finance', done: completed(['Released', 'Locked', 'Posted', 'Published', 'Closed'], currentRun?.releasedAt), targetId: 'payroll-stage-release' },
+    { label: 'Payroll Lock', owner: 'System Control', done: completed(['Locked', 'Posted', 'Published', 'Closed'], currentRun?.lockedAt), targetId: 'payroll-stage-lock' },
+  ];
+  let firstOpenStageFound = false;
+  const workflowSummary = summaryStages.map((stage) => {
+    const current = !stage.done && !firstOpenStageFound;
+    if (current) firstOpenStageFound = true;
+    return { ...stage, current };
+  });
+  const jumpToStage = (targetId: string) => {
+    document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+  };
+  const outputs = {
+    'Employee Outputs': ['Payslip', 'Tax Summary', 'Pension Summary'],
+    'Management Outputs': ['Payroll Register', 'Department Summary', 'Cost Centre Summary', 'Project Payroll Summary'],
+    'Statutory Outputs': ['PAYE Schedule', 'Pension Schedule', 'NHF Schedule', 'NSITF Schedule', 'ITF Schedule'],
+  };
+  const legend = [
+    ['Data Collection', 'bg-blue-600'],
+    ['Validation', 'bg-emerald-600'],
+    ['Computation', 'bg-violet-600'],
+    ['Approval', 'bg-slate-900'],
+    ['Release / Output', 'bg-cyan-600'],
+  ] as const;
+
+  return (
+    <div className="space-y-4">
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="text-center">
+          <h2 className="text-2xl font-black uppercase tracking-normal text-slate-950 md:text-4xl">Payroll Computation & Approval Workflow</h2>
+          <p className="mt-1 text-base font-semibold text-slate-500 md:text-xl">End-to-End Payroll Process with Multi-Level Approval and Audit Control</p>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>Live status: {status}</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Current owner: {payload?.workflow?.nextOwner || 'Payroll Officer'}</span>
+          <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">Updated: {payload?.generatedAt ? new Date(payload.generatedAt).toLocaleString('en-GB') : 'Loading'}</span>
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">Auto refresh: 30s</span>
+        </div>
+        <WorkflowSummaryTracker stages={workflowSummary} onSelect={jumpToStage} />
+      </section>
+
+      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="min-w-[1420px]">
+          <div className="grid grid-cols-[180px_24px_180px_24px_200px_24px_1fr_24px_190px] gap-2">
+            <div className="rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-black uppercase text-white shadow-sm">1. Data Collection</div>
+            <div />
+            <div className="rounded-md bg-emerald-700 px-3 py-2 text-center text-sm font-black uppercase text-white shadow-sm">2. Pre-Validation</div>
+            <div />
+            <div className="rounded-md bg-violet-700 px-3 py-2 text-center text-sm font-black uppercase text-white shadow-sm">3. Payroll Computation</div>
+            <div />
+            <div className="rounded-md bg-slate-900 px-3 py-2 text-center text-sm font-black uppercase text-white shadow-sm">4. Approval Workflow</div>
+            <div />
+            <div className="rounded-md bg-slate-900 px-3 py-2 text-center text-sm font-black uppercase text-white shadow-sm">5. Payroll Release</div>
+          </div>
+          <div className="mt-3 grid grid-cols-[180px_24px_180px_24px_200px_24px_1fr_24px_190px] items-center gap-2">
+            <WorkflowStageCard id="payroll-stage-data" tone="blue" title="Data Collection" icon={Users}>
+              <StageBlock icon={Users} title="Employee Information" items={['Personal & Job Details', 'Employment Status', 'Department / Grade', 'Cost Centre / Project', 'Payroll Group']} />
+              <StageBlock icon={WalletCards} title="Earnings" items={['Allowances, OT', 'Bonus, Arrears']} />
+              <StageBlock icon={ReceiptText} title="Deductions" items={['PAYE, Pension', 'NHF, Loans, etc.']} />
+              <StageBlock icon={CalendarClock} title="Time Data" items={['Attendance, Leave', 'Timesheets, OT']} />
+            </WorkflowStageCard>
+            <WorkflowArrow tone="blue" />
+            <WorkflowStageCard id="payroll-stage-validation" tone="green" title="Pre-Validation" icon={ShieldCheck}>
+              <div className="space-y-1">
+                {checks.map(([label, ok]) => (
+                  <div key={label} className="flex items-center gap-2 text-[12px] font-bold text-slate-800"><CheckCircle2 className={`h-4 w-4 shrink-0 ${ok ? 'text-emerald-600' : 'text-red-600'}`} /><span>{label}</span></div>
+                ))}
+              </div>
+              <div className={`mt-3 rounded-lg border p-2 text-center text-xs font-black ${validationBlocked ? toneStyles.red.card : toneStyles.green.card}`}>Payroll Validation Report Generated</div>
+            </WorkflowStageCard>
+            <WorkflowArrow tone="green" />
+            <WorkflowStageCard id="payroll-stage-computation" tone="violet" title="Payroll Computation" icon={Calculator}>
+              <div className="rounded-lg border border-violet-200 bg-violet-50">
+                <div className="rounded-t-lg bg-violet-200 py-1 text-center text-sm font-black text-violet-950">Gross Earnings</div>
+                {['Basic Salary', 'Variable Earnings', 'Overtime', 'Bonus', 'Arrears', 'Other Earnings'].map((item) => <p key={item} className="px-3 py-1 text-xs font-bold text-slate-800">+ {item}</p>)}
+              </div>
+              <div className="my-2 rounded-md bg-violet-700 py-2 text-center text-sm font-black text-white">= Gross Pay</div>
+              <div className="rounded-lg border border-red-200 bg-red-50">
+                <div className="rounded-t-lg bg-red-100 py-1 text-center text-sm font-black text-red-800">Less Deductions</div>
+                {['PAYE', 'Pension', 'NHF', 'Loans', 'Cooperative Deductions', 'Other Deductions'].map((item) => <p key={item} className="px-3 py-1 text-xs font-bold text-slate-800">- {item}</p>)}
+              </div>
+              <div className="mt-2 rounded-md bg-fuchsia-700 py-2 text-center text-sm font-black text-white">= Net Pay</div>
+              <div className="mt-3 rounded-lg border border-violet-100 bg-white p-2">
+                <p className="text-xs font-black uppercase text-violet-800">Payroll Types Supported</p>
+                <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-bold text-slate-700">{['Monthly', 'Weekly', 'Contract', 'Daily Rate', 'Bonus', 'Off-Cycle', 'Final Settlement'].map((item) => <span key={item}>• {item}</span>)}</div>
+              </div>
+            </WorkflowStageCard>
+            <WorkflowArrow tone="violet" />
+            <div id="payroll-stage-approval" className="scroll-mt-24">
+              <div className="grid grid-cols-5 gap-2">
+                {approvalCards.map((card) => (
+                  <div key={card.title} className={`min-h-[370px] rounded-lg border bg-white p-3 shadow-sm ${card.done ? 'border-emerald-200' : 'border-slate-200'}`}>
+                    <div className="flex flex-col items-center text-center">
+                      <span className={`flex h-14 w-14 items-center justify-center rounded-full border-2 ${toneStyles[card.tone].card}`}><UserCheck className={`h-7 w-7 ${toneStyles[card.tone].text}`} /></span>
+                      <p className={`mt-3 text-lg font-black ${toneStyles[card.tone].text}`}>{card.code}</p>
+                      <p className={`text-sm font-black uppercase ${toneStyles[card.tone].text}`}>{card.title}</p>
+                    </div>
+                    <ul className="mt-4 space-y-2 text-[11px] font-semibold text-slate-800">{card.actions.map((item) => <li key={item}>• {item}</li>)}</ul>
+                    <div className={`mt-4 rounded-lg border p-2 text-center text-xs font-black ${card.done ? toneStyles[card.tone].card : 'border-slate-200 bg-slate-50'}`}>Status: {card.done ? card.statusText : 'Pending'}</div>
+                    <p className="mt-2 text-[10px] font-bold text-slate-500">Owner: {card.owner}</p>
+                    <p className="text-[10px] font-bold text-slate-500">Time: {stageStamp(card.date)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 grid grid-cols-5 gap-2">
+                {approvalCards.map((card) => (
+                  <div key={`${card.title}-audit`} className="rounded-lg border border-slate-200 bg-white p-2 text-center shadow-sm">
+                    <FileCheck2 className="mx-auto h-4 w-4 text-slate-700" />
+                    <p className="mt-1 text-[10px] font-black text-slate-700">Action Logged</p>
+                    <p className="text-[10px] font-bold text-slate-500">Audit Trail Captured</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mx-[10%] mt-2 border-t-2 border-dashed border-slate-400" />
+            </div>
+            <WorkflowArrow tone="slate" />
+            <WorkflowStageCard id="payroll-stage-release" tone="cyan" title="Payroll Release" icon={Landmark}>
+              <div className="space-y-4">
+                {releaseSteps.map(([label, done, date, Icon]) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${done ? toneStyles.cyan.icon : 'bg-slate-100 text-slate-500'}`}><Icon className="h-5 w-5" /></span>
+                    <div><p className="text-xs font-black text-slate-900">{label}</p><p className="text-[10px] font-bold text-slate-500">{stageStamp(date)}</p></div>
+                  </div>
+                ))}
+              </div>
+            </WorkflowStageCard>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_1fr_0.85fr]">
+        <div className="rounded-lg border border-blue-200 bg-white p-4 shadow-sm">
+          <h3 className="text-center text-sm font-black uppercase text-blue-800">Payroll Outputs</h3>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {Object.entries(outputs).map(([title, items]) => (
+              <div key={title} className="border-r border-slate-100 last:border-r-0">
+                <p className="text-xs font-black uppercase text-blue-800">{title}</p>
+                <ul className="mt-2 space-y-2 text-xs font-semibold text-slate-700">{items.map((item) => <li key={item}>• {item}</li>)}</ul>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+            <span className="text-xs font-black uppercase text-blue-800">Export Options:</span>
+            <button type="button" onClick={exportExcel} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-50"><FileSpreadsheet className="h-4 w-4" /> Excel</button>
+            <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-50"><FileText className="h-4 w-4" /> PDF</button>
+            <button type="button" onClick={exportCsv} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold text-blue-700 hover:bg-blue-50"><Download className="h-4 w-4" /> CSV</button>
+            <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100"><Printer className="h-4 w-4" /> Print</button>
+          </div>
+        </div>
+        <div id="payroll-stage-lock" className="scroll-mt-24 rounded-lg border border-orange-200 bg-orange-50 p-4 shadow-sm">
+          <div className="flex items-center justify-center gap-2 text-orange-800"><Lock className="h-5 w-5" /><h3 className="text-sm font-black uppercase">Payroll Locking Controls</h3></div>
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div><p className="text-xs font-black uppercase text-slate-900">After final approval, system locks:</p><ul className="mt-2 space-y-2 text-xs font-semibold text-slate-700">{['Salary Structures', 'Payroll Transactions', 'Attendance Records', 'Timesheets', 'Overtime Records', 'Payroll Deductions'].map((item) => <li key={item}>• {item}</li>)}</ul></div>
+            <div className="border-l border-orange-200 pl-4 text-center text-xs font-black text-orange-800"><p>No changes allowed.</p><p className="mt-2">Any adjustment requires:</p><p className="mt-3">Payroll Reopening Request</p><p className="text-lg">↓</p><p>CFO Approval</p><p className="text-lg">↓</p><p>Audit Trail Created</p></div>
+          </div>
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+          <div className="flex items-center justify-center gap-2 text-emerald-800"><Settings2 className="h-5 w-5" /><h3 className="text-sm font-black uppercase">Workflow Features</h3></div>
+          <ul className="mt-4 space-y-2 text-xs font-semibold text-slate-800">{['Configurable Approval Levels', 'Threshold Based Approvals', 'Delegation of Authority', 'Escalation Rules', 'Audit Trail at Every Step', 'Email / In-App Notifications', 'Approval SLA Monitoring', 'Auto Reminders'].map((item) => <li key={item} className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-600" /> {item}</li>)}</ul>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_0.9fr]">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black uppercase text-slate-900">Stage Actions & Role Controls</h3>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Role: {role}. Actions are RBAC checked by the payroll API and audit logged with user, role, action, timestamp, reason, and comments.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {quickAction('validate-payroll', 'Validate Payroll', 'blue')}
+            {quickAction('create-run', 'Run Payroll', 'green')}
+            {quickAction('submit-run', 'Submit for Approval', 'violet', true)}
+            {quickAction('approve-run', 'Approve', 'green', true)}
+            {quickAction('request-revision', 'Return', 'amber', true)}
+            {quickAction('reject-run', 'Reject', 'red', true)}
+            {quickAction('release-run', 'Release', 'cyan', true)}
+            {quickAction('generate-bank-schedule', 'Bank Schedule', 'slate', true)}
+            {quickAction('generate-statutory-schedules', 'Statutory Schedules', 'blue')}
+            {quickAction('generate-payslips', 'Publish Payslips', 'cyan', true)}
+            {quickAction('post-run', 'Post Payroll', 'slate', true)}
+            {quickAction('close-period', 'Close Period', 'violet', true)}
+            {quickAction('reopen-period', 'Reopen Period', 'red', true)}
+            <button type="button" onClick={onAudit} className={`${toneStyles.slate.button} min-h-9 rounded-lg px-3 text-[11px] font-black`}>View Audit Trail</button>
+          </div>
+        </div>
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+          <div className="flex items-center justify-center gap-2 text-blue-800"><BarChart3 className="h-5 w-5" /><h3 className="text-sm font-black uppercase">Dashboard Overview</h3></div>
+          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3">
+            <DashboardMiniKpi label="Payroll Eligible Employees" value={number(payrollEligible)} icon={Users} />
+            <DashboardMiniKpi label="Gross Payroll (NGN)" value={money(payload?.summary.grossPay, canViewMoney)} icon={Coins} />
+            <DashboardMiniKpi label="Net Payroll (NGN)" value={money(payload?.summary.netPay, canViewMoney)} icon={Banknote} />
+            <DashboardMiniKpi label="Tax & Pension Liability" value={money(payload?.summary.deductions, canViewMoney)} icon={Landmark} />
+            <DashboardMiniKpi label="Pending Approvals" value={number(pendingApprovals)} icon={CalendarClock} />
+            <div className="rounded-lg border border-blue-100 bg-white p-3 text-center"><p className="text-[11px] font-black text-slate-700">Payroll Readiness</p><div className="mx-auto mt-2 flex h-16 w-16 items-center justify-center rounded-full border-[8px] border-cyan-500 text-sm font-black text-slate-950">{readiness}%</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[1.1fr_1fr]">
+        <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <p className="text-sm font-black uppercase text-blue-800">Legend</p>
+            {legend.map(([label, color]) => <span key={label} className="inline-flex items-center gap-2 text-xs font-bold text-slate-700"><span className={`h-2 w-8 rounded-full ${color}`} />{label}</span>)}
+            <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-700"><span className="h-px w-10 bg-slate-900" /> Process Flow</span>
+            <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-700"><span className="h-px w-10 border-t-2 border-dashed border-slate-500" /> Audit Trail</span>
+          </div>
+        </div>
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 shadow-sm"><p className="text-center text-xs font-black uppercase text-blue-900">Key Principles: Integrity | Accuracy | Accountability | Transparency | Compliance | Security</p></div>
+      </section>
+    </div>
+  );
+}
+
+function WorkflowSummaryTracker({
+  stages,
+  onSelect,
+}: {
+  stages: { label: string; owner: string; done: boolean; current: boolean; targetId: string }[];
+  onSelect: (targetId: string) => void;
+}) {
+  return (
+    <div className="mt-5 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="relative min-w-[860px] px-2 py-3">
+        <div className="absolute left-10 right-10 top-8 h-1 rounded-full bg-slate-200" />
+        <div
+          className="absolute left-10 top-8 h-1 rounded-full bg-violet-600 transition-all"
+          style={{ width: `${Math.max(0, (stages.filter((stage) => stage.done).length - 1) / Math.max(1, stages.length - 1)) * 100}%` }}
+        />
+        <div className="relative grid grid-cols-6 gap-4">
+          {stages.map((stage, index) => {
+            const circleClass = stage.done
+              ? 'border-violet-600 bg-violet-600 text-white shadow-violet-100'
+              : stage.current
+                ? 'border-amber-400 bg-amber-100 text-amber-900 shadow-amber-100'
+                : 'border-slate-300 bg-white text-slate-400 shadow-slate-100';
+            const textClass = stage.done ? 'text-violet-700' : stage.current ? 'text-amber-700' : 'text-slate-500';
+            const chipClass = stage.done
+              ? 'bg-emerald-100 text-emerald-800'
+              : stage.current
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-slate-100 text-slate-500';
+            return (
+              <button
+                key={stage.label}
+                type="button"
+                onClick={() => onSelect(stage.targetId)}
+                className="group flex min-h-[108px] flex-col items-center rounded-lg px-2 py-1 text-center outline-none transition hover:bg-white focus-visible:ring-2 focus-visible:ring-violet-500"
+                title={`Open ${stage.label} details`}
+              >
+                <span className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-black shadow-sm ${circleClass}`}>
+                  {stage.done ? <CheckCircle2 className="h-5 w-5" /> : index + 1}
+                </span>
+                <span className={`mt-2 text-[11px] font-black uppercase leading-tight ${textClass}`}>{stage.label}</span>
+                <span className="mt-1 max-w-[130px] truncate text-[10px] font-bold text-slate-500">{stage.owner}</span>
+                <span className={`mt-2 rounded-full px-2 py-0.5 text-[10px] font-black ${chipClass}`}>{stage.done ? 'Complete' : stage.current ? 'Current' : 'Pending'}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowStageCard({ id, tone, title, icon: Icon, children }: { id?: string; tone: Tone; title: string; icon: any; children: any }) {
+  return (
+    <details id={id} open className={`scroll-mt-24 min-h-[390px] rounded-lg border bg-white p-3 shadow-sm ${toneStyles[tone].card}`}>
+      <summary className="flex cursor-pointer list-none items-center justify-center gap-2 text-center text-sm font-black text-slate-950"><Icon className={`h-7 w-7 ${toneStyles[tone].text}`} /><span>{title}</span></summary>
+      <div className="mt-3 space-y-3">{children}</div>
+    </details>
+  );
+}
+
+function WorkflowArrow({ tone }: { tone: Tone }) {
+  return <div className="flex items-center justify-center"><ArrowRight className={`h-7 w-7 ${toneStyles[tone].text}`} /></div>;
+}
+
+function StageBlock({ icon: Icon, title, items }: { icon: any; title: string; items: string[] }) {
+  return (
+    <div className="border-b border-slate-200 pb-3 last:border-b-0">
+      <div className="flex items-start gap-3">
+        <Icon className="mt-0.5 h-6 w-6 shrink-0 text-blue-700" />
+        <div><p className="text-sm font-black text-slate-950">{title}</p><ul className="mt-1 space-y-1 text-xs font-semibold text-slate-700">{items.map((item) => <li key={item}>• {item}</li>)}</ul></div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardMiniKpi({ label, value, icon: Icon }: { label: string; value: string; icon: any }) {
+  return (
+    <div className="rounded-lg border border-blue-100 bg-white p-3 text-center">
+      <p className="min-h-8 text-[11px] font-black text-slate-700">{label}</p>
+      <Icon className="mx-auto mt-2 h-5 w-5 text-blue-700" />
+      <p className="mt-1 truncate text-sm font-black text-slate-950">{value}</p>
     </div>
   );
 }
@@ -1209,6 +1838,15 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
+  useEffect(() => {
+    if (sectionId !== 'payroll-computation-workflow') return;
+    const interval = window.setInterval(() => {
+      void load();
+    }, 30000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionId, role]);
+
   const filteredRecords = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (payload?.records || []).filter((record) => {
@@ -1295,8 +1933,8 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
               <WalletCards className="h-6 w-6" />
             </span>
             <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-950">{section.id === 'dashboard' ? 'Payroll Management' : section.title}</h1>
-              <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">{section.id === 'dashboard' ? 'Modern enterprise payroll with page-and-tab architecture for payroll operations, compliance, finance integration, Sage readiness, and reporting.' : section.description}</p>
+              <h1 className="text-2xl font-black tracking-tight text-slate-950">{section.id === 'dashboard' ? 'Payroll' : section.title}</h1>
+              <p className="mt-1 max-w-4xl text-sm font-semibold text-slate-600">{section.id === 'dashboard' ? 'Review the current payroll, fix issues, approve, release, and publish payslips from one simple workspace.' : section.description}</p>
             </div>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1321,11 +1959,15 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
       {toast ? <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Payroll Eligible" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees in HRIS`} icon={Users} tone="blue" />
-        <MetricCard label="Gross Payroll" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net payroll`} icon={Banknote} tone="green" />
-        <MetricCard label="Tax & Pension Liability" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension, statutory and other deductions" icon={ReceiptText} tone="violet" />
-        <MetricCard label="Payroll Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked, ${number(payload?.summary.reviewEmployees)} review`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) > 0 ? 'red' : 'green'} />
+        <MetricCard label="Ready Employees" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees loaded`} icon={Users} tone="blue" />
+        <MetricCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net pay`} icon={Banknote} tone="green" />
+        <MetricCard label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension and statutory items" icon={ReceiptText} tone="violet" />
+        <MetricCard label="Issues" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked, ${number(payload?.summary.reviewEmployees)} to review`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) > 0 ? 'red' : 'green'} />
       </div>
+
+      {section.id === 'dashboard' ? (
+        <PayrollNextStepPanel payload={payload} currentRun={currentRun} canViewMoney={canViewMoney} onAction={triggerAction} busyAction={busyAction} role={role} />
+      ) : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-[250px_1fr]">
         <aside className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm xl:sticky xl:top-20">
@@ -1334,7 +1976,15 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
               const Icon = item.icon;
               const active = section.id === item.id;
               return (
-                <button key={item.id} type="button" onClick={() => setSectionId(item.id)} className={`flex min-h-11 items-center gap-2 rounded-lg px-3 text-left text-xs font-black transition-colors ${active ? `${toneStyles[item.tone].button}` : 'text-slate-700 hover:bg-slate-50'}`}>
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setSectionId(item.id);
+                    window.history.pushState(null, '', sectionHref(item.id));
+                  }}
+                  className={`flex min-h-11 items-center gap-2 rounded-lg px-3 text-left text-xs font-black transition-colors ${active ? `${toneStyles[item.tone].button}` : 'text-slate-700 hover:bg-slate-50'}`}
+                >
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="min-w-0 truncate">{item.label}</span>
                 </button>
@@ -1363,7 +2013,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             </div>
           </section>
 
-          {section.id !== 'salary-management' ? (
+          {section.id !== 'salary-management' && section.id !== 'payroll-computation-workflow' ? (
             <PayrollCommandBar
               section={section}
               activeTab={activeTab}
@@ -1374,36 +2024,35 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             />
           ) : null}
 
-          <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white p-2">
-            <div className="flex min-w-max gap-1">
-              {section.tabs.map((tab) => (
-                <button key={tab.id} type="button" onClick={() => setActiveTabs((prev) => ({ ...prev, [section.id]: tab.id }))} className={`min-h-10 rounded-lg px-3 text-xs font-black transition-colors ${activeTab.id === tab.id ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-50'}`}>
-                  {tab.label}
-                </button>
-              ))}
+          {section.id !== 'payroll-computation-workflow' ? (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white p-2">
+              <div className="flex min-w-max gap-1">
+                {section.tabs.map((tab) => (
+                  <button key={tab.id} type="button" onClick={() => setActiveTabs((prev) => ({ ...prev, [section.id]: tab.id }))} className={`min-h-10 rounded-lg px-3 text-xs font-black transition-colors ${activeTab.id === tab.id ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-50'}`}>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="mt-4">
             {section.id === 'dashboard' ? (
               <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} />
+            ) : section.id === 'payroll-computation-workflow' ? (
+              <PayrollComputationWorkflowPage payload={payload} canViewMoney={canViewMoney} role={role} runAction={runAction} busyAction={busyAction} onAudit={() => setAuditOpen(true)} exportCsv={exportCsv} exportExcel={exportExcel} />
             ) : section.id === 'salary-management' ? (
-              <PayrollAdministrationControlCenter activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} role={role} runAction={runAction} busyAction={busyAction} />
-            ) : section.id === 'payroll-processing' && activeTab.id === 'payroll-period-management' ? (
-              <PayrollPeriodManagementPanel payload={payload} activeTabId={periodTab} setActiveTabId={setPeriodTab} />
+              <PaySetupWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
+            ) : section.id === 'payroll-processing' ? (
+              <ProcessPayrollWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
             ) : (
               <FeaturePanel tab={activeTab} section={section} payload={payload} canViewMoney={canViewMoney} />
             )}
           </div>
 
-          <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h3 className="text-sm font-black text-slate-950">Enterprise Requirements Coverage</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-500">Modular, scalable, maintainable, cloud-ready, API-ready, and future-proof payroll architecture.</p>
-              </div>
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">20 / 20 capability surfaces</span>
-            </div>
+          <details className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <summary className="cursor-pointer text-sm font-black text-slate-950">System controls and compliance coverage</summary>
+            <p className="mt-2 text-xs font-semibold text-slate-500">These controls stay available for audit, administration, and implementation reviews.</p>
             <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {enterpriseRequirements.map((item) => (
                 <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -1412,7 +2061,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
                 </div>
               ))}
             </div>
-          </section>
+          </details>
         </main>
       </div>
       {confirmAction ? (
@@ -1453,59 +2102,154 @@ function DashboardWorkspace({
   status: string;
   setStatus: (value: string) => void;
 }) {
+  const runStatus = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+  const issues = payload?.exceptions || [];
+  const readiness = payload?.summary.totalEmployees ? Math.round(((payload?.summary.readyEmployees || 0) / payload.summary.totalEmployees) * 100) : 0;
+  const workflow = [
+    { label: 'Draft', done: Boolean(currentRun?.createdAt) },
+    { label: 'Validated', done: Boolean(currentRun?.validatedAt) || ['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Computed', done: ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'HR Review', done: Boolean(currentRun?.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Finance Review', done: ['Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Approved', done: Boolean(currentRun?.approvedAt) || ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Released', done: Boolean(currentRun?.releasedAt) || ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
+    { label: 'Payslips', done: Boolean(currentRun?.payslipsGeneratedAt) || ['Published', 'Closed'].includes(runStatus) },
+  ];
+  const quickActions = [
+    { label: 'Validate Payroll', action: 'validate-payroll', icon: ClipboardCheck, tone: 'blue' as Tone, disabled: !payload?.permissions.canManageRun },
+    { label: 'Review Issues', action: 'view-exceptions', icon: AlertTriangle, tone: issues.length ? 'red' as Tone : 'green' as Tone, disabled: false },
+    { label: 'Submit Approval', action: 'submit-run', icon: Send, tone: 'amber' as Tone, disabled: !payload?.permissions.canManageRun },
+    { label: 'Publish Payslips', action: 'generate-payslips', icon: ReceiptText, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun },
+  ];
+  const activity = [
+    { label: 'Payroll data loaded', detail: payload?.generatedAt ? new Date(payload.generatedAt).toLocaleString('en-GB') : 'Loading' },
+    { label: `Status is ${runStatus}`, detail: payload?.workflow?.nextOwner ? `Next owner: ${payload.workflow.nextOwner}` : 'No workflow owner assigned' },
+    { label: `${number(payload?.summary.readyEmployees)} records ready`, detail: `${number(payload?.summary.reviewEmployees)} review, ${number(payload?.summary.blockedEmployees)} blocked` },
+    { label: 'Audit trail active', detail: `${number(payload?.auditTrail?.length)} logged payroll actions` },
+  ];
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h3 className="text-sm font-black text-slate-950">Payroll Cycle Status</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-500">Run, validation, approval, locking, posting, and version-control readiness.</p>
-              </div>
-              <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(currentRun?.status || 'Draft')].chip}`}>{currentRun?.status || 'Draft'}</span>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-blue-700">Payroll Dashboard</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">Control room for {payload?.periodLabel || 'current payroll'}</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-600">Review status, clear issues, approve, release, and publish payslips without digging through setup screens.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">{payload?.periodLabel || 'Loading'}</span>
+            <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(runStatus)].chip}`}>{runStatus}</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Run: {currentRun?.id || 'Not started'}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase text-blue-800">Payroll Summary</p>
+              <h3 className="mt-1 text-xl font-black text-slate-950">{readiness}% ready for payroll</h3>
+              <p className="mt-1 text-sm font-semibold text-slate-600">{number(payload?.summary.readyEmployees)} ready, {number(payload?.summary.reviewEmployees)} to review, {number(payload?.summary.blockedEmployees)} blocked.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
+              <MiniDashboardCard label="Ready Employees" value={number(payload?.summary.readyEmployees)} tone="blue" />
+              <MiniDashboardCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} tone="green" />
+              <MiniDashboardCard label="Net Pay" value={money(payload?.summary.netPay, canViewMoney)} tone="cyan" />
+              <MiniDashboardCard label="Issues" value={number(issues.length)} tone={issues.length ? 'red' : 'green'} />
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
-            <InfoTile label="Run ID" value={currentRun?.id || `payroll-${payload?.period || ''}`} detail={`Created by ${currentRun?.createdBy || 'System'}`} tone="blue" />
-            <InfoTile label="Run Value" value={money(currentRun?.netPay, canViewMoney)} detail={`${number(currentRun?.employeeCount)} employees`} tone="green" />
-            <InfoTile label="Approval" value={currentRun?.approvedBy || 'Pending'} detail={currentRun?.approvedAt ? new Date(currentRun.approvedAt).toLocaleString('en-GB') : 'Awaiting approval'} tone="violet" />
+          <div className="mt-5 overflow-x-auto">
+            <div className="flex min-w-[760px] items-start gap-2">
+              {workflow.map((step, index) => (
+                <div key={step.label} className="flex flex-1 items-start gap-2">
+                  <div className="flex flex-1 flex-col items-center text-center">
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-xs font-black ${step.done ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-500'}`}>
+                      {step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                    </span>
+                    <span className={`mt-2 text-[10px] font-black uppercase leading-tight ${step.done ? 'text-blue-700' : 'text-slate-500'}`}>{step.label}</span>
+                  </div>
+                  {index < workflow.length - 1 ? <div className={`mt-4 h-0.5 flex-1 rounded-full ${step.done ? 'bg-blue-600' : 'bg-slate-200'}`} /> : null}
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 border-t border-slate-100 p-4">
-            <ActionButton label="Validate" icon={ClipboardCheck} onClick={() => runAction('validate-payroll')} disabled={busyAction === 'validate-payroll' || !payload?.permissions.canManageRun} tone="cyan" />
-            <ActionButton label="Run Payroll" icon={PlayCircle} onClick={() => runAction('create-run')} disabled={busyAction === 'create-run' || !payload?.permissions.canManageRun} tone="blue" />
-            <ActionButton label="Submit" icon={Send} onClick={() => runAction('submit-run')} disabled={busyAction === 'submit-run' || !payload?.permissions.canManageRun} tone="amber" />
-            <ActionButton label="Approve" icon={BadgeCheck} onClick={() => runAction('approve-run')} disabled={busyAction === 'approve-run' || !payload?.permissions.canApprove} tone="green" />
-            <ActionButton label="Release" icon={ShieldCheck} onClick={() => runAction('release-run')} disabled={busyAction === 'release-run' || (!payload?.permissions.canManageRun && !payload?.permissions.canPost)} tone="green" />
-            <ActionButton label="Lock" icon={Lock} onClick={() => runAction('lock-run')} disabled={busyAction === 'lock-run' || !payload?.permissions.canManageRun} tone="violet" />
-            <ActionButton label="Bank Schedule" icon={CreditCard} onClick={() => runAction('generate-bank-schedule')} disabled={busyAction === 'generate-bank-schedule' || !payload?.permissions.canPost} tone="slate" />
-            <ActionButton label="Statutory" icon={FileCheck2} onClick={() => runAction('generate-statutory-schedules')} disabled={busyAction === 'generate-statutory-schedules' || !payload?.permissions.canManageRun} tone="blue" />
-            <ActionButton label="Payslips" icon={ReceiptText} onClick={() => runAction('generate-payslips')} disabled={busyAction === 'generate-payslips' || !payload?.permissions.canManageRun} tone="cyan" />
-            <ActionButton label="Post to Finance" icon={Send} onClick={() => runAction('post-run')} disabled={busyAction === 'post-run' || !payload?.permissions.canPost} tone="slate" />
-            <ActionButton label="Close Period" icon={Lock} onClick={() => runAction('close-period')} disabled={busyAction === 'close-period' || (!payload?.permissions.canManageRun && !payload?.permissions.canApprove)} tone="red" />
-          </div>
-        </section>
+        </div>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-black text-slate-950">Quick Actions</h3>
+          <div className="mt-3 grid grid-cols-1 gap-2">
+            {quickActions.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button key={item.action} type="button" disabled={item.disabled || busyAction === item.action} onClick={() => runAction(item.action)} className={`flex min-h-11 items-center justify-between rounded-lg px-3 text-left text-xs font-black ${item.disabled || busyAction === item.action ? 'cursor-not-allowed bg-slate-100 text-slate-400' : toneStyles[item.tone].button}`}>
+                  <span className="inline-flex items-center gap-2"><Icon className="h-4 w-4" />{item.label}</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 p-4">
-            <h3 className="text-sm font-black text-slate-950">Payroll Analytics</h3>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Coverage, readiness, exceptions, and trend-ready dashboard widgets.</p>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-950">Issues to Fix</h3>
+                <p className="mt-1 text-xs font-semibold text-slate-500">Only items blocking approval or release appear here.</p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${issues.length ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>{number(issues.length)} open</span>
+            </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
-            <MetricCard label="Coverage" value={`${pctFmt.format(payload?.summary.payrollCoveragePct || 0)}%`} detail="Employees assigned to payroll setup" icon={ShieldCheck} tone="cyan" />
-            <MetricCard label="Ready Records" value={number(payload?.summary.readyEmployees)} detail="No payroll-blocking exceptions" icon={CheckCircle2} tone="green" />
-            <MetricCard label="Review Queue" value={number(payload?.summary.reviewEmployees)} detail="Requires validation" icon={Sparkles} tone="amber" />
-            <MetricCard label="Blocked Records" value={number(payload?.summary.blockedEmployees)} detail="Must be resolved before posting" icon={AlertTriangle} tone="red" />
+          <div className="divide-y divide-slate-100">
+            {issues.slice(0, 5).map((issue) => (
+              <div key={issue.id} className="grid grid-cols-1 gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center">
+                <div>
+                  <p className="text-sm font-black text-slate-950">{issue.issue}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{issue.employeeName} - {issue.employeeId} - Owner: {issue.owner}</p>
+                </div>
+                <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-black ${issue.severity === 'High' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>{issue.severity}</span>
+              </div>
+            ))}
+            {!issues.length ? <div className="p-4 text-sm font-black text-emerald-800">No open payroll issues.</div> : null}
           </div>
-        </section>
-      </div>
+        </div>
 
-      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 p-4">
+        <div className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Payroll Summary</h3>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <InfoTile label="Employees" value={number(payload?.summary.totalEmployees)} detail={`${number(payload?.summary.payrollEligible)} eligible`} tone="blue" />
+              <InfoTile label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="Tax and statutory" tone="violet" />
+              <InfoTile label="Coverage" value={`${pctFmt.format(payload?.summary.payrollCoveragePct || 0)}%`} detail="Assigned setup" tone="cyan" />
+              <InfoTile label="Approval" value={currentRun?.approvedBy || 'Pending'} detail={currentRun?.approvedAt ? new Date(currentRun.approvedAt).toLocaleString('en-GB') : payload?.workflow?.nextOwner || 'Awaiting workflow'} tone="amber" />
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Recent Activity</h3>
+            <div className="mt-3 space-y-3">
+              {activity.map((item) => (
+                <div key={item.label} className="flex gap-3">
+                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-600" />
+                  <div><p className="text-sm font-black text-slate-800">{item.label}</p><p className="text-xs font-semibold text-slate-500">{item.detail}</p></div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <details className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <summary className="cursor-pointer border-b border-slate-100 p-4 text-sm font-black text-slate-950">Employee payroll register</summary>
+        <div className="p-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h3 className="text-sm font-black text-slate-950">Payroll Register & Exceptions</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">Search, filter, drill down, export, and resolve exceptions.</p>
+              <h3 className="text-sm font-black text-slate-950">Employee records</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Use this when you need employee-level detail.</p>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[auto_1fr_160px]">
               <Link href="/hris/payroll/daily-rate-pay" className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-black text-amber-900 hover:bg-white">
@@ -1544,51 +2288,26 @@ function DashboardWorkspace({
             </tbody>
           </table>
         </div>
-      </section>
-
-      <PayrollExceptionCenter payload={payload} onAction={runAction} />
+      </details>
     </div>
   );
 }
 
 function PayrollExceptionCenter({ payload, onAction }: { payload: PayrollPayload | null; onAction: (action: string, reason?: string) => void }) {
-  const categories = [
-    'Missing salary setup',
-    'Missing payroll group',
-    'Missing bank account',
-    'Missing tax profile',
-    'Missing pension profile',
-    'Missing department',
-    'Missing cost center',
-    'Employee not payroll eligible',
-    'Duplicate payroll record',
-    'Negative net pay',
-    'Salary outside grade band',
-    'Unapproved allowance',
-    'Unapproved deduction',
-    'Unprocessed employee',
-    'Payslip not generated',
-    'Journal not posted',
-    'Bank schedule not generated',
-    'Statutory schedule not generated',
-  ];
   const exceptions = payload?.exceptions || [];
   return (
     <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 p-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
-            <h3 className="text-sm font-black text-slate-950">Payroll Exception Center</h3>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Assign owners, resolve, override with approval, export, comment, and review resolution history.</p>
+            <h3 className="text-sm font-black text-slate-950">Issues to Fix</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Resolve these before approving or releasing payroll.</p>
           </div>
           <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${exceptions.length ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>{number(exceptions.length)} exceptions</span>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {categories.slice(0, 9).map((item) => <span key={item} className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-700">{item}</span>)}
-        </div>
       </div>
-      <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
-        {exceptions.slice(0, 8).map((item) => (
+      <div className="grid grid-cols-1 gap-3 p-4">
+        {exceptions.slice(0, 6).map((item) => (
           <div key={item.id} className={`rounded-lg border p-3 ${item.severity === 'High' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
             <div className="flex items-start justify-between gap-3">
               <div><p className="text-sm font-black text-slate-950">{item.employeeName}</p><p className="mt-1 text-xs font-semibold text-slate-600">{item.employeeId} · Owner: {item.owner}</p></div>
@@ -1596,9 +2315,17 @@ function PayrollExceptionCenter({ payload, onAction }: { payload: PayrollPayload
             </div>
             <p className="mt-2 text-sm font-bold text-slate-800">{item.issue}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {['View Details', 'Assign Owner', 'Resolve', 'Override with Reason', 'Export Exception', 'Add Comment', 'View Resolution History'].map((label) => (
+              {['View Details', 'Resolve'].map((label) => (
                 <button key={label} type="button" onClick={() => onAction(label.toLowerCase().replace(/\s+/g, '-'), item.issue)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-50">{label}</button>
               ))}
+              <details className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+                <summary className="cursor-pointer text-[11px] font-black text-slate-700">More</summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {['Assign Owner', 'Override with Reason', 'Export Exception', 'Add Comment', 'View Resolution History'].map((label) => (
+                    <button key={label} type="button" onClick={() => onAction(label.toLowerCase().replace(/\s+/g, '-'), item.issue)} className="rounded-md bg-slate-50 px-2 py-1 text-[11px] font-black text-slate-700 hover:bg-slate-100">{label}</button>
+                  ))}
+                </div>
+              </details>
             </div>
           </div>
         ))}
@@ -1612,12 +2339,14 @@ function PayrollCommandBar({ section, activeTab, role, payload, busyAction, onAc
   const actions = actionsFor(section, activeTab);
   const currentStatus = payload?.workflow?.currentStatus || payload?.runs[0]?.status || 'Draft';
   const blocked = payload?.workflow?.blockedActions || [];
-  const visibleActions = actions.slice(0, 16);
+  const primaryIds = ['validate-payroll', 'view-exceptions', 'create-run', 'submit-run', 'approve-run', 'release-run', 'generate-payslips', 'generate-report'];
+  const visibleActions = actions.filter((item) => primaryIds.includes(item.id)).slice(0, 6);
+  const advancedActions = actions.filter((item) => !visibleActions.some((visible) => visible.id === item.id));
   return (
     <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h3 className="text-sm font-black text-slate-950">Payroll Command Center</h3>
+          <h3 className="text-sm font-black text-slate-950">Actions</h3>
           <p className="mt-1 text-xs font-semibold text-slate-500">
             Status: <span className="font-black text-slate-800">{currentStatus}</span> · Stage: <span className="font-black text-slate-800">{payload?.workflow?.approvalStage || 'Draft'}</span> · Next owner: <span className="font-black text-slate-800">{payload?.workflow?.nextOwner || 'Payroll Officer'}</span>
           </p>
@@ -1632,7 +2361,6 @@ function PayrollCommandBar({ section, activeTab, role, payload, busyAction, onAc
           </div>
         </div>
       ) : null}
-      <WorkflowStepper payload={payload} onAction={onAction} />
       <div className="mt-4 flex flex-wrap gap-2">
         {visibleActions.map((item) => {
           const auth = canRunAction(item, role, payload);
@@ -1660,6 +2388,31 @@ function PayrollCommandBar({ section, activeTab, role, payload, busyAction, onAc
           );
         })}
       </div>
+      <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <summary className="cursor-pointer text-xs font-black uppercase text-slate-700">Advanced actions and workflow detail</summary>
+        <WorkflowStepper payload={payload} onAction={onAction} />
+        {advancedActions.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {advancedActions.map((item) => {
+              const auth = canRunAction(item, role, payload);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => auth.allowed && onAction(item)}
+                  disabled={!auth.allowed || busyAction === item.id}
+                  title={auth.reason || item.label}
+                  className={`inline-flex min-h-9 items-center justify-center rounded-lg px-3 text-[11px] font-black transition-colors ${
+                    !auth.allowed || busyAction === item.id ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </details>
     </section>
   );
 }
@@ -1794,6 +2547,71 @@ function AuditPanel({ payload, onClose }: { payload: PayrollPayload | null; onCl
         )) : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-600">No payroll audit actions have been logged in this session yet.</div>}
       </div>
     </div>
+  );
+}
+
+function PayrollNextStepPanel({
+  payload,
+  currentRun,
+  canViewMoney,
+  role,
+  busyAction,
+  onAction,
+}: {
+  payload: PayrollPayload | null;
+  currentRun: PayrollRun | null;
+  canViewMoney: boolean;
+  role: Role;
+  busyAction: string;
+  onAction: (action: PayrollAction) => void;
+}) {
+  const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+  const exceptions = payload?.summary.exceptionCount || 0;
+  const nextAction = exceptions > 0
+    ? action('view-exceptions', 'Review Issues', 'secondary')
+    : status === 'Draft'
+      ? action('validate-payroll', 'Validate Payroll', 'workflow', payrollMakerRoles)
+      : ['Validated', 'Computed', 'Ready for Approval'].includes(status)
+        ? action('submit-run', 'Submit for Approval', 'workflow', payrollMakerRoles, true)
+        : ['Submitted', 'Under Review'].includes(status)
+          ? action('approve-run', 'Approve Payroll', 'workflow', payrollApprovalRoles, true)
+          : status === 'Approved'
+            ? action('release-run', 'Release Payroll', 'workflow', [...payrollMakerRoles, ...financeRoles], true)
+            : ['Released', 'Locked'].includes(status)
+              ? action('generate-payslips', 'Publish Payslips', 'workflow', payrollMakerRoles, true)
+              : action('generate-report', 'Generate Reports', 'secondary');
+  const auth = canRunAction(nextAction, role, payload);
+  const readiness = payload?.summary.totalEmployees ? Math.round(((payload?.summary.readyEmployees || 0) / payload.summary.totalEmployees) * 100) : 0;
+  return (
+    <section className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 shadow-sm">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div>
+          <p className="text-xs font-black uppercase text-blue-800">Next step</p>
+          <h2 className="mt-1 text-xl font-black text-slate-950">{exceptions > 0 ? 'Fix payroll issues before approval' : nextAction.label}</h2>
+          <p className="mt-1 text-sm font-semibold text-slate-600">
+            Current status is <span className="font-black text-slate-900">{status}</span>. {payload?.workflow?.nextOwner ? `Next owner: ${payload.workflow.nextOwner}.` : `Active role: ${role}.`}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={!auth.allowed || busyAction === nextAction.id}
+          onClick={() => auth.allowed && onAction(nextAction)}
+          title={auth.reason || nextAction.label}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-black ${
+            !auth.allowed || busyAction === nextAction.id ? 'cursor-not-allowed bg-slate-200 text-slate-500' : 'bg-slate-900 text-white hover:bg-slate-800'
+          }`}
+        >
+          {nextAction.label}
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <InfoTile label="Readiness" value={`${readiness}%`} detail={`${number(payload?.summary.readyEmployees)} ready records`} tone={readiness >= 95 ? 'green' : 'amber'} />
+        <InfoTile label="Payroll Value" value={money(payload?.summary.netPay, canViewMoney)} detail="Net payroll estimate" tone="green" />
+        <InfoTile label="Approvals" value={['Submitted', 'Under Review'].includes(status) ? 'Open' : status === 'Approved' ? 'Approved' : 'Not due'} detail={payload?.workflow?.nextOwner || 'No active approver'} tone="violet" />
+        <InfoTile label="Issues" value={number(exceptions)} detail={exceptions ? 'Needs review' : 'No open issues'} tone={exceptions ? 'red' : 'green'} />
+      </div>
+    </section>
   );
 }
 

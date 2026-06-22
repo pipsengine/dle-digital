@@ -336,9 +336,13 @@ const config = (): sql.config | null => {
       trustServerCertificate: bool(process.env.DLE_ENTERPRISE_DB_TRUST_SERVER_CERTIFICATE, true),
       enableArithAbort: true,
     },
-    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
-    requestTimeout: 15000,
-    connectionTimeout: 5000,
+    pool: {
+      max: Number(process.env.DLE_ENTERPRISE_DB_POOL_MAX || 10),
+      min: 0,
+      idleTimeoutMillis: Number(process.env.DLE_ENTERPRISE_DB_POOL_IDLE_TIMEOUT_MS || 30000),
+    },
+    requestTimeout: Number(process.env.DLE_ENTERPRISE_DB_REQUEST_TIMEOUT_MS || 60000),
+    connectionTimeout: Number(process.env.DLE_ENTERPRISE_DB_CONNECTION_TIMEOUT_MS || 20000),
   };
 };
 

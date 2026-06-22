@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { loadWorkspaceEnv, readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines } from '@/lib/sage-people-payroll-store';
 
@@ -45,11 +45,14 @@ const moneyFrom = (...values: unknown[]) => {
   }
   return null;
 };
+loadWorkspaceEnv();
 const EMPLOYEE_SOURCE_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_CACHE_MS || 60000);
 const EMPLOYEE_SOURCE_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_STALE_MS || 900000);
 const EMPLOYEE_SOURCE_FALLBACK_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_CACHE_MS || 10000);
 const EMPLOYEE_SOURCE_FALLBACK_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_STALE_MS || 60000);
-const EMPLOYEE_SOURCE_DB_TIMEOUT_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_DB_TIMEOUT_MS || 5000);
+const EMPLOYEE_SOURCE_DB_TIMEOUT_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_DB_TIMEOUT_MS || 60000);
+const REQUIRE_HRIS_DB = !['0', 'false', 'no', 'off'].includes(String(process.env.HRIS_REQUIRE_DB_EMPLOYEE_SOURCE ?? 'true').toLowerCase());
+const MIN_HRIS_EMPLOYEES = Number(process.env.HRIS_MIN_EMPLOYEE_SOURCE_COUNT || 100);
 let employeeSourceCache: EmployeeSourceCache | null = null;
 
 export const invalidatePayrollEmployeeCache = () => {
@@ -58,7 +61,7 @@ export const invalidatePayrollEmployeeCache = () => {
 
 const cacheWindow = (source: PayrollEmployeeSource) => {
   if (source.databaseAvailable) {
-    return { expiresIn: EMPLOYEE_SOURCE_CACHE_MS, staleFor: EMPLOYEE_SOURCE_STALE_MS };
+    return { expiresIn: EMPLOYEE_SOURCE_CACHE_MS, staleFor: REQUIRE_HRIS_DB ? EMPLOYEE_SOURCE_CACHE_MS : EMPLOYEE_SOURCE_STALE_MS };
   }
   return { expiresIn: EMPLOYEE_SOURCE_FALLBACK_CACHE_MS, staleFor: EMPLOYEE_SOURCE_FALLBACK_STALE_MS };
 };
@@ -286,13 +289,20 @@ const readCachedPayrollEmployees = async () => {
 };
 
 const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
+  let dbError: unknown = null;
   try {
     const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
-    if (employees) {
+    if (employees && employees.length >= MIN_HRIS_EMPLOYEES) {
       return { employees: await applyPayrollEmployeeOptions(await enrichEmployeesFromSagePayroll(employees)), source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
     }
-  } catch {
-    // Fall through to cache; payroll pages should stay operational while DB connectivity is restored.
+    if (REQUIRE_HRIS_DB) {
+      throw new Error(`DLE_Enterprise HRIS employee source returned ${employees?.length || 0} records; expected at least ${MIN_HRIS_EMPLOYEES}. Payroll cannot use the local cache in production.`);
+    }
+  } catch (error) {
+    dbError = error;
+    if (REQUIRE_HRIS_DB) {
+      throw new Error(error instanceof Error ? `Unable to read DLE_Enterprise HRIS employees: ${error.message}` : 'Unable to read DLE_Enterprise HRIS employees.');
+    }
   }
 
   const cached = await applyPayrollEmployeeOptions(await readCachedPayrollEmployees());
@@ -300,7 +310,9 @@ const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
     employees: cached,
     source: 'Local HRIS payroll cache',
     databaseAvailable: false,
-    warning: 'DLE_Enterprise HRIS database is not available. Showing local cached payroll data until the database connection is restored.',
+    warning: dbError instanceof Error
+      ? `DLE_Enterprise HRIS database is not available (${dbError.message}). Showing local cached payroll data because HRIS_REQUIRE_DB_EMPLOYEE_SOURCE is disabled.`
+      : 'DLE_Enterprise HRIS database is not available. Showing local cached payroll data because HRIS_REQUIRE_DB_EMPLOYEE_SOURCE is disabled.',
   };
 };
 

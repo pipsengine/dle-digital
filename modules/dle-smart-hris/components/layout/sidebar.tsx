@@ -184,7 +184,9 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
     <motion.aside 
       initial={false}
       animate={{ width: isOpen ? 280 : 120 }}
-      className="bg-white border-r border-slate-100 flex flex-col relative z-20 shadow-sm shrink-0"
+      className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r border-slate-100 bg-white shadow-xl transition-transform duration-200 lg:relative lg:z-20 lg:shrink-0 lg:shadow-sm ${
+        isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+      }`}
     >
       <div className="h-16 flex items-center justify-between px-4 border-b border-slate-100 whitespace-nowrap overflow-hidden">
         <Link href={toHref('/dashboard/executive-hr-dashboard')} className="flex items-center w-full px-3">
@@ -200,7 +202,7 @@ export function Sidebar({ isOpen, toggle }: { isOpen: boolean; toggle: () => voi
 
       <button 
         onClick={toggle}
-        className="absolute -right-3 top-20 w-6 h-6 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:text-dle-blue hover:border-dle-blue transition-colors shadow-sm z-30"
+        className="absolute -right-3 top-20 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition-colors hover:border-dle-blue hover:text-dle-blue"
       >
         {isOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
       </button>

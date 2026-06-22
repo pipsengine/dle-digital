@@ -69,6 +69,35 @@ function Invoke-CheckedCommand {
   }
 }
 
+function Copy-IisEnvironmentFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$DestinationRoot
+  )
+
+  $CandidateEnvPaths = @(
+    (Join-Path $RepoRoot ".env"),
+    (Join-Path $AppPath ".env")
+  )
+
+  $EnvSource = $CandidateEnvPaths |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+
+  if (-not $EnvSource) {
+    Write-Warning "No .env file found at repo root or apps\dashboard. IIS package will rely on machine-level environment variables."
+    return
+  }
+
+  Copy-Item -LiteralPath $EnvSource -Destination (Join-Path $DestinationRoot ".env") -Force
+
+  $DashboardEnvTargetDirectory = Join-Path $DestinationRoot "apps\dashboard"
+  if (Test-Path -LiteralPath $DashboardEnvTargetDirectory) {
+    Copy-Item -LiteralPath $EnvSource -Destination (Join-Path $DashboardEnvTargetDirectory ".env") -Force
+  }
+
+  Write-Host "Copied IIS runtime environment from $EnvSource"
+}
+
 function Test-NextTraceFiles {
   param(
     [Parameter(Mandatory = $true)][string]$NextRootPath
@@ -152,10 +181,7 @@ try {
   }
   Copy-Item -LiteralPath $WebConfigSource -Destination (Join-Path $ResolvedOutputPath "web.config") -Force
   Copy-Item -LiteralPath (Join-Path $RepoRoot "deployment\iis\Start-DleDashboard.ps1") -Destination (Join-Path $ResolvedOutputPath "Start-DleDashboard.ps1") -Force
-  $EnvPath = Join-Path $RepoRoot ".env"
-  if (Test-Path -LiteralPath $EnvPath) {
-    Copy-Item -LiteralPath $EnvPath -Destination (Join-Path $ResolvedOutputPath ".env") -Force
-  }
+  Copy-IisEnvironmentFile -DestinationRoot $ResolvedOutputPath
 
   Test-NextTraceFiles -NextRootPath (Join-Path $ResolvedOutputPath "apps\dashboard\.next")
 
