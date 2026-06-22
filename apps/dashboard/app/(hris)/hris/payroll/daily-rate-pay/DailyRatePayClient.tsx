@@ -38,6 +38,14 @@ type DailyRateRecord = {
 type Payload = {
   generatedAt: string;
   source: string;
+  payrollPeriod: string;
+  periodLabel: string;
+  controls: {
+    maxMonthlyPayableDays: number;
+    sourceRule: string;
+    historicalDataExcluded: boolean;
+    duplicateSourcePrevention: boolean;
+  };
   role: Role;
   permissions: { canViewMoney: boolean; canUpdateRates: boolean; canExport: boolean };
   summary: {
@@ -96,6 +104,7 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
 
 export default function DailyRatePayClient({ initialNow }: { initialNow: string }) {
   const [role, setRole] = useState<Role>('Payroll Officer');
+  const [period, setPeriod] = useState('2026-05');
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -110,7 +119,7 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/hris/payroll/daily-rate-pay', { headers: { 'x-hris-role': role }, cache: 'no-store' });
+      const res = await fetch(`/api/hris/payroll/daily-rate-pay?period=${encodeURIComponent(period)}`, { headers: { 'x-hris-role': role }, cache: 'no-store' });
       const json = (await res.json()) as ApiResponse<Payload>;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Daily rate pay request failed (${res.status})`);
       const data = json.data;
@@ -125,7 +134,7 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
 
   useEffect(() => {
     void load();
-  }, [role]);
+  }, [role, period]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -184,7 +193,7 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
   };
 
   const exportCsv = () => {
-    window.location.href = '/api/hris/payroll/daily-rate-pay?format=csv';
+    window.location.href = `/api/hris/payroll/daily-rate-pay?period=${encodeURIComponent(period)}&format=csv`;
   };
 
   return (
@@ -209,6 +218,10 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700">
+            Period
+            <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="bg-transparent text-xs font-extrabold text-slate-900 outline-none" />
+          </label>
           <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none">
             {['Payroll Officer', 'Finance Controller', 'HR Director', 'HR Manager', 'Executive Management', 'Auditor', 'Employee'].map((item) => <option key={item}>{item}</option>)}
           </select>
@@ -225,6 +238,11 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
 
       {error && <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div>}
       {toast && <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div>}
+      {payload && (
+        <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+          Period control: {payload.periodLabel}. {payload.controls.sourceRule}; historical periods are excluded, duplicate employee keys are prevented, and payable days are capped at {payload.controls.maxMonthlyPayableDays}.
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Daily Rate Employees" value={number(payload?.summary.dailyRateEmployees || 0)} detail="Employees with C/Daily Rate classification" icon={Users} tone="blue" />

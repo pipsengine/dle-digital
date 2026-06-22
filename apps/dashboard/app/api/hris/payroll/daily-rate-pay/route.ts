@@ -4,6 +4,7 @@ import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-emplo
 import { isTimesheetPaidLeaveLine, normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { calculateContractDayRateEarnings } from '@/lib/payroll-earnings-engine';
+import { activePayrollPeriod, payrollPeriodLabel } from '@/lib/payroll-periods';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 
@@ -16,6 +17,12 @@ const num = (value: unknown) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 };
+const normalizePeriod = (value: unknown) => {
+  const text = compact(value);
+  return /^\d{4}-\d{2}$/.test(text) ? text : activePayrollPeriod();
+};
+const periodIdFromPayrollPeriod = (period: string) => `per-${period}`;
+const MAX_MONTHLY_PAYABLE_DAYS = Number(process.env.DAILY_RATE_MAX_PAYABLE_DAYS || 31);
 
 const getRole = (request: Request): Role => {
   const value = request.headers.get('x-hris-role');
@@ -36,45 +43,68 @@ const statusFromIssues = (issues: string[]) => {
 };
 
 const buildPayload = async (request: Request) => {
+  const { searchParams } = new URL(request.url);
+  const payrollPeriod = normalizePeriod(searchParams.get('period'));
+  const periodId = periodIdFromPayrollPeriod(payrollPeriod);
   const role = getRole(request);
   const perms = permissions(role);
   const employeeSource = await readPayrollEmployees();
   const employees = employeeSource.employees;
   const dailyEmployees = employees.filter((employee) => employee.employmentType === 'Daily Rate' || employee.employeeCode.startsWith('C'));
-  const { lines } = await readTimesheetData();
+  const { headers, lines } = await readTimesheetData();
   const payrollUpdates = await readTimesheetPayrollUpdates();
+  const headerById = new Map(headers.map((header) => [header.id, header]));
+  const periodHeaderIds = new Set(headers.filter((header) => header.periodId === periodId).map((header) => header.id));
 
-  const attendanceByKey = new Map<string, { daysWorked: number; attendanceHours: number; bookedHours: number; idleHours: number; payrollReadyDays: number; payrollReadyHours: number; latestPayrollUpdate: string | null }>();
+  const attendanceByKey = new Map<string, { daysWorked: number; attendanceHours: number; bookedHours: number; idleHours: number; payrollReadyDays: number; payrollReadyHours: number; latestPayrollUpdate: string | null; source: 'payroll-update' | 'timesheet-lines' | 'none'; anomalyCount: number }>();
 
   const addAttendance = (key: string, item: { daysWorked: number; attendanceHours: number; bookedHours: number; idleHours: number; payrollReady?: boolean; updateAt?: string | null }) => {
     if (!key) return;
-    const current = attendanceByKey.get(key) || { daysWorked: 0, attendanceHours: 0, bookedHours: 0, idleHours: 0, payrollReadyDays: 0, payrollReadyHours: 0, latestPayrollUpdate: null };
-    current.daysWorked += item.daysWorked;
+    const current = attendanceByKey.get(key) || { daysWorked: 0, attendanceHours: 0, bookedHours: 0, idleHours: 0, payrollReadyDays: 0, payrollReadyHours: 0, latestPayrollUpdate: null, source: 'none' as const, anomalyCount: 0 };
+    const safeDays = Math.min(Math.max(0, item.daysWorked), MAX_MONTHLY_PAYABLE_DAYS);
+    if (item.daysWorked > MAX_MONTHLY_PAYABLE_DAYS || current.daysWorked + safeDays > MAX_MONTHLY_PAYABLE_DAYS) current.anomalyCount += 1;
+    current.daysWorked = Math.min(current.daysWorked + safeDays, MAX_MONTHLY_PAYABLE_DAYS);
     current.attendanceHours += item.attendanceHours;
     current.bookedHours += item.bookedHours;
     current.idleHours += item.idleHours;
     if (item.payrollReady) {
-      current.payrollReadyDays += item.daysWorked;
+      if (current.payrollReadyDays + safeDays > MAX_MONTHLY_PAYABLE_DAYS) current.anomalyCount += 1;
+      current.payrollReadyDays = Math.min(current.payrollReadyDays + safeDays, MAX_MONTHLY_PAYABLE_DAYS);
       current.payrollReadyHours += item.bookedHours || item.attendanceHours;
       current.latestPayrollUpdate = item.updateAt || current.latestPayrollUpdate;
+      current.source = 'payroll-update';
+    } else if (current.source === 'none') {
+      current.source = 'timesheet-lines';
     }
     attendanceByKey.set(key, current);
   };
 
-  for (const line of lines) {
+  const periodPayrollUpdates = payrollUpdates.filter((update) => update.periodId === periodId);
+  const hasPayrollUpdateForPeriod = periodPayrollUpdates.length > 0;
+  const payrollUpdateKeysForPeriod = new Set<string>();
+  for (const update of periodPayrollUpdates) {
+    for (const employee of update.employeeAttendance) {
+      [employee.employeeId, employee.employeeName].map(normalizePayrollMatchKey).filter(Boolean).forEach((key) => payrollUpdateKeysForPeriod.add(key));
+    }
+  }
+
+  for (const line of lines.filter((item) => periodHeaderIds.has(item.headerId))) {
+    const lineKeys = new Set([line.employeeId, line.employeeNo, line.employeeName].map(normalizePayrollMatchKey).filter(Boolean));
+    if ([...lineKeys].some((key) => payrollUpdateKeysForPeriod.has(key))) continue;
+    const header = headerById.get(line.headerId);
     const paidLeave = isTimesheetPaidLeaveLine(line);
     const payload = {
       daysWorked: line.clockIn || paidLeave ? 1 : 0,
       attendanceHours: normalizePaidWorkHours(num(line.attendanceDuration)),
       bookedHours: normalizePaidWorkHours(num(line.totalHours)),
       idleHours: num(line.idleHours),
-      payrollReady: false,
+      payrollReady: header?.status === 'HR_Acknowledged' || header?.status === 'Locked',
       updateAt: null,
     };
-    [line.employeeId, line.employeeNo, line.employeeName].map(normalizePayrollMatchKey).forEach((key) => addAttendance(key, payload));
+    lineKeys.forEach((key) => addAttendance(key, payload));
   }
 
-  for (const update of payrollUpdates) {
+  for (const update of periodPayrollUpdates) {
     for (const employee of update.employeeAttendance) {
       const payload = {
         daysWorked: num(employee.daysWorked),
@@ -84,19 +114,19 @@ const buildPayload = async (request: Request) => {
         payrollReady: true,
         updateAt: update.acknowledgedAt,
       };
-      [employee.employeeId, employee.employeeName].map(normalizePayrollMatchKey).forEach((key) => addAttendance(key, payload));
+      new Set([employee.employeeId, employee.employeeName].map(normalizePayrollMatchKey).filter(Boolean)).forEach((key) => addAttendance(key, payload));
     }
   }
 
   const records = dailyEmployees.map((employee) => {
     const keys = [employee.employeeId, employee.employeeCode, employee.fullName].map(normalizePayrollMatchKey).filter(Boolean);
-    const attendance = keys.map((key) => attendanceByKey.get(key)).find(Boolean) || { daysWorked: 0, attendanceHours: 0, bookedHours: 0, idleHours: 0, payrollReadyDays: 0, payrollReadyHours: 0, latestPayrollUpdate: null };
+    const attendance = keys.map((key) => attendanceByKey.get(key)).find(Boolean) || { daysWorked: 0, attendanceHours: 0, bookedHours: 0, idleHours: 0, payrollReadyDays: 0, payrollReadyHours: 0, latestPayrollUpdate: null, source: 'none' as const, anomalyCount: 0 };
     const hoursPerDay = 8;
     const ratePerDay = num(employee.ratePerDay) || num(employee.periodSalary);
     const ratePerHour = num(employee.ratePerHour) || (ratePerDay && hoursPerDay ? ratePerDay / hoursPerDay : 0);
     const payMode = ratePerHour > 0 && ratePerDay <= 0 ? 'Hourly' : 'Daily';
-    const payableDays = attendance.payrollReadyDays || attendance.daysWorked;
-    const payableHours = attendance.payrollReadyHours || attendance.bookedHours || attendance.attendanceHours;
+    const payableDays = Math.min(attendance.payrollReadyDays || attendance.daysWorked, MAX_MONTHLY_PAYABLE_DAYS);
+    const payableHours = Math.min(attendance.payrollReadyHours || attendance.bookedHours || attendance.attendanceHours, MAX_MONTHLY_PAYABLE_DAYS * hoursPerDay);
     const dayRateEarnings = calculateContractDayRateEarnings({
       ratePerDay: ratePerDay || ratePerHour * hoursPerDay,
       weekdayDays: payMode === 'Hourly' ? payableHours / hoursPerDay : payableDays,
@@ -106,6 +136,7 @@ const buildPayload = async (request: Request) => {
     if (!ratePerDay && !ratePerHour) issues.push('Daily or hourly rate is missing');
     if (!attendance.daysWorked && !attendance.bookedHours && !attendance.attendanceHours) issues.push('No daily timesheet found');
     if (!attendance.payrollReadyDays && !attendance.payrollReadyHours) issues.push('Timesheet is not yet payroll-ready');
+    if (attendance.anomalyCount > 0) issues.push(`Timesheet days were capped at payroll period limit (${MAX_MONTHLY_PAYABLE_DAYS})`);
     if (!employee.setupAssignedToPayroll) issues.push('Employee is not assigned to payroll setup');
     return {
       employeeDbId: employee.employeeDbId,
@@ -136,6 +167,8 @@ const buildPayload = async (request: Request) => {
       nonTaxablePay: dayRateEarnings.nonTaxablePay,
       earnings: dayRateEarnings.earningLines,
       latestPayrollUpdate: attendance.latestPayrollUpdate,
+      attendanceSource: attendance.source,
+      payrollPeriod,
       setupAssignedToPayroll: employee.setupAssignedToPayroll,
       status: statusFromIssues(issues),
       issues,
@@ -158,7 +191,16 @@ const buildPayload = async (request: Request) => {
 
   return {
     generatedAt: new Date().toISOString(),
-    source: `${employeeSource.source} and Daily Timesheet Payroll Updates`,
+    source: `${employeeSource.source} and Daily Timesheet Payroll Updates (${payrollPeriodLabel(payrollPeriod)})`,
+    payrollPeriod,
+    periodId,
+    periodLabel: payrollPeriodLabel(payrollPeriod),
+    controls: {
+      maxMonthlyPayableDays: MAX_MONTHLY_PAYABLE_DAYS,
+      sourceRule: hasPayrollUpdateForPeriod ? 'Using payroll-ready period update only' : 'Using current-period timesheet lines only',
+      historicalDataExcluded: true,
+      duplicateSourcePrevention: true,
+    },
     dataSource: payrollDataSourceInfo(employeeSource),
     role,
     permissions: perms,

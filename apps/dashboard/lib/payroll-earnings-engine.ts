@@ -317,8 +317,23 @@ const isLeaveAllowanceLine = (line: Pick<PayrollEarningLine, 'code' | 'name'>) =
   return text.includes('LEAVEALLOW') || text.includes('LEAVE ALLOWANCE') || /(^|_)LEAVE(TAX)?($|_)/.test(String(line.code || '').toUpperCase());
 };
 
-export const monthlyGrossFromEmployee = (employee: DleEmployeeDirectoryRow) =>
-  roundMoney(num(employee.periodSalary) || (num(employee.annualSalary) > 0 ? num(employee.annualSalary) / 12 : 0));
+export const monthlyGrossFromEmployee = (employee: DleEmployeeDirectoryRow) => {
+  const periodSalary = num(employee.periodSalary);
+  if (periodSalary > 0) return roundMoney(periodSalary);
+  const annualSalary = num(employee.annualSalary);
+  if (annualSalary > 0) return roundMoney(annualSalary / 12);
+  const employeeCode = compact(employee.employeeCode || employee.employeeId).toUpperCase();
+  const groupText = [employee.payrollGroup, employee.staffCategory, employee.employeeCategory, employee.employmentType].map(compact).join(' ').toUpperCase();
+  const isDailyRate = /^C\d+/.test(employeeCode) || /DAILY RATE|DAY RATE/.test(groupText);
+  if (isDailyRate) {
+    const ratePerDay = num(employee.ratePerDay) || (num(employee.ratePerHour) > 0 ? num(employee.ratePerHour) * (num(employee.hoursPerDay) || 8) : 0);
+    const workingDays = num(employee.hoursPerPeriod) > 0 && (num(employee.hoursPerDay) || 8) > 0
+      ? num(employee.hoursPerPeriod) / (num(employee.hoursPerDay) || 8)
+      : 22;
+    if (ratePerDay > 0) return roundMoney(ratePerDay * workingDays);
+  }
+  return 0;
+};
 
 export const resolvePayrollEarningProfile = (employee: DleEmployeeDirectoryRow): PayrollEarningProfileId => {
   const grade = compact(employee.salaryGrade || employee.jobGrade).toUpperCase();

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadWorkspaceEnv, readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { importSagePayrollEmployeesToDb, loadWorkspaceEnv, readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines } from '@/lib/sage-people-payroll-store';
 
@@ -112,6 +112,7 @@ const sageLineItems = (raw: string | null | undefined) => {
 const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
   try {
     const sageEmployees = await withTimeout(readActiveSagePayrollEmployeesWithLatestPayslipLines(), Number(process.env.SAGE_PAYROLL_ENRICH_TIMEOUT_MS || 20000), 'Sage payroll enrichment timed out.');
+    void importSagePayrollEmployeesToDb(sageEmployees).catch(() => undefined);
     const sageByKey = new Map(sageEmployees.flatMap((employee) => {
       const keys = [employee.directoryEmployeeCode, employee.employeeCode, employee.employeeCodeDisplay].map(normalizePayrollMatchKey).filter(Boolean);
       return keys.map((key) => [key, employee] as const);
@@ -124,10 +125,12 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
       const earningLines = sageLineItems(sage.latestEarningLinesJson);
       const deductionLines = sageLineItems(sage.latestDeductionLinesJson);
       const contributionLines = sageLineItems(sage.latestContributionLinesJson);
-      const hoursPerDay = moneyFrom(employee.hoursPerDay, 8) || 8;
-      const ratePerDay = moneyFrom(employee.ratePerDay);
-      const ratePerHour = moneyFrom(employee.ratePerHour);
-      const periodSalary = moneyFrom(employee.periodSalary);
+      const hoursPerDay = moneyFrom(employee.hoursPerDay, sage.hoursPerDay, 8) || 8;
+      const sageRatePerDay = moneyFrom(sage.ratePerDay);
+      const sageRatePerHour = moneyFrom(sage.ratePerHour);
+      const ratePerDay = moneyFrom(employee.ratePerDay, sageRatePerDay, sageRatePerHour ? sageRatePerHour * hoursPerDay : null);
+      const ratePerHour = moneyFrom(employee.ratePerHour, sageRatePerHour, ratePerDay ? ratePerDay / hoursPerDay : null);
+      const periodSalary = moneyFrom(employee.periodSalary, sage.periodSalary, ratePerDay ? ratePerDay * 22 : null);
       return {
         ...employee,
         bankName: employee.bankName || sage.bankName || '',
@@ -140,7 +143,7 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
         paymentRun: employee.paymentRun || sage.paymentRunLong || sage.paymentRunShort || '',
         paymentType: employee.paymentType || sage.paymentType || '',
         periodSalary,
-        annualSalary: moneyFrom(employee.annualSalary, periodSalary ? periodSalary * 12 : null),
+        annualSalary: moneyFrom(employee.annualSalary, sage.annualSalary, periodSalary ? periodSalary * 12 : null),
         ratePerDay,
         ratePerHour,
         hoursPerDay,
