@@ -10,7 +10,7 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { hasLeaveAllowanceInYear } from '@/lib/payroll-leave-allowance-store';
 import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
-import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
+import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
 
@@ -237,6 +237,9 @@ export async function GET(request: Request) {
     const cached = essResponseCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return ok(cached.payload);
     const [employeeSource, rawRequests, loanApplications, loansConfig, taxConfig, pensionConfig, identityByKey] = await Promise.all([readPayrollEmployees(), readRequests(), readPayrollLoanApplications(), readPayrollLoansConfig(), readPayrollTaxConfig(), readPayrollPensionConfig(), payslipIdentityMap()]);
+    if (identityByKey.size === 0) {
+      void syncPayslipIdentitiesFromSage({ migratedBy: 'Employee Self-Service background identity sync' }).catch(() => undefined);
+    }
     const allRequests = await expireStaleLeaveRequests(rawRequests);
     const employee = resolveEssEmployee(employeeSource.employees, session);
     if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');

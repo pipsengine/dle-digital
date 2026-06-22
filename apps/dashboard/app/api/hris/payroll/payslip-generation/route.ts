@@ -12,7 +12,7 @@ import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-stor
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
-import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
+import { payslipIdentityMap, syncPayslipIdentitiesFromSage, type PayslipEmployeeIdentity } from '@/lib/payroll-payslip-identity-store';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayslipStatus = 'Ready' | 'Review' | 'Blocked';
@@ -49,6 +49,24 @@ const isDailyRateEmployee = (employee: DleEmployeeDirectoryRow, earningProfileId
     .join(' ')
     .toLowerCase();
   return code.startsWith('C') || earningProfileId === 'contract-day-rate' || text.includes('daily') || text.includes('day rate');
+};
+const isPermanentEmployee = (employee: DleEmployeeDirectoryRow) => {
+  const text = [employee.employmentType, employee.employeeCategory, employee.staffCategory, employee.payrollGroup]
+    .map(compact)
+    .join(' ')
+    .toLowerCase();
+  return text.includes('permanent') && !/contract|lumpsum|lump sum|daily|day rate|temporary|nysc|intern|industrial training/.test(text);
+};
+const requiredPermanentIdentityIssues = (employee: DleEmployeeDirectoryRow, identity?: PayslipEmployeeIdentity) => {
+  if (!isPermanentEmployee(employee)) return [];
+  const employeeAny = employee as Record<string, unknown>;
+  return [
+    ...!compact(identity?.bankName || employee.bankName) ? ['Permanent employee bank name is missing'] : [],
+    ...!compact(identity?.accountNo || employee.accountNo || employeeAny.accountNumber) ? ['Permanent employee account number is missing'] : [],
+    ...!compact(identity?.pensionProvider || employee.pensionProvider) ? ['Permanent employee pension fund administrator is missing'] : [],
+    ...!compact(identity?.pensionPin || employee.pensionPin) ? ['Permanent employee pension number is missing'] : [],
+    ...!compact(identity?.taxIdentificationNumber || employee.taxIdentificationNumber || employeeAny.taxNo) ? ['Permanent employee tax number is missing'] : [],
+  ];
 };
 
 const resolveDashboardRoot = () => {
@@ -255,7 +273,7 @@ const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: Pay
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  await syncPayslipIdentitiesFromSage({ force: true, migratedBy: 'Payslip Generation' }).catch(() => undefined);
+  await syncPayslipIdentitiesFromSage({ migratedBy: 'Payslip Generation' }).catch(() => undefined);
   const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches, dailyAttendanceByKey, identityByKey] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
@@ -322,6 +340,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       ...amounts.grossPay <= 0 ? ['Gross pay is missing'] : [],
       ...netPay <= 0 && amounts.grossPay > 0 ? ['Net pay is zero after deductions'] : [],
       ...!employee.setupAssignedToPayroll ? ['Payroll setup is not assigned'] : [],
+      ...requiredPermanentIdentityIssues(employee, identity),
       ...dailyRateEmployee && ratePerDay <= 0 ? ['Daily rate is missing'] : [],
       ...dailyRateEmployee && dailyAttendance.daysWorked <= 0 ? ['No payroll-ready daily timesheet found'] : [],
       ...!compact(employee.payrollGroup) ? ['Payroll group is missing'] : [],
