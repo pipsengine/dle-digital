@@ -32,6 +32,7 @@ import {
   CreditCard,
   DatabaseZap,
   Download,
+  Eye,
   FileBarChart,
   FileCheck2,
   FileText,
@@ -648,13 +649,33 @@ const canRunAction = (actionItem: PayrollAction, role: Role, payload: PayrollPay
   const run = payload?.runs[0];
   const status = run?.status || 'Draft';
   const blockedEmployees = payload?.summary.blockedEmployees || 0;
+  const completedStatuses = ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'];
+  const submittedStatuses = ['Submitted', 'Under Review', ...completedStatuses];
+  const releasedStatuses = ['Released', 'Locked', 'Posted', 'Published', 'Closed'];
+  const actionCompleted = (id: string) => {
+    if (id === 'validate-payroll') return Boolean(run?.validatedAt) && blockedEmployees === 0;
+    if (id === 'create-run') return ['Computed', 'Ready for Approval', ...submittedStatuses].includes(status);
+    if (id === 'submit-run') return Boolean(run?.submittedAt) || submittedStatuses.includes(status);
+    if (id === 'approve-run' || id === 'approve-entire-workflow') return Boolean(run?.approvedAt) || completedStatuses.includes(status);
+    if (id === 'release-run') return Boolean(run?.releasedAt) || releasedStatuses.includes(status);
+    if (id === 'generate-payslips') return Boolean(run?.payslipsGeneratedAt) || ['Published', 'Closed'].includes(status);
+    if (id === 'generate-bank-schedule') return Boolean(run?.bankScheduleGeneratedAt);
+    if (id === 'generate-statutory-schedules') return Boolean(run?.statutorySchedulesGeneratedAt);
+    if (id === 'post-run') return Boolean(run?.postedAt) || ['Posted', 'Closed'].includes(status);
+    if (id === 'close-period') return status === 'Closed';
+    return false;
+  };
+  if (actionCompleted(actionItem.id)) return { allowed: false, reason: 'This step is already completed. Continue to the next active step.' };
   if (actionItem.id === 'create-run' && blockedEmployees > 0) return { allowed: false, reason: 'Resolve blocked payroll setup before processing.' };
   if (actionItem.id === 'submit-run' && blockedEmployees > 0) return { allowed: false, reason: 'Resolve blocked payroll setup before submitting payroll for approval.' };
   if (['approve-run'].includes(actionItem.id) && blockedEmployees > 0) return { allowed: false, reason: 'Resolve blocked payroll setup before approval.' };
-  if (actionItem.id === 'submit-run' && !['Ready for Approval', 'Validated', 'Computed', 'Validation', 'Draft', 'Open'].includes(status)) return { allowed: false, reason: `Cannot submit payroll from ${status}.` };
-  if (actionItem.id === 'approve-run' && !['Ready for Approval', 'Submitted', 'Under Review', 'Validation'].includes(status)) return { allowed: false, reason: `Cannot approve payroll from ${status}.` };
+  if (actionItem.id === 'create-run' && !['Draft', 'Open', 'Validation', 'Validated', 'Ready for Approval'].includes(status)) return { allowed: false, reason: 'Run payroll validation before processing, then continue in order.' };
+  if (actionItem.id === 'submit-run' && status !== 'Computed') return { allowed: false, reason: 'Process payroll first. Submit activates after computation is complete.' };
+  if (actionItem.id === 'approve-run' && !['Submitted', 'Under Review'].includes(status)) return { allowed: false, reason: 'Submit payroll for approval first. Approval activates after submission.' };
+  if (actionItem.id === 'approve-entire-workflow' && !['Submitted', 'Under Review'].includes(status)) return { allowed: false, reason: 'Submit payroll first. Entire workflow approval activates after submission.' };
   if (actionItem.id === 'release-run' && status !== 'Approved') return { allowed: false, reason: 'Payroll approval is required before release.' };
-  if (['generate-payslips', 'generate-bank-schedule', 'generate-statutory-schedules', 'export-bank-file', 'post-run'].includes(actionItem.id) && !['Approved', 'Released', 'Locked', 'Posted', 'Published'].includes(status)) return { allowed: false, reason: 'Payroll approval is required first.' };
+  if (['generate-payslips', 'generate-bank-schedule', 'generate-statutory-schedules', 'export-bank-file', 'post-run'].includes(actionItem.id) && !releasedStatuses.includes(status)) return { allowed: false, reason: 'Release payroll first. Output actions activate after release.' };
+  if (actionItem.id === 'post-run' && (!run?.bankScheduleGeneratedAt || !run?.statutorySchedulesGeneratedAt)) return { allowed: false, reason: 'Generate bank and statutory schedules before posting.' };
   if (actionItem.id === 'close-period' && status !== 'Posted') return { allowed: false, reason: 'Close is blocked until payslips, bank schedule, journal, and statutory schedules are complete.' };
   if (status === 'Closed' && !['approve-entire-workflow', 'reopen-period', 'view-audit', 'generate-report', 'export-csv', 'export-excel', 'export-pdf'].includes(actionItem.id)) return { allowed: false, reason: 'Closed periods are locked until approved reopening.' };
   return { allowed: true, reason: '' };
@@ -2083,11 +2104,22 @@ function BankFinanceWorkspace({
   const deductions = payload?.summary.deductions || 0;
   const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
   const issueRows = records.filter((record) => record.payrollStatus !== 'Ready' || record.exceptionCount > 0 || record.exceptions.some((issue) => /bank|account|payment|finance|journal|gl|cost/i.test(issue)));
-  const canGenerateBankSchedule = ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(currentRun?.status || '');
+  const bankScheduleRows = readyRows.length ? readyRows : records.filter((record) => record.payrollStatus !== 'Blocked');
+  const bankSchedulePreviewRows = bankScheduleRows.slice(0, 25);
+  const bankScheduleTotals = bankScheduleRows.reduce(
+    (sum, record) => ({
+      grossPay: sum.grossPay + Number(record.grossPay || 0),
+      deductions: sum.deductions + Number(record.deductions || 0),
+      netPay: sum.netPay + Number(record.netPay || 0),
+    }),
+    { grossPay: 0, deductions: 0, netPay: 0 }
+  );
+  const canGenerateBankSchedule = ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(currentRun?.status || '');
   const canPostJournal = ['Released', 'Locked', 'Published'].includes(currentRun?.status || '') || Boolean(currentRun?.bankScheduleGeneratedAt);
+  const bankScheduleExportUrl = `/api/hris/payroll-management?format=xls&report=bank-schedule&status=Ready`;
   const financeCards = [
     { id: 'payments' as const, title: 'Payment Value', value: money(netPay, canViewMoney), detail: `${number(readyRows.length)} payroll-ready employees`, icon: Banknote, tone: 'green' as Tone },
-    { id: 'bank-file' as const, title: 'Bank Schedule', value: currentRun?.bankScheduleGeneratedAt ? 'Generated' : 'Pending', detail: currentRun?.bankScheduleGeneratedAt ? new Date(currentRun.bankScheduleGeneratedAt).toLocaleString('en-GB') : 'Requires approved payroll', icon: CreditCard, tone: currentRun?.bankScheduleGeneratedAt ? 'green' as Tone : 'amber' as Tone },
+    { id: 'bank-file' as const, title: 'Bank Schedule', value: currentRun?.bankScheduleGeneratedAt ? 'Generated' : 'Pending', detail: currentRun?.bankScheduleGeneratedAt ? new Date(currentRun.bankScheduleGeneratedAt).toLocaleString('en-GB') : 'Requires released payroll', icon: CreditCard, tone: currentRun?.bankScheduleGeneratedAt ? 'green' as Tone : 'amber' as Tone },
     { id: 'journal' as const, title: 'Payroll Journal', value: currentRun?.postedAt ? 'Posted' : 'Not Posted', detail: currentRun?.postedAt ? new Date(currentRun.postedAt).toLocaleString('en-GB') : 'Awaiting finance posting', icon: Landmark, tone: currentRun?.postedAt ? 'green' as Tone : 'slate' as Tone },
     { id: 'issues' as const, title: 'Finance Issues', value: number(issueRows.length), detail: 'Bank, payment, journal, and reconciliation checks', icon: AlertTriangle, tone: issueRows.length ? 'red' as Tone : 'green' as Tone },
   ];
@@ -2138,9 +2170,27 @@ function BankFinanceWorkspace({
     }
     runAction(actionId);
   };
+  const spoolBankSchedule = () => window.print();
 
   return (
     <div className="space-y-4">
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden; }
+          #bank-schedule-print-area, #bank-schedule-print-area * { visibility: visible; }
+          #bank-schedule-print-area {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white;
+            padding: 18px;
+          }
+          #bank-schedule-print-area table { width: 100%; border-collapse: collapse; }
+          #bank-schedule-print-area th, #bank-schedule-print-area td { border: 1px solid #cbd5e1; padding: 6px; font-size: 11px; }
+          #bank-schedule-print-area th { background: #0f172a !important; color: white !important; }
+        }
+      `}</style>
       <section className="rounded-lg border border-slate-300 bg-slate-50 p-4 shadow-sm">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -2149,17 +2199,33 @@ function BankFinanceWorkspace({
             <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Generate bank schedules, export payment batches, post payroll journals, monitor GL allocation, and reconcile finance outputs with payroll approvals.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setFinanceView('bank-file')} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-800 hover:bg-slate-50">
+              <Eye className="h-4 w-4" />
+              View Bank Schedule
+            </button>
             <button type="button" onClick={() => runFinanceAction('generate-bank-schedule')} disabled={busyAction === 'generate-bank-schedule' || !canGenerateBankSchedule} className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-black ${canGenerateBankSchedule ? 'bg-slate-900 text-white hover:bg-slate-800' : 'cursor-not-allowed bg-slate-100 text-slate-400'}`}>
               <CreditCard className="h-4 w-4" />
               {busyAction === 'generate-bank-schedule' ? 'Generating...' : 'Generate Bank Schedule'}
             </button>
+            <button type="button" onClick={spoolBankSchedule} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-blue-600 px-3 text-xs font-black text-white hover:bg-blue-700">
+              <Printer className="h-4 w-4" />
+              Spool Bank Schedule
+            </button>
+            <a href={bankScheduleExportUrl} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-black text-white hover:bg-emerald-700">
+              <FileSpreadsheet className="h-4 w-4" />
+              Export Formatted Excel
+            </a>
+            <Link href="/hris/payroll/payslip-generation" className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-800 hover:bg-slate-50">
+              <ReceiptText className="h-4 w-4" />
+              View Payslips
+            </Link>
             <button type="button" onClick={() => runFinanceAction('post-run')} disabled={busyAction === 'post-run' || !canPostJournal} className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-black ${canPostJournal ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'cursor-not-allowed bg-slate-100 text-slate-400'}`}>
               <Send className="h-4 w-4" />
               {busyAction === 'post-run' ? 'Posting...' : 'Post Journal'}
             </button>
           </div>
         </div>
-        {!canGenerateBankSchedule ? <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Payroll approval is required before finance can generate the bank payment schedule.</p> : null}
+        {!canGenerateBankSchedule ? <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Payroll release is required before finance can generate the bank payment schedule.</p> : null}
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -2179,6 +2245,65 @@ function BankFinanceWorkspace({
             </button>
           );
         })}
+      </section>
+
+      <section id="bank-schedule-print-area" className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-slate-500">Bank Schedule Salary Preview</p>
+            <h3 className="mt-1 text-lg font-black text-slate-950">{payload?.periodLabel || 'Current period'} salary schedule</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{number(bankScheduleRows.length)} employees ready for bank schedule. Review salaries here before printing or exporting.</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-right">
+            <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+              <p className="text-[10px] font-black uppercase text-blue-700">Gross</p>
+              <p className="text-sm font-black text-slate-950">{money(bankScheduleTotals.grossPay, canViewMoney)}</p>
+            </div>
+            <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
+              <p className="text-[10px] font-black uppercase text-violet-700">Deductions</p>
+              <p className="text-sm font-black text-slate-950">{money(bankScheduleTotals.deductions, canViewMoney)}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+              <p className="text-[10px] font-black uppercase text-emerald-700">Net Salary</p>
+              <p className="text-sm font-black text-slate-950">{money(bankScheduleTotals.netPay, canViewMoney)}</p>
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[1080px] w-full text-left">
+            <thead className="bg-slate-900 text-xs font-black uppercase text-white">
+              <tr>{['#', 'Employee', 'Department / Location', 'Payment Type', 'Currency', 'Gross Salary', 'Deductions', 'Net Salary', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {bankSchedulePreviewRows.map((record, index) => (
+                <tr key={record.employeeId} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-xs font-black text-slate-500">{index + 1}</td>
+                  <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId}</p></td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.location || 'No location'}</span></td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.paymentType || 'Cash'}</td>
+                  <td className="px-4 py-3 text-xs font-black text-slate-700">{record.payCurrency || 'NGN'}</td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-950">{money(record.grossPay, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.deductions, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
+                  <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                </tr>
+              ))}
+              {!bankSchedulePreviewRows.length ? <tr><td colSpan={9} className="px-4 py-6 text-sm font-black text-slate-700">No bank schedule salary lines are ready for preview.</td></tr> : null}
+            </tbody>
+            {bankSchedulePreviewRows.length ? (
+              <tfoot className="bg-slate-50">
+                <tr>
+                  <td colSpan={5} className="px-4 py-3 text-right text-xs font-black uppercase text-slate-600">Visible schedule total</td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-950">{money(bankSchedulePreviewRows.reduce((sum, record) => sum + Number(record.grossPay || 0), 0), canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-violet-700">{money(bankSchedulePreviewRows.reduce((sum, record) => sum + Number(record.deductions || 0), 0), canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(bankSchedulePreviewRows.reduce((sum, record) => sum + Number(record.netPay || 0), 0), canViewMoney)}</td>
+                  <td className="px-4 py-3"></td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        </div>
+        {bankScheduleRows.length > bankSchedulePreviewRows.length ? <p className="border-t border-slate-100 px-4 py-3 text-xs font-bold text-slate-500 print:hidden">Showing first {number(bankSchedulePreviewRows.length)} salary lines. Export formatted Excel for the full {number(bankScheduleRows.length)}-employee bank schedule.</p> : null}
       </section>
 
       <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">

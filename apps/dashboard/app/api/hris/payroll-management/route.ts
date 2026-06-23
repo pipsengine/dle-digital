@@ -620,6 +620,7 @@ const reportTitle = (report: string) => ({
   'pension-report': 'Pension Report',
   'deduction-report': 'Deduction Report',
   'bank-payment-report': 'Bank Payment Report',
+  'bank-schedule': 'Bank Salary Schedule',
   'compliance-report': 'Compliance Report',
   'audit-report': 'Payroll Audit Report',
   'executive-analytics': 'Executive Payroll Analytics',
@@ -734,10 +735,23 @@ const reportExport = (records: any[], report: string) => {
       rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.paye ?? 0, r.pension ?? 0, r.otherDeductions ?? 0, r.deductions ?? 0, r.payrollStatus]),
     };
   }
-  if (report === 'bank-payment-report') {
+  if (report === 'bank-payment-report' || report === 'bank-schedule') {
     return {
-      columns: ['Employee ID', 'Name', 'Department', 'Location', 'Payment Type', 'Currency', 'Net Payment', 'Payroll Status', 'Exceptions'],
-      rows: records.map((r) => [r.employeeId, r.fullName, r.department, r.location, r.paymentType, r.payCurrency, r.netPay ?? 0, r.payrollStatus, (r.exceptions || []).join('; ')]),
+      columns: ['S/N', 'Employee ID', 'Employee Name', 'Department', 'Location', 'Payment Type', 'Currency', 'Gross Salary', 'Deductions', 'Net Salary / Bank Amount', 'Payroll Status', 'Finance Note'],
+      rows: records.map((r, index) => [
+        index + 1,
+        r.employeeId,
+        r.fullName,
+        r.department,
+        r.location,
+        r.paymentType,
+        r.payCurrency,
+        r.grossPay ?? 0,
+        r.deductions ?? 0,
+        r.netPay ?? 0,
+        r.payrollStatus,
+        (r.exceptions || []).join('; ') || 'Ready for bank schedule',
+      ]),
     };
   }
   if (report === 'salary-analysis') {
@@ -912,6 +926,7 @@ export async function POST(request: Request) {
     const targetRun = runStore.get(runId) || getCurrentRun();
     if (!targetRun) return jsonErr(404, 'Payroll run not found');
     if (targetRun.status === 'Closed') return jsonOk({ run: targetRun, message: 'Payroll workflow is already closed.' });
+    if (!['Submitted', 'Under Review'].includes(targetRun.status)) return jsonErr(409, 'Submit payroll first. Entire workflow approval activates after submission.');
     const approvedRun = applySuperAdminEndToEndApproval(request, targetRun, actor, role, payload, reason, comment);
     runStore.set(approvedRun.id, approvedRun);
     return jsonOk({ run: approvedRun, message: 'Global Super Administrator approved the entire payroll workflow end-to-end.' });
@@ -929,7 +944,7 @@ export async function POST(request: Request) {
     if (existing.createdBy === role) return jsonErr(409, 'Self-approval is not allowed.');
     const payload = await buildPayload(request);
     if (payload.summary.blockedEmployees > 0) return jsonErr(409, 'Cannot approve payroll while blocked payroll setup issues are unresolved.');
-    if (!['Ready for Approval', 'Submitted', 'Under Review', 'Validation'].includes(existing.status)) return jsonErr(409, `Cannot approve payroll from ${existing.status}.`);
+    if (!['Submitted', 'Under Review'].includes(existing.status)) return jsonErr(409, `Cannot approve payroll from ${existing.status}. Submit payroll for approval first.`);
     existing.status = 'Approved';
     existing.approvedAt = nowIso();
     existing.approvedBy = role;
@@ -965,7 +980,7 @@ export async function POST(request: Request) {
   }
   if (action === 'generate-payslips') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
-    if (!['Approved', 'Released', 'Locked', 'Posted', 'Published'].includes(existing.status)) return jsonErr(409, 'Payslips can only be published after payroll approval.');
+    if (!['Released', 'Locked', 'Posted', 'Published'].includes(existing.status)) return jsonErr(409, 'Payslips can only be published after payroll release.');
     existing.payslipsGeneratedAt = nowIso();
     existing.payslipsGeneratedBy = role;
     existing.status = existing.postedAt ? existing.status : 'Published';
@@ -974,7 +989,7 @@ export async function POST(request: Request) {
   }
   if (action === 'generate-bank-schedule') {
     if (!perms.canPost) return jsonErr(403, 'Permission denied');
-    if (!['Approved', 'Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Bank schedule generation requires approved payroll.');
+    if (!['Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Bank schedule generation requires released payroll.');
     existing.bankScheduleGeneratedAt = nowIso();
     existing.bankScheduleGeneratedBy = role;
     logAudit(request, { user: actor, role, action: 'generate-bank-schedule', record: existing.id, oldValue: before, newValue: 'Bank schedule generated', reason, comment });
@@ -982,7 +997,7 @@ export async function POST(request: Request) {
   }
   if (action === 'generate-statutory-schedules') {
     if (!perms.canManageRun && !perms.canPost) return jsonErr(403, 'Permission denied');
-    if (!['Approved', 'Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Statutory schedules require approved payroll.');
+    if (!['Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Statutory schedules require released payroll.');
     existing.statutorySchedulesGeneratedAt = nowIso();
     existing.statutorySchedulesGeneratedBy = role;
     logAudit(request, { user: actor, role, action: 'generate-statutory-schedules', record: existing.id, oldValue: before, newValue: 'Statutory schedules generated', reason, comment: 'PAYE, Pension, NHF, NSITF, and ITF schedule pack generated.' });
@@ -990,7 +1005,7 @@ export async function POST(request: Request) {
   }
   if (action === 'post-run') {
     if (!perms.canPost) return jsonErr(403, 'Permission denied');
-    if (!['Approved', 'Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Payroll journal cannot be posted before payroll approval.');
+    if (!['Released', 'Locked', 'Published'].includes(existing.status)) return jsonErr(409, 'Payroll journal cannot be posted before payroll release.');
     if (!existing.bankScheduleGeneratedAt) return jsonErr(409, 'Generate the bank schedule before posting payroll.');
     if (!existing.statutorySchedulesGeneratedAt) return jsonErr(409, 'Generate statutory schedules before posting payroll.');
     existing.status = 'Posted';
@@ -1003,7 +1018,7 @@ export async function POST(request: Request) {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
     const payload = await buildPayload(request);
     if (payload.summary.blockedEmployees > 0) return jsonErr(409, 'Resolve blocked payroll setup issues before submitting payroll for approval.');
-    if (!['Ready for Approval', 'Validated', 'Computed', 'Validation', 'Draft', 'Open'].includes(existing.status)) return jsonErr(409, `Cannot submit payroll from ${existing.status}.`);
+    if (existing.status !== 'Computed') return jsonErr(409, `Cannot submit payroll from ${existing.status}. Process payroll first.`);
     existing.status = 'Submitted';
     existing.submittedAt = nowIso();
     existing.submittedBy = role;

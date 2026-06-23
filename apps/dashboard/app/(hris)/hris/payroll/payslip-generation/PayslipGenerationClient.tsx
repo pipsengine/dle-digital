@@ -389,6 +389,9 @@ export default function PayslipGenerationClient({ initialNow }: { initialNow: st
   const exportCsv = () => {
     window.location.href = `/api/hris/payroll/payslip-generation?period=${encodeURIComponent(period)}&format=csv`;
   };
+  const exportExcel = () => {
+    window.location.href = `/api/hris/payroll/payslip-generation?period=${encodeURIComponent(period)}&format=xls`;
+  };
 
   const printPayslip = () => window.print();
 
@@ -511,7 +514,11 @@ export default function PayslipGenerationClient({ initialNow }: { initialNow: st
             </button>
             <button type="button" onClick={exportCsv} disabled={!payload?.permissions.canExport} className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-extrabold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
               <Download className="h-4 w-4" />
-              Export Batch
+              Export CSV
+            </button>
+            <button type="button" onClick={exportExcel} disabled={!payload?.permissions.canExport} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-extrabold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
+              <Download className="h-4 w-4" />
+              Export Excel
             </button>
             <button type="button" className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700">
               <Mail className="h-4 w-4" />

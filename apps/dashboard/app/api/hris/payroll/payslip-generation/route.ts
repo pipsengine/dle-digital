@@ -13,6 +13,7 @@ import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { calculateTimesheetPeriod, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage, type PayslipEmployeeIdentity } from '@/lib/payroll-payslip-identity-store';
+import { buildExcelHtml, excelMimeType } from '@/lib/excel-export';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayslipStatus = 'Ready' | 'Review' | 'Blocked';
@@ -501,6 +502,24 @@ const csv = (records: any[]) => {
   return [headers.join(','), ...lines].join('\n');
 };
 
+const payslipExcelRows = (records: any[]) =>
+  records.map((record, index) => [
+    index + 1,
+    record.payslipId,
+    record.employeeId,
+    record.fullName,
+    record.department,
+    record.location,
+    record.payrollGroup,
+    record.payBasis,
+    record.grossPay ?? 0,
+    record.totalDeductions ?? 0,
+    record.netPay ?? 0,
+    record.status,
+    record.deliveryStatus,
+    (record.issues || []).join('; ') || 'Ready',
+  ]);
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -512,6 +531,21 @@ export async function GET(request: Request) {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
           'content-disposition': `attachment; filename="payslips-${period}.csv"`,
+        },
+      });
+    }
+    if (url.searchParams.get('format') === 'xls' || url.searchParams.get('format') === 'excel') {
+      if (!payload.permissions.canExport) return err(403, 'Permission denied');
+      return new Response(buildExcelHtml({
+        title: `Payslip Salary Schedule - ${payload.periodLabel}`,
+        subtitle: `${payload.payslips.length} payslips / ${payload.summary.ready} ready / ${payload.summary.blocked} blocked or withheld`,
+        sheetName: 'Payslip Schedule',
+        columns: ['S/N', 'Payslip ID', 'Employee ID', 'Employee Name', 'Department', 'Location', 'Payroll Group', 'Pay Basis', 'Gross Salary', 'Deductions', 'Net Salary', 'Payslip Status', 'Delivery Status', 'Issues'],
+        rows: payslipExcelRows(payload.payslips),
+      }), {
+        headers: {
+          'content-type': excelMimeType,
+          'content-disposition': `attachment; filename="payslip-schedule-${period}.xls"`,
         },
       });
     }
