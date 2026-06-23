@@ -8,6 +8,13 @@ export type PayrollEmployeeOption = {
   employeeCode?: string;
   nhfApplicable?: boolean;
   annualRentRelief?: number | null;
+  payrollGroup?: string;
+  salaryGrade?: string;
+  jobGrade?: string;
+  setupAssignedToPayroll?: boolean;
+  ratePerDay?: number | null;
+  ratePerHour?: number | null;
+  hoursPerDay?: number | null;
   updatedAt: string;
   updatedBy?: string;
 };
@@ -57,8 +64,9 @@ export const readPayrollEmployeeOptions = async (): Promise<PayrollEmployeeOptio
 
 export const writePayrollEmployeeOption = async (option: Omit<PayrollEmployeeOption, 'updatedAt'> & { updatedAt?: string }) => {
   const current = await readPayrollEmployeeOptions();
-  const nextOption: PayrollEmployeeOption = { ...option, updatedAt: option.updatedAt || new Date().toISOString() };
-  const keys = [nextOption.employeeId, nextOption.employeeCode].map(keyFor).filter(Boolean);
+  const keys = [option.employeeId, option.employeeCode].map(keyFor).filter(Boolean);
+  const previous = current.find((item) => [item.employeeId, item.employeeCode].map(keyFor).some((key) => keys.includes(key)));
+  const nextOption: PayrollEmployeeOption = { ...previous, ...option, updatedAt: option.updatedAt || new Date().toISOString() };
   const next = current.filter((item) => ![item.employeeId, item.employeeCode].map(keyFor).some((key) => keys.includes(key)));
   next.push(nextOption);
   const payload = JSON.stringify(next.sort((a, b) => keyFor(a.employeeId).localeCompare(keyFor(b.employeeId))), null, 2);
@@ -93,6 +101,13 @@ export const applyPayrollEmployeeOptions = async (employees: DleEmployeeDirector
       ...employee,
       nhfApplicable: typeof option.nhfApplicable === 'boolean' ? option.nhfApplicable : employee.nhfApplicable,
       annualRentRelief: Number.isFinite(Number(option.annualRentRelief)) ? Number(option.annualRentRelief) : employee.annualRentRelief,
+      payrollGroup: option.payrollGroup || employee.payrollGroup,
+      salaryGrade: option.salaryGrade || employee.salaryGrade,
+      jobGrade: option.jobGrade || employee.jobGrade,
+      setupAssignedToPayroll: typeof option.setupAssignedToPayroll === 'boolean' ? option.setupAssignedToPayroll : employee.setupAssignedToPayroll,
+      ratePerDay: Number.isFinite(Number(option.ratePerDay)) ? Number(option.ratePerDay) : employee.ratePerDay,
+      ratePerHour: Number.isFinite(Number(option.ratePerHour)) ? Number(option.ratePerHour) : employee.ratePerHour,
+      hoursPerDay: Number.isFinite(Number(option.hoursPerDay)) ? Number(option.hoursPerDay) : employee.hoursPerDay,
     };
   });
 };

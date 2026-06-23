@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import {
   Bar,
@@ -160,6 +160,7 @@ type PayrollPayload = {
   auditTrail?: PayrollAuditEntry[];
 };
 
+type PayrollException = PayrollPayload['exceptions'][number];
 type PayrollAuditEntry = {
   id: string;
   at: string;
@@ -3650,6 +3651,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
   const [actionReason, setActionReason] = useState('');
   const [auditOpen, setAuditOpen] = useState(false);
   const [dashboardPanel, setDashboardPanel] = useState<DashboardPanelId>('ready');
+  const [fixIssue, setFixIssue] = useState<PayrollException | null>(null);
 
   const section = sectionById(sectionId);
   const activeTabId = activeTabs[section.id] || section.tabs[0].id;
@@ -3662,6 +3664,15 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     setSectionId(targetSection);
     if (targetTab) setActiveTabs((prev) => ({ ...prev, [targetSection]: targetTab }));
     window.history.pushState(null, '', sectionHref(targetSection));
+  };
+
+  const openDashboardPanel = (panel: DashboardPanelId) => {
+    setSectionId('dashboard');
+    setDashboardPanel(panel);
+    window.history.pushState(null, '', sectionHref('dashboard'));
+    window.setTimeout(() => {
+      document.getElementById('payroll-dashboard-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
   };
 
   const load = async () => {
@@ -3736,9 +3747,49 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     }
   };
 
+  const fixPayrollIssue = async (issue: PayrollException, values: {
+    setupAssignedToPayroll?: boolean;
+    payrollGroup?: string;
+    salaryGrade?: string;
+    ratePerDay?: string;
+    ratePerHour?: string;
+    hoursPerDay?: string;
+  }) => {
+    const action = `fix-${issue.id}`;
+    setBusyAction(action);
+    setToast('');
+    try {
+      const res = await fetch('/api/hris/payroll-management', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-hris-role': role },
+        body: JSON.stringify({
+          action: 'fix-payroll-setup',
+          employeeId: issue.employeeId,
+          ...values,
+          reason: issue.issue,
+          actor: role,
+        }),
+      });
+      const json = await readApiResponse<{ option: unknown }>(res);
+      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Payroll issue fix failed');
+      setToast(`Payroll issue updated for ${issue.employeeName}.`);
+      setFixIssue(null);
+      await load();
+      openDashboardPanel('issues');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Payroll issue fix failed');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const triggerAction = (actionItem: PayrollAction) => {
     if (actionItem.id === 'view-audit') {
       setAuditOpen(true);
+      return;
+    }
+    if (actionItem.id === 'view-exceptions') {
+      openDashboardPanel('issues');
       return;
     }
     if (actionItem.id === 'export-csv') {
@@ -3808,10 +3859,10 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
       {toast ? <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Ready Employees" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees loaded`} icon={Users} tone="blue" active={section.id === 'dashboard' && dashboardPanel === 'ready'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('ready'); }} />
-        <MetricCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net pay`} icon={Banknote} tone="green" active={section.id === 'dashboard' && dashboardPanel === 'gross'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('gross'); }} />
-        <MetricCard label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension and statutory items" icon={ReceiptText} tone="violet" active={section.id === 'dashboard' && dashboardPanel === 'deductions'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('deductions'); }} />
-        <MetricCard label="Issues" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked, ${number(payload?.summary.reviewEmployees)} to review`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) > 0 ? 'red' : 'green'} active={section.id === 'dashboard' && dashboardPanel === 'issues'} onClick={() => { setSectionId('dashboard'); setDashboardPanel('issues'); }} />
+        <MetricCard label="Ready Employees" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees loaded`} icon={Users} tone="blue" active={section.id === 'dashboard' && dashboardPanel === 'ready'} onClick={() => openDashboardPanel('ready')} />
+        <MetricCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net pay`} icon={Banknote} tone="green" active={section.id === 'dashboard' && dashboardPanel === 'gross'} onClick={() => openDashboardPanel('gross')} />
+        <MetricCard label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension and statutory items" icon={ReceiptText} tone="violet" active={section.id === 'dashboard' && dashboardPanel === 'deductions'} onClick={() => openDashboardPanel('deductions')} />
+        <MetricCard label="Issues" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked, ${number(payload?.summary.reviewEmployees)} to review`} icon={AlertTriangle} tone={(payload?.summary.exceptionCount || 0) > 0 ? 'red' : 'green'} active={section.id === 'dashboard' && dashboardPanel === 'issues'} onClick={() => openDashboardPanel('issues')} />
       </div>
 
       {section.id === 'dashboard' ? (
@@ -3884,7 +3935,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
 
           <div className="mt-4">
             {section.id === 'dashboard' ? (
-              <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} activePanel={dashboardPanel} setActivePanel={setDashboardPanel} role={role} onOpenSection={openSection} />
+              <DashboardWorkspace payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} currentRun={currentRun} filteredRecords={filteredRecords} query={query} setQuery={setQuery} status={status} setStatus={setStatus} activePanel={dashboardPanel} setActivePanel={setDashboardPanel} role={role} onOpenSection={openSection} onFixIssue={setFixIssue} />
             ) : section.id === 'payroll-computation-workflow' ? (
               <PayrollComputationWorkflowPage payload={payload} canViewMoney={canViewMoney} role={role} runAction={runAction} busyAction={busyAction} onAudit={() => setAuditOpen(true)} exportCsv={exportCsv} exportExcel={exportExcel} />
             ) : section.id === 'salary-management' ? (
@@ -3930,6 +3981,15 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
           onConfirm={confirmSensitiveAction}
         />
       ) : null}
+      {fixIssue ? (
+        <IssueFixDrawer
+          issue={fixIssue}
+          record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+          busy={busyAction === `fix-${fixIssue.id}`}
+          onClose={() => setFixIssue(null)}
+          onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+        />
+      ) : null}
       {auditOpen ? <AuditPanel payload={payload} onClose={() => setAuditOpen(false)} /> : null}
     </div>
   );
@@ -3950,6 +4010,7 @@ function DashboardWorkspace({
   setActivePanel,
   role,
   onOpenSection,
+  onFixIssue,
 }: {
   payload: PayrollPayload | null;
   canViewMoney: boolean;
@@ -3965,6 +4026,7 @@ function DashboardWorkspace({
   setActivePanel: (value: DashboardPanelId) => void;
   role: Role;
   onOpenSection: (section: SectionId, tab?: string) => void;
+  onFixIssue: (issue: PayrollException) => void;
 }) {
   const records = payload?.records || [];
   const runStatus = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
@@ -4219,6 +4281,7 @@ function DashboardWorkspace({
           setQuery={setQuery}
           setStatus={setStatus}
           setActivePanel={setActivePanel}
+          onFixIssue={onFixIssue}
         />
       </section>
 
@@ -4235,12 +4298,13 @@ function DashboardWorkspace({
           </div>
           <div className="divide-y divide-slate-100">
             {issues.slice(0, 5).map((issue) => (
-              <div key={issue.id} className="grid grid-cols-1 gap-3 p-4 md:grid-cols-[1fr_auto] md:items-center">
+              <div key={issue.id} className="grid grid-cols-1 gap-3 p-4 md:grid-cols-[1fr_auto_auto] md:items-center">
                 <div>
                   <p className="text-sm font-black text-slate-950">{issue.issue}</p>
                   <p className="mt-1 text-xs font-semibold text-slate-500">{issue.employeeName} - {issue.employeeId} - Owner: {issue.owner}</p>
                 </div>
                 <span className={`w-fit rounded-full px-2.5 py-1 text-[11px] font-black ${issue.severity === 'High' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`}>{issue.severity}</span>
+                <button type="button" onClick={() => onFixIssue(issue)} className="h-9 rounded-lg bg-slate-900 px-3 text-[11px] font-black text-white hover:bg-slate-800">Fix now</button>
               </div>
             ))}
             {!issues.length ? <div className="p-4 text-sm font-black text-emerald-800">No open payroll issues.</div> : null}
@@ -4462,6 +4526,7 @@ function DashboardDetailPanel({
   setQuery,
   setStatus,
   setActivePanel,
+  onFixIssue,
 }: {
   panel: DashboardPanelId;
   payload: PayrollPayload | null;
@@ -4472,6 +4537,7 @@ function DashboardDetailPanel({
   setQuery: (value: string) => void;
   setStatus: (value: string) => void;
   setActivePanel: (value: DashboardPanelId) => void;
+  onFixIssue: (issue: PayrollException) => void;
 }) {
   const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
   const issueRows = records.filter((record) => record.exceptionCount > 0 || record.payrollStatus !== 'Ready');
@@ -4581,11 +4647,28 @@ function DashboardDetailPanel({
       ) : null}
 
       {panel === 'issues' ? (
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <InfoTile label="Blocked" value={number(payload?.summary.blockedEmployees)} detail="Cannot proceed without correction" tone="red" />
-          <InfoTile label="Review" value={number(payload?.summary.reviewEmployees)} detail="Payroll officer review required" tone="amber" />
-          <InfoTile label="Exception Lines" value={number(payload?.summary.exceptionCount)} detail="Total detected issues" tone={payload?.summary.exceptionCount ? 'red' : 'green'} />
-        </div>
+        <>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <InfoTile label="Blocked" value={number(payload?.summary.blockedEmployees)} detail="Cannot proceed without correction" tone="red" />
+            <InfoTile label="Review" value={number(payload?.summary.reviewEmployees)} detail="Payroll officer review required" tone="amber" />
+            <InfoTile label="Exception Lines" value={number(payload?.summary.exceptionCount)} detail="Total detected issues" tone={payload?.summary.exceptionCount ? 'red' : 'green'} />
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+            {(payload?.exceptions || []).slice(0, 10).map((issue) => (
+              <div key={issue.id} className={`rounded-lg border p-3 ${issue.severity === 'High' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-slate-950">{issue.issue}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-600">{issue.employeeName} - {issue.employeeId}</p>
+                    <p className="mt-1 text-[11px] font-black uppercase text-slate-500">Owner: {issue.owner}</p>
+                  </div>
+                  <button type="button" onClick={() => onFixIssue(issue)} className="h-9 shrink-0 rounded-lg bg-slate-900 px-3 text-[11px] font-black text-white hover:bg-slate-800">Fix now</button>
+                </div>
+              </div>
+            ))}
+            {!payload?.exceptions?.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800">No payroll issues detected.</div> : null}
+          </div>
+        </>
       ) : null}
 
       <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
@@ -4653,6 +4736,136 @@ function PayrollExceptionCenter({ payload, onAction }: { payload: PayrollPayload
         {!exceptions.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800">No payroll exceptions detected.</div> : null}
       </div>
     </section>
+  );
+}
+
+function IssueFixDrawer({
+  issue,
+  record,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  issue: PayrollException;
+  record?: PayrollRecord;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (values: {
+    setupAssignedToPayroll?: boolean;
+    payrollGroup?: string;
+    salaryGrade?: string;
+    ratePerDay?: string;
+    ratePerHour?: string;
+    hoursPerDay?: string;
+  }) => void;
+}) {
+  const [setupAssignedToPayroll, setSetupAssignedToPayroll] = useState(record?.setupAssignedToPayroll || issue.issue.includes('Payroll setup is not assigned'));
+  const [payrollGroup, setPayrollGroup] = useState(record?.payrollGroup && record.payrollGroup !== 'Unassigned' ? record.payrollGroup : issue.issue.includes('Payroll group') ? 'DLE' : '');
+  const [salaryGrade, setSalaryGrade] = useState(record?.salaryGrade && !['Unassigned', 'Rate Missing'].includes(record.salaryGrade) ? record.salaryGrade : record?.isDailyRate ? 'Daily Rate' : '');
+  const [ratePerDay, setRatePerDay] = useState(record?.ratePerDay ? String(record.ratePerDay) : '');
+  const [ratePerHour, setRatePerHour] = useState(record?.ratePerHour ? String(record.ratePerHour) : '');
+  const [hoursPerDay, setHoursPerDay] = useState(record?.hoursPerDay ? String(record.hoursPerDay) : '8');
+  const unsupported = issue.issue.includes('status') || issue.issue.includes('Foreign currency');
+
+  useEffect(() => {
+    setSetupAssignedToPayroll(record?.setupAssignedToPayroll || issue.issue.includes('Payroll setup is not assigned'));
+    setPayrollGroup(record?.payrollGroup && record.payrollGroup !== 'Unassigned' ? record.payrollGroup : issue.issue.includes('Payroll group') ? 'DLE' : '');
+    setSalaryGrade(record?.salaryGrade && !['Unassigned', 'Rate Missing'].includes(record.salaryGrade) ? record.salaryGrade : record?.isDailyRate ? 'Daily Rate' : '');
+    setRatePerDay(record?.ratePerDay ? String(record.ratePerDay) : '');
+    setRatePerHour(record?.ratePerHour ? String(record.ratePerHour) : '');
+    setHoursPerDay(record?.hoursPerDay ? String(record.hoursPerDay) : '8');
+  }, [issue, record]);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (unsupported) return;
+    onSubmit({
+      setupAssignedToPayroll,
+      payrollGroup,
+      salaryGrade,
+      ratePerDay,
+      ratePerHour,
+      hoursPerDay,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/40">
+      <div className="ml-auto flex h-full w-full max-w-xl flex-col bg-white shadow-2xl">
+        <div className="border-b border-slate-200 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase text-red-700">Payroll Issue Resolution</p>
+              <h3 className="mt-1 text-xl font-black text-slate-950">{issue.employeeName}</h3>
+              <p className="mt-1 text-sm font-semibold text-slate-600">{issue.employeeId} - {issue.issue}</p>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50" aria-label="Close issue fixer">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+            <div className={`rounded-lg border p-4 ${issue.severity === 'High' ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
+              <p className="text-sm font-black text-slate-950">What needs attention</p>
+              <p className="mt-1 text-sm font-semibold text-slate-700">{issue.issue}</p>
+              <p className="mt-2 text-xs font-black uppercase text-slate-500">Owner: {issue.owner}</p>
+            </div>
+
+            {unsupported ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-black text-amber-900">This issue must be corrected from the employee master record.</p>
+                <p className="mt-1 text-xs font-semibold text-amber-800">After correcting the employee status or currency, return here and refresh payroll validation.</p>
+                <Link href={`/hris/employees?search=${encodeURIComponent(issue.employeeId)}`} className="mt-3 inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">
+                  Open employee record
+                </Link>
+              </div>
+            ) : (
+              <>
+                <label className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <span>
+                    <span className="block text-sm font-black text-slate-950">Assign employee to payroll</span>
+                    <span className="block text-xs font-semibold text-slate-500">Required before the employee can pass payroll validation.</span>
+                  </span>
+                  <input type="checkbox" checked={setupAssignedToPayroll} onChange={(event) => setSetupAssignedToPayroll(event.target.checked)} className="h-5 w-5 rounded border-slate-300" />
+                </label>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-black uppercase text-slate-500">Payroll Group</span>
+                    <input value={payrollGroup} onChange={(event) => setPayrollGroup(event.target.value)} placeholder="DLE" className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-black uppercase text-slate-500">Salary Grade / Structure</span>
+                    <input value={salaryGrade} onChange={(event) => setSalaryGrade(event.target.value)} placeholder={record?.isDailyRate ? 'Daily Rate' : 'Grade'} className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-black uppercase text-slate-500">Rate Per Day</span>
+                    <input value={ratePerDay} onChange={(event) => setRatePerDay(event.target.value)} inputMode="decimal" placeholder="Enter daily rate" className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-black uppercase text-slate-500">Rate Per Hour</span>
+                    <input value={ratePerHour} onChange={(event) => setRatePerHour(event.target.value)} inputMode="decimal" placeholder="Optional" className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20" />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-black uppercase text-slate-500">Paid Hours Per Day</span>
+                    <input value={hoursPerDay} onChange={(event) => setHoursPerDay(event.target.value)} inputMode="decimal" placeholder="8" className="mt-1 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20" />
+                  </label>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="border-t border-slate-200 p-5">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={onClose} className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-xs font-black text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button type="submit" disabled={busy || unsupported} className={`h-11 rounded-lg px-4 text-xs font-black text-white ${busy || unsupported ? 'cursor-not-allowed bg-slate-300' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                {busy ? 'Applying fix...' : 'Apply Fix and Revalidate'}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

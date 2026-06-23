@@ -758,6 +758,44 @@ export async function POST(request: Request) {
     return jsonOk({ option });
   }
 
+  if (action === 'fix-payroll-setup') {
+    if (!perms.canManageRun && !perms.canConfigure) return jsonErr(403, 'Permission denied');
+    const employeeId = compact(body.employeeId || body.employeeCode);
+    if (!employeeId) return jsonErr(400, 'Employee ID is required.');
+    const numberOption = (value: unknown) => {
+      if (value === null || value === undefined || compact(value) === '') return undefined;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : undefined;
+    };
+    const updates = {
+      ...(typeof body.setupAssignedToPayroll === 'boolean' ? { setupAssignedToPayroll: body.setupAssignedToPayroll } : {}),
+      ...(compact(body.payrollGroup) ? { payrollGroup: compact(body.payrollGroup) } : {}),
+      ...(compact(body.salaryGrade) ? { salaryGrade: compact(body.salaryGrade), jobGrade: compact(body.salaryGrade) } : {}),
+      ...(numberOption(body.ratePerDay) !== undefined ? { ratePerDay: numberOption(body.ratePerDay) } : {}),
+      ...(numberOption(body.ratePerHour) !== undefined ? { ratePerHour: numberOption(body.ratePerHour) } : {}),
+      ...(numberOption(body.hoursPerDay) !== undefined ? { hoursPerDay: numberOption(body.hoursPerDay) } : {}),
+    };
+    if (!Object.keys(updates).length) return jsonErr(400, 'Provide at least one payroll setup value to update.');
+    const option = await writePayrollEmployeeOption({
+      employeeId,
+      employeeCode: employeeId,
+      ...updates,
+      updatedBy: actor,
+    });
+    invalidatePayrollEmployeeCache();
+    logAudit(request, {
+      user: actor,
+      role,
+      action,
+      record: employeeId,
+      oldValue: null,
+      newValue: JSON.stringify(updates),
+      reason: reason || 'Payroll issue fixed from dashboard',
+      comment: comment || 'Payroll setup correction applied from the issue resolution panel.',
+    });
+    return jsonOk({ option });
+  }
+
   if (action === 'create-run') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
     const payload = await buildPayload(request);
