@@ -1,0 +1,18 @@
+{
+  "assignmentBatch": "2026-06-23-galvanizing-dipping-akinsanya-adebobola",
+  "assignmentGroup": "GALVANIZING SECTION - DIPPING",
+  "supervisorEmployeeCode": "P0277",
+  "performedBy": "codex.database-import",
+  "reason": "Galvanizing dipping supervisor assignment from provided GALVANIZING SECTION schedule.",
+  "rows": [
+    { "sourceName": "RAHEEM ORIYOMI", "tradeRole": "KETTLE OPT", "employeeCode": "P0318", "matchConfidence": "ExactReversed", "matchNote": "Database name is Mr ORIYOMI RAHEEM." },
+    { "sourceName": "AHMED IDOWU", "tradeRole": "KETTLE OPT", "employeeCode": "C2394", "matchConfidence": "SpellingAlias", "matchNote": "Database name is IDOWU HAMMED." },
+    { "sourceName": "AKINDELE MUSBAU", "tradeRole": "KETTLE OPT", "employeeCode": "C2396", "matchConfidence": "ExactReversed", "matchNote": "Database name is MUSBAU AKINDELE." },
+    { "sourceName": "GANIYU ADEBIYI", "tradeRole": "KETTLE OPT", "employeeCode": "C2443", "matchConfidence": "ExactReversed", "matchNote": "Database name is ADEBIYI GANIYU." },
+    { "sourceName": "ONOJA MICHAEL", "tradeRole": "KETTLE OPT", "employeeCode": "C2506", "matchConfidence": "ExactReversed", "matchNote": "Database name is MICHAEL ONOJA." },
+    { "sourceName": "RASAK JAMIU", "tradeRole": "KETTLE OPT", "employeeCode": "C2522", "matchConfidence": "ExactReversed", "matchNote": "Database name is JAMIU RASAK." },
+    { "sourceName": "LAWRENCE ANTHONY", "tradeRole": "KETTLE OPT", "employeeCode": "C2408", "matchConfidence": "Exact" },
+    { "sourceName": "SUNDAY OVAT", "tradeRole": "GALV Q C ASSIT", "employeeCode": "C2512", "matchConfidence": "Exact" },
+    { "sourceName": "DAWODU ADEDIRAN", "tradeRole": "FINISHING SUP.", "employeeCode": "P0320", "matchConfidence": "ExactReversed", "matchNote": "Database name is Mr ADEDIRAN DAWODU." }
+  ]
+}

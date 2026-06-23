@@ -6,11 +6,14 @@ import {
   isTimesheetPayrollReadyStatus,
   normalizePaidWorkHours,
   readTimesheetData,
+  readProjects,
+  readTimesheetWorkCenters,
   STANDARD_TIMESHEET_HOURS,
   type TimesheetHeader,
   type TimesheetLine,
 } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
+import { readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
 
 export type OvertimeRole =
   | 'Employee'
@@ -45,6 +48,22 @@ export type OvertimeCreateRequest = {
   payableHours?: number;
   reason?: string | null;
   projectCode?: string | null;
+};
+
+export type OvertimeAuthorizationOption = {
+  id: string;
+  code: string;
+  name: string;
+  email?: string | null;
+  jobTitle?: string;
+  department?: string;
+};
+
+export type OvertimeAuthorizationSetup = {
+  projects: Array<OvertimeAuthorizationOption & { projectManager: string; projectManagerEmail?: string | null }>;
+  workCenters: Array<OvertimeAuthorizationOption & { location?: string | null; site?: string | null }>;
+  supervisors: OvertimeAuthorizationOption[];
+  mdApprover: OvertimeAuthorizationOption | null;
 };
 
 export type OvertimeAuditEntry = {
@@ -180,6 +199,46 @@ const dayTypeFor = (date: string): OvertimeDayType => {
 
 const employeeKeys = (employee: DleEmployeeDirectoryRow) => [employee.employeeId, employee.employeeCode, employee.fullName, employee.sourceEmployeeId].map(normalizePayrollMatchKey).filter(Boolean);
 const lineKeys = (line: TimesheetLine) => [line.employeeId, line.employeeNo, line.employeeName].map(normalizePayrollMatchKey).filter(Boolean);
+const employeeEmail = (employee?: DleEmployeeDirectoryRow | null) => clean(employee?.officialEmail) || clean(employee?.email) || clean(employee?.personalEmail) || null;
+const employeeOption = (employee: DleEmployeeDirectoryRow): OvertimeAuthorizationOption => ({
+  id: clean(employee.employeeCode) || clean(employee.employeeId),
+  code: clean(employee.employeeCode) || clean(employee.employeeId),
+  name: clean(employee.fullName) || clean(employee.employeeCode) || clean(employee.employeeId),
+  email: employeeEmail(employee),
+  jobTitle: clean(employee.jobTitle),
+  department: clean(employee.department),
+});
+
+const findEmployeeByText = (employees: DleEmployeeDirectoryRow[], value: string) => {
+  const target = clean(value).toLowerCase();
+  if (!target) return null;
+  return employees.find((employee) => [employee.employeeCode, employee.employeeId, employee.fullName, employee.officialEmail, employee.email].some((field) => {
+    const current = clean(field).toLowerCase();
+    return current && (current === target || current.includes(target) || target.includes(current));
+  })) || null;
+};
+
+const resolveMdApprover = (employees: DleEmployeeDirectoryRow[]) => {
+  const active = employees.filter((employee) => !['Resigned', 'Terminated', 'Retired', 'Inactive'].includes(clean(employee.status)));
+  const configuredCode = clean(process.env.HRIS_MD_EMPLOYEE_CODE).toLowerCase();
+  if (configuredCode) {
+    const configured = active.find((employee) => [employee.employeeCode, employee.employeeId].map((value) => clean(value).toLowerCase()).includes(configuredCode));
+    if (configured) return configured;
+  }
+  const supportRole = (employee: DleEmployeeDirectoryRow) => /\b(driver|assistant|asst|pa\.?|p\.a|secretary|aide)\b/i.test(`${employee.jobTitle} ${employee.designation}`);
+  const score = (employee: DleEmployeeDirectoryRow) => {
+    if (supportRole(employee)) return -100;
+    const title = `${employee.jobTitle} ${employee.designation}`.toLowerCase();
+    if (/\bmanaging director\b/.test(title)) return 100;
+    if (/\bmd\/ceo\b|\bchief executive\b|\bceo\b/.test(title)) return 90;
+    if (/\bgroup managing director\b/.test(title)) return 85;
+    return 0;
+  };
+  return active
+    .map((employee) => ({ employee, score: score(employee) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || clean(a.employee.employeeCode).localeCompare(clean(b.employee.employeeCode)))[0]?.employee || null;
+};
 
 const ensureDb = async () => {
   const pool = await getDleEnterpriseDbPool();
@@ -510,9 +569,70 @@ export const validateOvertimeAction = (action: OvertimeAction, role: OvertimeRol
 
 export const readOvertimeManagementPayload = async (roleInput?: string | null) => {
   const role = normalizeOvertimeRole(roleInput);
-  const { employeeSource, records: candidates } = await buildCandidateRecords();
+  const [
+    { employeeSource, records: candidates },
+    projects,
+    workCenters,
+    supervisorAssignments,
+  ] = await Promise.all([
+    buildCandidateRecords(),
+    readProjects().catch(() => []),
+    readTimesheetWorkCenters().catch(() => []),
+    readSupervisorAssignments().catch(() => []),
+  ]);
   await upsertCandidates(candidates);
   const records = await readRecords();
+  const activeEmployees = employeeSource.employees.filter((employee) => !['Resigned', 'Terminated', 'Retired', 'Inactive'].includes(clean(employee.status)));
+  const employeeByCode = new Map(activeEmployees.map((employee) => [clean(employee.employeeCode).toLowerCase(), employee]));
+  const uniqueSupervisors = new Map<string, OvertimeAuthorizationOption>();
+  for (const assignment of supervisorAssignments) {
+    const code = clean(assignment.supervisorEmployeeCode);
+    if (!code || assignment.matchedStatus === 'Unresolved') continue;
+    const employee = employeeByCode.get(code.toLowerCase());
+    uniqueSupervisors.set(code.toLowerCase(), employee ? employeeOption(employee) : {
+      id: code,
+      code,
+      name: clean(assignment.supervisorName) || code,
+      department: clean(assignment.assignmentGroup),
+    });
+  }
+  for (const employee of activeEmployees) {
+    const text = `${employee.jobTitle} ${employee.designation} ${employee.fullName}`.toLowerCase();
+    if (text.includes('supervisor') || text.includes('lead') || text.includes('foreman')) {
+      const code = clean(employee.employeeCode) || clean(employee.employeeId);
+      if (code && !uniqueSupervisors.has(code.toLowerCase())) uniqueSupervisors.set(code.toLowerCase(), employeeOption(employee));
+    }
+  }
+  const mdEmployee = resolveMdApprover(activeEmployees);
+  const activeProjects = projects
+    .filter((project) => ['Active', 'Approved', 'Open'].includes(project.status))
+    .map((project) => {
+      const projectManager = clean(project.projectManager);
+      const managerEmployee = findEmployeeByText(activeEmployees, projectManager);
+      return {
+        id: project.id,
+        code: project.code,
+        name: project.name,
+        projectManager,
+        projectManagerEmail: employeeEmail(managerEmployee),
+      };
+    })
+    .sort((a, b) => a.code.localeCompare(b.code));
+  const authorizationSetup: OvertimeAuthorizationSetup = {
+    projects: activeProjects,
+    workCenters: workCenters
+      .filter((workCenter) => workCenter.status === 'Active')
+      .map((workCenter) => ({
+        id: workCenter.id,
+        code: workCenter.code,
+        name: workCenter.name,
+        location: workCenter.location,
+        site: workCenter.site,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    supervisors: Array.from(uniqueSupervisors.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    mdApprover: mdEmployee ? employeeOption(mdEmployee) : null,
+  };
   const employeeDepartments = employeeSource.employees.map((employee) => clean(employee.department)).filter(Boolean);
   const employeeLocations = employeeSource.employees.map((employee) => clean(employee.workLocation) || clean(employee.location) || clean(employee.officeLocation)).filter(Boolean);
   const uniqueSorted = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
@@ -543,6 +663,7 @@ export const readOvertimeManagementPayload = async (roleInput?: string | null) =
       locations: uniqueSorted([...records.map((item) => item.location), ...employeeLocations]),
       dayTypes: ['Weekday', 'Saturday', 'Sunday', 'Public Holiday'] as OvertimeDayType[],
     },
+    authorizationSetup,
     records,
   };
 };

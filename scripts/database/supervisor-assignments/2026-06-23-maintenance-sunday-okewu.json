@@ -1,0 +1,42 @@
+{
+  "assignmentBatch": "2026-06-23-maintenance-sunday-okewu",
+  "assignmentGroup": "MAINTENANCE",
+  "supervisorEmployeeCode": "P0436",
+  "performedBy": "codex.database-import",
+  "reason": "Maintenance employees assigned to the Maintenance Manager per operations request.",
+  "rows": [
+    {
+      "sourceName": "Olakunle Olaniyan",
+      "tradeRole": "Electrician",
+      "employeeCode": "C0293",
+      "matchConfidence": "Exact"
+    },
+    {
+      "sourceName": "Rotimi Matthew",
+      "tradeRole": "Mechanic",
+      "employeeCode": "C1705",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is MATTHEW ROTIMI."
+    },
+    {
+      "sourceName": "Timothy Ogwua",
+      "tradeRole": "Electrician",
+      "employeeCode": "C2492",
+      "matchConfidence": "Exact"
+    },
+    {
+      "sourceName": "Sunday Simire",
+      "tradeRole": "Electrician",
+      "employeeCode": "C2537",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is SIMIRE SUNDAY."
+    },
+    {
+      "sourceName": "Wahab Yusuf",
+      "tradeRole": "Mechanic",
+      "employeeCode": "C1979",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is YUSUF WAHABI."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "assignmentBatch": "2026-06-23-cnc-koike-orika-chukwudumebi",
+  "assignmentGroup": "CNC KOIKE MACHINE OPERATORS",
+  "supervisorEmployeeCode": "C1607",
+  "performedBy": "codex.database-import",
+  "reason": "CNC Koike machine operators supervisor assignment from provided schedule.",
+  "rows": [
+    { "sourceName": "FESTUS AMUNE", "tradeRole": "Operator", "employeeCode": "C2015", "matchConfidence": "Exact" },
+    { "sourceName": "SUNDAY KENECHUKWU", "tradeRole": "Operator", "employeeCode": "C2633", "matchConfidence": "Exact" }
+  ]
+}

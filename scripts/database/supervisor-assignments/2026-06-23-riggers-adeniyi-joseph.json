@@ -1,0 +1,17 @@
+{
+  "assignmentBatch": "2026-06-23-riggers-adeniyi-joseph",
+  "assignmentGroup": "RIGGERS",
+  "supervisorEmployeeCode": "C1544",
+  "performedBy": "codex.database-import",
+  "reason": "Riggers supervisor assignment from provided RIGGERS schedule.",
+  "rows": [
+    { "sourceName": "ROTIMI OKEOWO", "tradeRole": "FORKLIFT OPT.", "employeeCode": "C2082", "matchConfidence": "RoleDisambiguated", "matchNote": "Database name is OKEOWO ADEBANJO and role is FORKLIFT OPERATOR; selected over other Rotimi-only matches." },
+    { "sourceName": "LUKPATA MATHIAS", "tradeRole": "FORKLIFT OPT.", "employeeCode": "C1078", "matchConfidence": "ExactReversed", "matchNote": "Database name is MATHIAS LUKPATA." },
+    { "sourceName": "MUYIWA BADEJO", "tradeRole": "RIGGER", "employeeCode": null, "matchConfidence": "Unresolved", "matchNote": "No exact active HRIS match found for MUYIWA BADEJO. Similar active surname match is KEHINDE BADEJO." },
+    { "sourceName": "GANIYU IDOWU", "tradeRole": "RIGGER", "employeeCode": "C1772", "matchConfidence": "ExactReversed", "matchNote": "Database name is IDOWU GANIYU." },
+    { "sourceName": "TAIWO OGUNBIYI", "tradeRole": "RIGGER", "employeeCode": "C2342", "matchConfidence": "Exact" },
+    { "sourceName": "KUNLE ADEOSUN", "tradeRole": "RIGGER", "employeeCode": "C2607", "matchConfidence": "ExactWithMiddleName", "matchNote": "Database name is RASAK ADEKUNLE ADEOSUN." },
+    { "sourceName": "AYEDE PETER", "tradeRole": "RIGGER", "employeeCode": null, "matchConfidence": "Unresolved", "matchNote": "No exact active HRIS match found for AYEDE PETER." },
+    { "sourceName": "Sunday Adeniji", "tradeRole": "RIGGER", "employeeCode": "C2722", "matchConfidence": "ExactWithMiddleName", "matchNote": "Database name is SUNDAY SOLOMON ADENIJI." }
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "assignmentBatch": "2026-06-23-welders-wale-shittu",
+  "assignmentGroup": "WELDERS",
+  "supervisorEmployeeCode": "C1229",
+  "performedBy": "codex.database-import",
+  "reason": "Welders supervisor assignment from provided WELDERS schedule.",
+  "rows": [
+    {
+      "sourceName": "STANLEY OVAT",
+      "tradeRole": "3G SMAW + FCAW Welder",
+      "employeeCode": "C2534",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is OVAT STANLEY."
+    },
+    {
+      "sourceName": "FRED MICAH",
+      "tradeRole": "3G SMAW + FCAW Welder",
+      "employeeCode": "C1686",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is MICAH FRED."
+    },
+    {
+      "sourceName": "DAVID JEREMIAH",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C2663",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is JEREMIAH DAVID."
+    },
+    {
+      "sourceName": "NKEDURU NGOZIKA",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C1926",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is NZEDURU NGOZIKA."
+    },
+    {
+      "sourceName": "ITORO SAVIOUR",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C1793",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is SAVIOUR UDO ITORO."
+    },
+    {
+      "sourceName": "JIMMY UDOH",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C2664",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is IME JIMMY UDO."
+    },
+    {
+      "sourceName": "TORTI NDUBUISI",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C2319",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is NDUBUISI TORTI."
+    },
+    {
+      "sourceName": "IFEANYI ABEL",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for IFEANYI ABEL. Similar names include IFEANYI NWACHUKWU, ABEL UGBEKILE, ABEL DANIEL, and ABEL AKOR."
+    },
+    {
+      "sourceName": "TIMOTHY ADEKANBI",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C2328",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is TIMOTHY OLUMIDE ADEKANMBI."
+    },
+    {
+      "sourceName": "Nwabueze Stanley",
+      "tradeRole": "3G SMAW Welder",
+      "employeeCode": "C1815",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is STANLEY NWABUEZE."
+    },
+    {
+      "sourceName": "FUAD ODENIYI",
+      "tradeRole": "WELDER-MATE",
+      "employeeCode": "C2751",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is FUAD SAYO ODUNNIYI."
+    },
+    {
+      "sourceName": "OKEY NGELE",
+      "tradeRole": "WELDER-MATE",
+      "employeeCode": "C2291",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is NGELE OKEY UMA."
+    }
+  ]
+}

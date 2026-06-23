@@ -214,6 +214,21 @@ type Payload = {
     location: string;
     status: string;
   } | null;
+  approvedOvertimeAuthorizations: Array<{
+    id: string;
+    projectCode: string;
+    projectName: string;
+    workDate: string;
+    workCenter: string;
+    supervisorCode: string;
+    supervisorName: string;
+    requestedHours: number;
+    requestedHeadcount: number;
+    reason: string;
+    status: 'Submitted' | 'Project Manager Approved' | 'MD Approved' | 'Rejected' | 'Cancelled';
+    currentOwnerRole: string;
+    currentOwnerName: string;
+  }>;
   permissions: {
     actor: string;
     role: string;
@@ -355,6 +370,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<'matrix' | 'cards'>('matrix');
   
   const [selectedDate, setSelectedDate] = useState(dateParam || todayDateInputValue());
@@ -387,10 +403,15 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const [workCenters, setWorkCenters] = useState<Payload['workCenters']>([]);
   const [workCenterDraft, setWorkCenterDraft] = useState('');
   const [editingWorkCenter, setEditingWorkCenter] = useState<Payload['workCenters'][number] | null>(null);
+  const loadRequestRef = useRef(0);
   const autoSyncKeyRef = useRef<string | null>(null);
-
+  const hasPayloadRef = useRef(false);
   const load = useCallback(async (date?: string, supervisor?: string, location?: string, workCenter?: string) => {
-    setLoading(true);
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+    const initialLoad = !hasPayloadRef.current;
+    setLoading(initialLoad);
+    setRefreshing(!initialLoad);
     setError(null);
     setNotice(null);
     try {
@@ -404,10 +425,12 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
       const res = await fetch(url.toString(), { cache: 'no-store' });
       const json = await readApiJson(res);
       if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Unable to load timesheet entry');
+      if (loadRequestRef.current !== requestId) return;
       
       const data = json.data as Payload;
       const dbWorkCenters = data.workCenters || [];
       const dbLocationNames = data.filterOptions.locations || [];
+      hasPayloadRef.current = true;
       setPayload(data);
       setLocalLines(data.lines);
       setWorkCenters(dbWorkCenters);
@@ -427,9 +450,13 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
         return dbWorkCenterNames[0] || '';
       });
     } catch (e) {
+      if (loadRequestRef.current !== requestId) return;
       setError(e instanceof Error ? e.message : 'Unable to load timesheet entry');
     } finally {
-      setLoading(false);
+      if (loadRequestRef.current === requestId) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [isWorkforceSupervisor, matrixColumns.length, selectedLocation, selectedSupervisor]);
 
@@ -457,16 +484,19 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   }, [loadProjectSites, showProjectModal]);
 
   useEffect(() => {
-    void load(selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter);
+    const timer = window.setTimeout(() => {
+      void load(selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter);
+    }, hasPayloadRef.current ? 120 : 0);
+    return () => window.clearTimeout(timer);
   }, [load, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter]);
 
-  const handleSyncAttendance = useCallback(async () => {
+  const handleSyncAttendance = useCallback(async (source: 'manual' | 'auto' = 'manual') => {
     if (payload?.period.status !== 'Open') {
-      setError('This timesheet period is closed. Reopen it before syncing attendance.');
+      if (source === 'manual') setError('This timesheet period is closed. Reopen it before syncing attendance.');
       return;
     }
     if (!selectedWorkCenter) {
-      setError('No biometric device work center is available from the time and attendance system.');
+      if (source === 'manual') setError('No biometric device work center is available from the time and attendance system.');
       return;
     }
     setSubmitting(true);
@@ -488,23 +518,23 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
       setPayload(json.data);
       setLocalLines(json.data.lines);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Sync failed');
+      if (source === 'manual') setError(e instanceof Error ? e.message : 'Sync failed');
+      else setNotice(e instanceof Error ? `Automatic punch fetch is still pending: ${e.message}` : 'Automatic punch fetch is still pending.');
     } finally {
       setSubmitting(false);
     }
   }, [isWorkforceSupervisor, payload?.period.status, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter]);
 
   useEffect(() => {
-    if (!payload || loading || submitting) return;
+    if (!payload || loading || refreshing || submitting) return;
     if (payload.period.status !== 'Open') return;
-    if (payload.header || localLines.length > 0) return;
     if (!selectedDate || !selectedSupervisor || !selectedLocation || !selectedWorkCenter) return;
 
     const syncKey = [selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter].join('|');
     if (autoSyncKeyRef.current === syncKey) return;
     autoSyncKeyRef.current = syncKey;
-    void handleSyncAttendance();
-  }, [handleSyncAttendance, loading, localLines.length, payload, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter, submitting]);
+    void handleSyncAttendance('auto');
+  }, [handleSyncAttendance, loading, payload, refreshing, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter, submitting]);
 
   useEffect(() => {
     if (!selectedLocation || workCenters.length === 0) return;
@@ -598,6 +628,10 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const handleUpdateLine = (index: number, updates: Partial<TimesheetLine>) => {
     const next = [...localLines];
     const line = { ...next[index], ...updates };
+    const isAbsentLine = !line.clockIn;
+    if (isAbsentLine) {
+      line.projectAllocations = line.projectAllocations.map((allocation) => ({ ...allocation, hours: 0 }));
+    }
     line.idleAllocations = line.idleAllocations.map((allocation) =>
       allocation.reasonId || allocation.hours <= 0
         ? allocation
@@ -609,7 +643,10 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     line.totalHours = round1(line.usedHours + line.idleHours);
     line.variance = round1(line.totalHours - GROSS_TIMESHEET_HOURS);
     
-    if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
+    if (isAbsentLine && line.usedHours > 0.001) {
+      line.validationStatus = 'Error';
+      line.validationMessage = 'Absent employees cannot receive project/productive hours.';
+    } else if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
       line.validationStatus = 'Error';
       line.validationMessage = `Productive/payroll hours cannot exceed ${STANDARD_TIMESHEET_HOURS} hours per day.`;
     } else if (line.totalHours > GROSS_TIMESHEET_HOURS + 0.001) {
@@ -958,6 +995,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const supervisorDirectoryItem = supervisorDirectory.find((item) => item.value === selectedSupervisor);
   const supervisorLabel = supervisorDirectoryItem?.label || selectedSupervisor || payload?.permissions.actor || 'Select supervisor';
   const supervisorProfile = payload?.supervisorProfile ?? null;
+  const approvedOvertimeAuthorizations = payload?.approvedOvertimeAuthorizations ?? [];
   const supervisorJobTitle = supervisorProfile?.jobTitle || supervisorDirectoryItem?.jobTitle || '';
   const supervisorDepartment = supervisorProfile?.department || supervisorDirectoryItem?.department || '';
   const supervisorEmployees = payload?.supervisorEmployees ?? [];
@@ -980,8 +1018,8 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     ? [{ label: 'HRIS', href: '/hris' }, { label: 'Workforce Management', href: '/hris/workforce-management' }, { label: 'Timesheet Entry' }]
     : [{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Timesheet Entry' }];
   const primaryPageAction = isWorkforceSupervisor
-    ? (canEditTimesheet ? { label: 'Sync Attendance', onClick: handleSyncAttendance, icon: RefreshCcw } : undefined)
-    : { label: canEditTimesheet ? 'Sync Attendance' : periodIsOpen ? 'Read Only' : 'Period Closed', onClick: canEditTimesheet ? handleSyncAttendance : () => undefined, icon: RefreshCcw };
+    ? (canEditTimesheet ? { label: 'Sync Attendance', onClick: () => handleSyncAttendance('manual'), icon: RefreshCcw } : undefined)
+    : { label: canEditTimesheet ? 'Sync Attendance' : periodIsOpen ? 'Read Only' : 'Period Closed', onClick: canEditTimesheet ? () => handleSyncAttendance('manual') : () => undefined, icon: RefreshCcw };
   const biometricTone = onlineSiteDevices.length > 0
     ? 'text-emerald-400'
     : activeSiteDevices.length > 0
@@ -1252,6 +1290,28 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           ))}
         </div>
 
+        {approvedOvertimeAuthorizations.length ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Approved Overtime Available</p>
+                <h3 className="mt-1 text-base font-black text-slate-950">{approvedOvertimeAuthorizations.length} approved request{approvedOvertimeAuthorizations.length === 1 ? '' : 's'} for this supervisor and date</h3>
+                <p className="mt-1 text-xs font-semibold text-slate-600">Book only the approved overtime hours against the approved project after work is completed.</p>
+              </div>
+              <Link href="/hris/workforce-management/overtime-management" className="rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-800">Open OT Queue</Link>
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {approvedOvertimeAuthorizations.map((item) => (
+                <div key={item.id} className="rounded-xl border border-emerald-200 bg-white p-3">
+                  <div className="text-xs font-black text-slate-950">{item.projectCode} - {item.projectName}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-600">{round1(item.requestedHours)}h approved / {item.requestedHeadcount} people</div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-500">{item.reason}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* Biometric Bar */}
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-slate-950 px-5 py-3 text-[11px] text-white shadow-lg">
           <div className="flex flex-wrap items-center gap-5">
@@ -1284,7 +1344,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               <p className="text-[9px] font-bold uppercase text-white/45">Last Handshake</p>
               <p className="font-black text-indigo-200">{payload?.header?.lastSyncAt ? formatHandshake(payload.header.lastSyncAt) : formatHandshake(lastHandshakeAt)}</p>
             </div>
-            <button onClick={handleSyncAttendance} disabled={submitting || !canEditTimesheet} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
+            <button onClick={() => handleSyncAttendance('manual')} disabled={submitting || !canEditTimesheet} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">
               {submitting ? 'Fetching...' : 'Fetch Punches'}
             </button>
           </div>
@@ -1339,11 +1399,16 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredLines.map((line) => (
+                  {filteredLines.map((line, rowIndex) => (
                     <tr key={line.id} className={line.validationStatus === 'Valid' ? 'bg-emerald-50/30' : 'bg-white'}>
                       <td className="px-4 py-4">
-                        <div className="text-[9px] font-black uppercase tracking-widest text-indigo-600">{line.employeeNo}</div>
-                        <div className="mt-1 text-[13px] font-black text-slate-900">{line.employeeName}</div>
+                        <div className="flex items-start gap-3">
+                          <span className="min-w-7 rounded-md bg-slate-100 px-2 py-1 text-center text-[10px] font-black text-slate-600">{rowIndex + 1}</span>
+                          <div>
+                            <div className="text-[9px] font-black uppercase tracking-widest text-indigo-600">{line.employeeNo}</div>
+                            <div className="mt-1 text-[13px] font-black text-slate-900">{line.employeeName}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-4 text-[11px] font-black text-slate-700">{line.clockIn ? `${line.clockIn} - ${line.clockOut || '--:--'}` : 'Absent'}</td>
                       <td className="px-4 py-4 text-center text-xs font-black text-slate-700">{line.attendanceDuration}h</td>
@@ -1412,13 +1477,14 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredLines.map((line) => {
+                  {filteredLines.map((line, rowIndex) => {
                     const isAbsent = !line.clockIn;
                     const originalIdx = localLines.findIndex(l => l.id === line.id);
                     return (
                       <tr key={line.id} className={`hover:bg-slate-50/80 transition-colors ${isAbsent ? 'bg-slate-50/30' : line.validationStatus === 'Valid' ? 'bg-emerald-50/30' : line.validationStatus === 'Error' ? 'bg-red-50/30' : 'bg-white'}`}>
                         <td className={`sticky left-0 z-10 px-4 py-4 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.03)] ${isAbsent ? 'bg-slate-50' : line.validationStatus === 'Valid' ? 'bg-[#f0fdf4]' : line.validationStatus === 'Error' ? 'bg-[#fef2f2]' : 'bg-white'}`}>
                           <div className="flex items-center gap-3 min-w-max">
+                            <span className="min-w-7 rounded-md bg-slate-100 px-2 py-1 text-center text-[10px] font-black text-slate-600">{rowIndex + 1}</span>
                             <input 
                               type="checkbox" 
                               checked={selectedEmployees.includes(line.employeeId)}
@@ -1438,14 +1504,14 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                         <td className="px-4 py-4 whitespace-nowrap">{isAbsent ? <span className="text-[10px] font-black text-red-600">ABSENT</span> : <div className="flex flex-col gap-0.5 text-[10px] font-black text-slate-700"><span>IN: {line.clockIn}</span><span>OUT: {line.clockOut || '--:--'}</span></div>}</td>
                         <td className="px-4 py-4 text-center text-[11px] font-black text-slate-600 tabular-nums">{line.attendanceDuration}h</td>
                         {matrixColumns.map((col) => (
-                          <td key={col.code} className="px-4 py-4 border-l border-slate-100"><input type="number" step="0.5" disabled={!canEditTimesheet} value={line.projectAllocations.find(p => p.projectCode === col.code)?.hours || ''} onChange={(e) => {
+                          <td key={col.code} className="px-4 py-4 border-l border-slate-100"><input type="number" step="0.5" disabled={!canEditTimesheet || isAbsent} value={isAbsent ? 0 : line.projectAllocations.find(p => p.projectCode === col.code)?.hours || ''} onChange={(e) => {
                             const val = parseFloat(e.target.value) || 0;
                             const allocations = [...line.projectAllocations];
                             const pIdx = allocations.findIndex(p => p.projectCode === col.code);
                             if (pIdx >= 0) allocations[pIdx].hours = val;
                             else allocations.push({ projectId: col.code, projectCode: col.code, projectName: col.label, hours: val, remarks: null });
                             handleUpdateLine(originalIdx, { projectAllocations: allocations });
-                          }} className="w-full rounded-lg border border-slate-200 py-1.5 text-center text-xs font-black focus:border-indigo-500" /></td>
+                          }} className={`w-full rounded-lg border border-slate-200 py-1.5 text-center text-xs font-black focus:border-indigo-500 ${isAbsent ? 'bg-slate-100 text-slate-400' : ''}`} /></td>
                         ))}
                         <td className="px-4 py-4 border-l border-slate-100"></td>
                         <td className="px-4 py-4 text-center font-black text-blue-700 bg-blue-50/20">{line.usedHours}</td>
@@ -1512,13 +1578,15 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
             </div>
             <div className="max-h-[720px] overflow-y-auto pr-2">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {paginatedCardLines.map((line) => {
+            {paginatedCardLines.map((line, rowIndex) => {
               const originalIdx = localLines.findIndex(l => l.id === line.id);
               const isAbsent = !line.clockIn;
+              const displayNumber = employeeCardStart + rowIndex;
               return (
                 <div key={line.id} className={`rounded-2xl border p-5 shadow-sm ${employeeCardTone(line)}`}>
                   <div className="mb-4 flex items-center justify-between border-b border-white/60 pb-4">
                     <div className="flex items-center gap-3">
+                      <span className="min-w-7 rounded-md bg-white/70 px-2 py-1 text-center text-[10px] font-black text-slate-600 ring-1 ring-slate-200">{displayNumber}</span>
                       <input 
                         type="checkbox" 
                         checked={selectedEmployees.includes(line.employeeId)}
@@ -1540,14 +1608,14 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                       {matrixColumns.map(col => (
                         <div key={col.code} className="flex items-center justify-between gap-3">
                           <span className="text-xs font-bold text-slate-600 truncate flex-1">{col.label}</span>
-                          <input type="number" step="0.5" disabled={!canEditTimesheet} value={line.projectAllocations.find(p => p.projectCode === col.code)?.hours || ''} onChange={(e) => {
+                          <input type="number" step="0.5" disabled={!canEditTimesheet || isAbsent} value={isAbsent ? 0 : line.projectAllocations.find(p => p.projectCode === col.code)?.hours || ''} onChange={(e) => {
                             const val = parseFloat(e.target.value) || 0;
                             const next = [...line.projectAllocations];
                             const pIdx = next.findIndex(p => p.projectCode === col.code);
                             if (pIdx >= 0) next[pIdx].hours = val;
                             else next.push({ projectId: col.code, projectCode: col.code, projectName: col.label, hours: val, remarks: null });
                             handleUpdateLine(originalIdx, { projectAllocations: next });
-                          }} className="w-14 rounded-lg border border-slate-200 py-1 text-center text-xs font-black" />
+                          }} className={`w-14 rounded-lg border border-slate-200 py-1 text-center text-xs font-black ${isAbsent ? 'bg-slate-100 text-slate-400' : ''}`} />
                         </div>
                       ))}
                     </div>

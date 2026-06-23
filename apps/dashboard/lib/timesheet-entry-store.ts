@@ -747,6 +747,7 @@ const officialTimesheetWorkCenters = [
   'Logistics',
   'Loading & Offloading',
   'Packing & Preservation',
+  'Maintenance',
   'Mechanical Maintenance',
   'Electrical Maintenance',
   'Instrumentation',
@@ -2218,6 +2219,7 @@ const normalizeAttendanceScope = (value: string | null | undefined) =>
   String(value || '').trim().toLowerCase();
 const TIMESHEET_SAGE_ENRICH_TIMEOUT_MS = Number(process.env.TIMESHEET_SAGE_ENRICH_TIMEOUT_MS || 700);
 const TIMESHEET_SUPERVISOR_SCOPE_TIMEOUT_MS = Number(process.env.TIMESHEET_SUPERVISOR_SCOPE_TIMEOUT_MS || 700);
+const TIMESHEET_LIVE_ATTENDANCE_TIMEOUT_MS = Number(process.env.TIMESHEET_LIVE_ATTENDANCE_TIMEOUT_MS || 6000);
 
 const withSyncTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2349,7 +2351,11 @@ export async function syncAttendanceForTimesheet(
   options: { persist?: boolean } = {},
 ) {
   const persist = options.persist !== false;
-  const liveAttendancePromise = readLiveClockingActivity(date);
+  const liveAttendancePromise = withSyncTimeout(
+    readLiveClockingActivity(date),
+    TIMESHEET_LIVE_ATTENDANCE_TIMEOUT_MS,
+    'Live biometric attendance timed out.',
+  );
   const approvedLeavePromise = approvedPaidLeaveForDate(date);
   const scopePromise = withSyncTimeout(
     supervisorEmployeeScope(supervisorId),

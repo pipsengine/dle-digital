@@ -50,6 +50,7 @@ import { readPayrollEmployees, type PayrollEmployeeSource } from '@/lib/payroll-
 import type { StructureInsight } from '@/lib/organization-data';
 import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
+import { listApprovedOvertimeForSupervisor, type OvertimeAuthorizationRequest } from '@/lib/overtime-approval-workflow-store';
 
 type ProjectManagerOption = {
   employeeId: string;
@@ -101,6 +102,7 @@ type TimesheetPayload = {
     location: string;
     status: string;
   } | null;
+  approvedOvertimeAuthorizations: OvertimeAuthorizationRequest[];
   permissions: {
     actor: string;
     role: string;
@@ -731,17 +733,31 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   const uiPermissions = getUiPermissions(access);
   const session = await sessionFrom(request);
   const supervisorMode = mode === 'supervisor';
-  const { headers, lines: allLines } = await readTimesheetData();
-  const [departments, locations] = await Promise.all([
+  const [
+    timesheetData,
+    departments,
+    locations,
+    workCenters,
+    projects,
+    nextProjectCode,
+    biometricDevices,
+    timesheetRecords,
+    payrollEmployeeSource,
+    assignmentRows,
+  ] = await Promise.all([
+    readTimesheetData(),
     readSystemTimesheetDepartments(),
     readSystemTimesheetLocations(),
+    readTimesheetWorkCenters(),
+    readProjects(),
+    generateProjectCode(),
+    readBiometricDevices(),
+    readTimesheetRecords(),
+    readPayrollEmployees(),
+    readSupervisorAssignments().catch(() => []),
   ]);
-  const workCenters = await readTimesheetWorkCenters();
-  const projects = await readProjects();
-  const nextProjectCode = await generateProjectCode();
-  const biometricDevices = await readBiometricDevices();
-  const timesheetRecords = await readTimesheetRecords();
-  const employees = (await readPayrollEmployees()).employees;
+  const { headers, lines: allLines } = timesheetData;
+  const employees = payrollEmployeeSource.employees;
   const activeEmployees = employees.filter((employee) => !['Resigned', 'Terminated', 'Retired'].includes(employee.status));
   const supervisorIndex = buildSupervisorIndex(activeEmployees);
   const projectManagers = await buildProjectManagerOptions(activeEmployees);
@@ -763,7 +779,44 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
       employeesBySupervisor.set(key, existing);
     }
   }
-  const supervisorDirectory = Array.from(employeesBySupervisor.entries())
+  const assignmentSupervisors = new Map<string, {
+    value: string;
+    label: string;
+    employeeCode: string;
+    fullName: string;
+    jobTitle: string;
+    department: string;
+    employeeCount: number;
+  }>();
+  for (const assignment of assignmentRows) {
+    const supervisorCode = clean(assignment.supervisorEmployeeCode);
+    const supervisorName = clean(assignment.supervisorName);
+    if (!supervisorCode || assignment.matchedStatus === 'Unresolved') continue;
+    const supervisorEmployee = supervisorIndex.byKey.get(supervisorCode.toLowerCase());
+    const value = canonicalSupervisorValue(`${supervisorCode} - ${supervisorName || supervisorEmployee?.fullName || supervisorCode}`, supervisorIndex);
+    if (!value) continue;
+    const existing = assignmentSupervisors.get(value);
+    assignmentSupervisors.set(value, {
+      value,
+      label: value,
+      employeeCode: supervisorCode,
+      fullName: supervisorName || clean(supervisorEmployee?.fullName) || supervisorCode,
+      jobTitle: clean(supervisorEmployee?.jobTitle),
+      department: clean(supervisorEmployee?.department) || clean(assignment.assignmentGroup),
+      employeeCount: (existing?.employeeCount || 0) + (assignment.employeeCode ? 1 : 0),
+    });
+  }
+  const supervisorDirectoryByValue = new Map<string, {
+    value: string;
+    label: string;
+    employeeCode: string;
+    fullName: string;
+    jobTitle: string;
+    department: string;
+    employeeCount: number;
+  }>();
+  for (const item of assignmentSupervisors.values()) supervisorDirectoryByValue.set(item.value, item);
+  for (const item of Array.from(employeesBySupervisor.entries())
     .map(([manager, directReports]) => {
       const employeeCount = new Set(directReports.map((item) => item.employeeCode)).size;
       const supervisorEmployee = findSupervisorEmployee(manager, supervisorIndex);
@@ -777,11 +830,40 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
         employeeCount,
       };
     })
+    .filter((item) => item.employeeCount > 0)) {
+    const assignmentItem = supervisorDirectoryByValue.get(item.value);
+    supervisorDirectoryByValue.set(item.value, assignmentItem ? { ...item, employeeCount: Math.max(item.employeeCount, assignmentItem.employeeCount) } : item);
+  }
+  const supervisorDirectory = Array.from(supervisorDirectoryByValue.values())
+    .map((item) => ({ ...item, label: `${item.value}${item.employeeCount ? ` (${item.employeeCount})` : ''}` }))
     .filter((item) => item.employeeCount > 0)
     .sort((a, b) => a.label.localeCompare(b.label));
   const targetSupervisor = canonicalSupervisorValue(requestedSupervisor || supervisorDirectory[0]?.value || recordSupervisors[0] || access.actor, supervisorIndex);
   const selectedSupervisorProfile = findSupervisorEmployee(targetSupervisor, supervisorIndex) || activeEmployees.find((employee) => supervisorMatchesSelection(employee, targetSupervisor));
-  const assignedSupervisorEmployees = await assignedEmployeesForSupervisor(targetSupervisor, activeEmployees);
+  const targetSupervisorCode = clean(targetSupervisor).split(' - ')[0]?.trim().toLowerCase();
+  const employeesByCode = new Map(activeEmployees.map((employee) => [clean(employee.employeeCode).toLowerCase(), employee]));
+  const assignedSupervisorEmployees = assignmentRows
+    .filter((assignment) => clean(assignment.supervisorEmployeeCode).toLowerCase() === targetSupervisorCode && assignment.employeeCode && assignment.matchedStatus !== 'Unresolved')
+    .map((assignment) => {
+      const employee = employeesByCode.get(clean(assignment.employeeCode).toLowerCase());
+      return employee || {
+        employeeId: assignment.employeeCode || '',
+        employeeCode: assignment.employeeCode || '',
+        sourceEmployeeId: assignment.employeeCode || '',
+        fullName: assignment.employeeName || assignment.employeeCode || '',
+        jobTitle: assignment.tradeRole || 'Assigned Crew',
+        department: assignment.assignmentGroup || 'Operations',
+        division: assignment.assignmentGroup || '',
+        businessUnit: assignment.assignmentGroup || '',
+        costCenter: '',
+        projectSite: 'IDI_ORO',
+        workLocation: 'IDI_ORO',
+        officeLocation: 'IDI_ORO',
+        location: 'IDI_ORO',
+        managerName: targetSupervisor,
+        status: 'Active',
+      };
+    });
   const reportingManagerEmployees = activeEmployees.filter((employee) => {
     const canonicalManager = canonicalSupervisorValue(employee.managerName, supervisorIndex);
     return canonicalManager === targetSupervisor || managerMatches({ managerName: canonicalManager || employee.managerName }, targetSupervisor);
@@ -831,6 +913,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     .map(timesheetRecordEmployeeSummary)
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
   const selectedSupervisorEmployees = selectedSupervisorEmployeesFromDirectory.length ? selectedSupervisorEmployeesFromDirectory : selectedSupervisorEmployeesFromRecords;
+  const approvedOvertimeAuthorizations = await listApprovedOvertimeForSupervisor(targetDate, targetSupervisor).catch(() => []);
   const attendanceWorkCenters = workCenters.map((workCenter) => ({
     location: workCenter.location || workCenter.name,
     site: workCenter.site || workCenter.location || workCenter.name,
@@ -856,17 +939,8 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
         .filter(lineBelongsToSelectedCrew)
     : [];
 
-  if ((!header || lines.length === 0) && targetSupervisor && targetWorkCenter) {
-    try {
-      const preview = await syncAttendanceForTimesheet(targetDate, targetSupervisor, targetWorkCenter, targetLocation, { persist: period.status === 'Open' });
-      header = preview.header;
-      lines = preview.lines
-        .map(normalizeLineForGrossDay)
-        .filter(lineBelongsToSelectedCrew);
-    } catch (error) {
-      console.warn('Timesheet attendance preview could not be loaded:', error);
-    }
-  }
+  // Keep the initial page load lightweight. Attendance sync can involve biometric
+  // and Sage enrichment calls, so it is only run from the explicit Fetch Punches action.
 
   const activeProjects = projects.filter(p => ['Active', 'Approved', 'Open'].includes(p.status));
   const projectSiteOptions = Array.from(
@@ -923,6 +997,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     projectManagers,
     supervisorEmployees: selectedSupervisorEmployees,
     supervisorProfile: selectedSupervisorProfile ? employeeSummary(selectedSupervisorProfile) : null,
+    approvedOvertimeAuthorizations,
     permissions: {
       actor: session?.fullName || uiPermissions.actor,
       role: uiPermissions.role,
@@ -1134,6 +1209,10 @@ export async function PATCH(request: Request) {
 
       // Validate gross day separately from payroll/productive hours.
       for (const line of updatedLines) {
+        const projectHours = (line.projectAllocations || []).reduce((sum, allocation) => sum + Number(allocation.hours || 0), 0);
+        if (!line.clockIn && projectHours > 0.001) {
+          return err(400, `Absent employee ${line.employeeName} cannot receive project/productive hours.`);
+        }
         if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
           return err(400, `Productive/payroll hours for ${line.employeeName} cannot exceed ${STANDARD_TIMESHEET_HOURS} hours.`);
         }

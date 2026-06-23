@@ -1,0 +1,14 @@
+{
+  "assignmentBatch": "2026-06-23-cnc-angle-abel-daniel",
+  "assignmentGroup": "CNC ANGLE IRON AND BEAM MACHINE OPERATORS",
+  "supervisorEmployeeCode": "C2225",
+  "performedBy": "codex.database-import",
+  "reason": "CNC angle iron and beam machine operators supervisor assignment from provided schedule.",
+  "rows": [
+    { "sourceName": "YUNUS KAMORU", "tradeRole": "CNC OPERATOR", "employeeCode": "C2221", "matchConfidence": "ExactReversed", "matchNote": "Database name is KAMORUDEEN YUNUS." },
+    { "sourceName": "ABEL UGBEKILE", "tradeRole": "CNC OPERATOR", "employeeCode": "C2220", "matchConfidence": "Exact" },
+    { "sourceName": "AYUBA OGUNBONA", "tradeRole": "CNC OPERATOR", "employeeCode": "C2632", "matchConfidence": "Exact" },
+    { "sourceName": "EZEAGWU ANTHONY", "tradeRole": "CNC OPERATOR", "employeeCode": "C2222", "matchConfidence": "SpellingAlias", "matchNote": "Database name is ANTHONY EZEAGU." },
+    { "sourceName": "CHRISTIAN AGBATA", "tradeRole": "CNC OPERATOR", "employeeCode": "C2224", "matchConfidence": "Exact" }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "assignmentBatch": "2026-06-23-fitters-gbenga-daramola",
+  "assignmentGroup": "FITTERS",
+  "supervisorEmployeeCode": "C1783",
+  "performedBy": "codex.database-import",
+  "reason": "Fitters supervisor assignment from provided FITTERS schedule.",
+  "rows": [
+    {
+      "sourceName": "AKEEM AKINGBADE",
+      "tradeRole": "Fitter 1",
+      "employeeCode": "C2395",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is AKINGBADE AKEEM."
+    },
+    {
+      "sourceName": "BABATUNDE OYELEYE",
+      "tradeRole": "Fitter 1",
+      "employeeCode": "C2412",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is OYELEYE BABATUNDE."
+    },
+    {
+      "sourceName": "EKWERE AKPAN",
+      "tradeRole": "Fitter 1",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for EKWERE AKPAN. Similar active surname match is KUFREOBONG AKPAN."
+    },
+    {
+      "sourceName": "AJAYI ADEBAYO",
+      "tradeRole": "Fitter 1",
+      "employeeCode": "C2011",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is ADEBAYO AJAYI."
+    },
+    {
+      "sourceName": "GIDEON AKINGBOYE",
+      "tradeRole": "Fitter 1",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for GIDEON AKINGBOYE."
+    },
+    {
+      "sourceName": "IDOWU ADELEKE",
+      "tradeRole": "Fitter 1",
+      "employeeCode": "C2614",
+      "matchConfidence": "Exact"
+    },
+    {
+      "sourceName": "MURPHY KALU",
+      "tradeRole": "Fitter 1",
+      "employeeCode": "C2698",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is MURPHY OKEKE KALU."
+    },
+    {
+      "sourceName": "TAIWO GABRIEL",
+      "tradeRole": "Fitter 1",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for TAIWO GABRIEL. Similar active names include TAIWO OGUNBIYI, JULIUS TAIWO, and GABRIEL AWUA."
+    },
+    {
+      "sourceName": "ONUOHA OBINNA",
+      "tradeRole": "Fitter 1",
+      "employeeCode": "C2484",
+      "matchConfidence": "Exact"
+    },
+    {
+      "sourceName": "OJO PETER",
+      "tradeRole": "Fitter 2",
+      "employeeCode": "C2690",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is PETER OLAMILEKAN OJO."
+    },
+    {
+      "sourceName": "OLADIPUPO AKANLE",
+      "tradeRole": "Fitter 2",
+      "employeeCode": "C2338",
+      "matchConfidence": "Exact"
+    },
+    {
+      "sourceName": "ADEYEYE ADESOJI",
+      "tradeRole": "Fitter 2",
+      "employeeCode": "C2343",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is ADESOJI ADEYEYE."
+    },
+    {
+      "sourceName": "AKINLABI AKINMOLADUN",
+      "tradeRole": "Fitter 2",
+      "employeeCode": "C2699",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is AKINLABI KOLAJO AKINMOLADUN."
+    },
+    {
+      "sourceName": "ADEBISI OLALEKAN",
+      "tradeRole": "Fitter 2",
+      "employeeCode": "C2704",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is OLALEKAN AKANBI ADEBISI."
+    },
+    {
+      "sourceName": "FASHINA AYOMIDE SAMUEL",
+      "tradeRole": "FITTER-MATE",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for FASHINA AYOMIDE SAMUEL."
+    },
+    {
+      "sourceName": "WASIU ONABANJO",
+      "tradeRole": "FITTER-MATE",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for WASIU ONABANJO. Similar active first-name matches include WASIU BUSARI and LAWAL WASIU."
+    },
+    {
+      "sourceName": "OLAMILEKAN ABIODUN",
+      "tradeRole": "FITTER-MATE",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for OLAMILEKAN ABIODUN. Similar active surname match is OYEWOLE ABIODUN."
+    },
+    {
+      "sourceName": "DANIEL UDEH",
+      "tradeRole": "GRINDER",
+      "employeeCode": "C2341",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is DANIEL UDECHUKWU."
+    },
+    {
+      "sourceName": "JAMES NGELE",
+      "tradeRole": "GRINDER",
+      "employeeCode": "C2136",
+      "matchConfidence": "Exact"
+    },
+    {
+      "sourceName": "OBILIKWU JOHN",
+      "tradeRole": "GRINDER",
+      "employeeCode": "C2483",
+      "matchConfidence": "ExactReversed",
+      "matchNote": "Database name is JOHN OBILIKWU."
+    },
+    {
+      "sourceName": "TEMIDAYO AJAYI",
+      "tradeRole": "GRINDER",
+      "employeeCode": "C2760",
+      "matchConfidence": "ExactWithMiddleName",
+      "matchNote": "Database name is TEMIDAYO JOHNSON AJAYI."
+    },
+    {
+      "sourceName": "MOMODU BASHIRU",
+      "tradeRole": "GRINDER",
+      "employeeCode": "C1775",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is MOMODU BASHRU."
+    },
+    {
+      "sourceName": "UMAH KALU",
+      "tradeRole": "GRINDER",
+      "employeeCode": "C1804",
+      "matchConfidence": "SpellingAlias",
+      "matchNote": "Database name is UMA KALU."
+    },
+    {
+      "sourceName": "JOHN OHLIEMBOR",
+      "tradeRole": "PREPARATION SUP.",
+      "employeeCode": null,
+      "matchConfidence": "Unresolved",
+      "matchNote": "No exact active HRIS match found for JOHN OHLIEMBOR."
+    }
+  ]
+}

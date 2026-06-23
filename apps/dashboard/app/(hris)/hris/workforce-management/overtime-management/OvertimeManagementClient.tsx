@@ -73,6 +73,31 @@ type OvertimeRecord = {
   auditTrail: Array<{ id: string; at: string; actor: string; role: Role; action: string; oldStatus: Status | null; newStatus: Status; comment: string | null }>;
 };
 
+type AuthorizationStatus = 'Submitted' | 'Project Manager Approved' | 'MD Approved' | 'Rejected' | 'Cancelled';
+
+type OvertimeAuthorizationRequest = {
+  id: string;
+  projectCode: string;
+  projectName: string;
+  workDate: string;
+  workCenter: string;
+  supervisorCode: string;
+  supervisorName: string;
+  requestedHours: number;
+  requestedHeadcount: number;
+  reason: string;
+  status: AuthorizationStatus;
+  currentOwnerRole: string;
+  currentOwnerName: string;
+  projectManagerName: string;
+  projectManagerEmail: string | null;
+  mdApproverName: string;
+  mdApproverEmail: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type Payload = {
   generatedAt: string;
   source: string;
@@ -94,7 +119,14 @@ type Payload = {
     pendingApprovals: number;
   };
   filterOptions: { statuses: Status[]; departments: string[]; locations: string[]; dayTypes: DayType[] };
+  authorizationSetup: {
+    projects: Array<{ id: string; code: string; name: string; projectManager: string; projectManagerEmail?: string | null }>;
+    workCenters: Array<{ id: string; code: string; name: string; location?: string | null; site?: string | null }>;
+    supervisors: Array<{ id: string; code: string; name: string; email?: string | null; jobTitle?: string; department?: string }>;
+    mdApprover: { id: string; code: string; name: string; email?: string | null; jobTitle?: string; department?: string } | null;
+  };
   records: OvertimeRecord[];
+  authorizationRequests: OvertimeAuthorizationRequest[];
 };
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
@@ -123,6 +155,7 @@ const statusTone = (status: Status): Tone => {
   return 'slate';
 };
 const workflowTone = (status: string): Tone => status === 'Completed' ? 'green' : status === 'Blocked' || status === 'Rejected' ? 'red' : status === 'Returned' ? 'amber' : 'slate';
+const authorizationTone = (status: AuthorizationStatus): Tone => status === 'MD Approved' ? 'green' : status === 'Rejected' || status === 'Cancelled' ? 'red' : status === 'Project Manager Approved' ? 'violet' : 'blue';
 
 const actionLabels: Record<Action, string> = {
   submit: 'Submit',
@@ -181,6 +214,21 @@ export default function OvertimeManagementClient({ initialNow }: { initialNow: s
     projectCode: '',
     reason: '',
   });
+  const [authorizationForm, setAuthorizationForm] = useState({
+    projectCode: '',
+    projectName: '',
+    workDate: new Date(initialNow).toISOString().slice(0, 10),
+    workCenter: '',
+    supervisorCode: '',
+    supervisorName: '',
+    requestedHours: '2',
+    requestedHeadcount: '1',
+    projectManagerName: '',
+    projectManagerEmail: '',
+    mdApproverName: 'Managing Director',
+    mdApproverEmail: '',
+    reason: '',
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -217,6 +265,9 @@ export default function OvertimeManagementClient({ initialNow }: { initialNow: s
 
   const selected = payload?.records.find((record) => record.id === selectedId) || filtered[0] || null;
   const canViewMoney = Boolean(payload?.permissions.canViewMoney);
+  const authorizationRequests = payload?.authorizationRequests || [];
+  const approvedAuthorizations = authorizationRequests.filter((item) => item.status === 'MD Approved');
+  const setup = payload?.authorizationSetup;
 
   const runAction = async (recordId: string, action: Action) => {
     setBusy(`${recordId}-${action}`);
@@ -294,6 +345,90 @@ export default function OvertimeManagementClient({ initialNow }: { initialNow: s
     }
   };
 
+  const createAuthorization = async () => {
+    setBusy('create-authorization');
+    setToast('');
+    setError('');
+    try {
+      const res = await fetch('/api/hris/workforce-management/overtime-management', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-hris-role': role },
+        body: JSON.stringify({
+          action: 'create-authorization',
+          actor: 'Production Manager',
+          ...authorizationForm,
+          requestedHours: Number(authorizationForm.requestedHours || 0),
+          requestedHeadcount: Number(authorizationForm.requestedHeadcount || 1),
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<Payload>;
+      if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Unable to submit overtime authorization.');
+      setPayload(json.data);
+      setToast('Overtime authorization submitted to the Project Manager.');
+      setAuthorizationForm((current) => ({ ...current, projectCode: '', projectName: '', workCenter: '', supervisorCode: '', supervisorName: '', requestedHours: '2', requestedHeadcount: '1', reason: '' }));
+    } catch (event) {
+      setError(event instanceof Error ? event.message : 'Unable to submit overtime authorization.');
+    } finally {
+      setBusy('');
+    }
+  };
+
+  useEffect(() => {
+    const md = setup?.mdApprover;
+    if (!md) return;
+    setAuthorizationForm((current) => ({
+      ...current,
+      mdApproverName: current.mdApproverName && current.mdApproverName !== 'Managing Director' ? current.mdApproverName : md.name,
+      mdApproverEmail: current.mdApproverEmail || md.email || '',
+    }));
+  }, [setup?.mdApprover]);
+
+  const onProjectChange = (projectCode: string) => {
+    const project = setup?.projects.find((item) => item.code === projectCode);
+    setAuthorizationForm((current) => ({
+      ...current,
+      projectCode,
+      projectName: project?.name || '',
+      projectManagerName: project?.projectManager || '',
+      projectManagerEmail: project?.projectManagerEmail || '',
+    }));
+  };
+
+  const onWorkCenterChange = (workCenterName: string) => {
+    setAuthorizationForm((current) => ({ ...current, workCenter: workCenterName }));
+  };
+
+  const onSupervisorChange = (supervisorCode: string) => {
+    const supervisor = setup?.supervisors.find((item) => item.code === supervisorCode);
+    setAuthorizationForm((current) => ({
+      ...current,
+      supervisorCode,
+      supervisorName: supervisor?.name || '',
+    }));
+  };
+
+  const actOnAuthorization = async (id: string, decision: 'approve' | 'reject') => {
+    setBusy(`${id}-${decision}`);
+    setToast('');
+    setError('');
+    try {
+      const res = await fetch('/api/hris/workforce-management/overtime-management', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-hris-role': role },
+        body: JSON.stringify({ id, action: `${decision}-authorization`, actor: role, comment }),
+      });
+      const json = (await res.json()) as ApiResponse<Payload>;
+      if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Unable to ${decision} authorization.`);
+      setPayload(json.data);
+      setToast(`Overtime authorization ${decision === 'approve' ? 'approved' : 'rejected'}.`);
+      setComment('');
+    } catch (event) {
+      setError(event instanceof Error ? event.message : `Unable to ${decision} authorization.`);
+    } finally {
+      setBusy('');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -362,6 +497,107 @@ export default function OvertimeManagementClient({ initialNow }: { initialNow: s
           </div>
         </section>
       ) : null}
+
+      <section className="mt-5 rounded-2xl border border-blue-200 bg-blue-50/60 p-4 shadow-sm">
+        <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-base font-black text-slate-950">Pre-Overtime Authorization</h2>
+            <p className="text-xs font-semibold text-slate-600">Production Manager submits, Project Manager approves, MD approves, then the supervisor receives a bell and email notification to book the approved overtime.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-black">
+            <span className="rounded-full bg-white px-3 py-1 text-blue-800 ring-1 ring-blue-100">{authorizationRequests.length} requests</span>
+            <span className="rounded-full bg-white px-3 py-1 text-emerald-800 ring-1 ring-emerald-100">{approvedAuthorizations.length} supervisor-ready</span>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <Field label="Project">
+            <input list="overtime-projects" value={authorizationForm.projectCode} onChange={(event) => onProjectChange(event.target.value)} placeholder="Search/select project" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+            <datalist id="overtime-projects">
+              {(setup?.projects || []).map((project) => <option key={project.id} value={project.code}>{project.name}</option>)}
+            </datalist>
+          </Field>
+          <Field label="Project name">
+            <input value={authorizationForm.projectName} readOnly placeholder="Auto from project" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none" />
+          </Field>
+          <Field label="Work date">
+            <input type="date" value={authorizationForm.workDate} onChange={(event) => setAuthorizationForm((current) => ({ ...current, workDate: event.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </Field>
+          <Field label="Work center">
+            <input list="overtime-work-centers" value={authorizationForm.workCenter} onChange={(event) => onWorkCenterChange(event.target.value)} placeholder="Search/select work center" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+            <datalist id="overtime-work-centers">
+              {(setup?.workCenters || []).map((workCenter) => <option key={workCenter.id} value={workCenter.name}>{[workCenter.code, workCenter.site || workCenter.location].filter(Boolean).join(' / ')}</option>)}
+            </datalist>
+          </Field>
+          <Field label="Supervisor">
+            <input list="overtime-supervisors" value={authorizationForm.supervisorCode} onChange={(event) => onSupervisorChange(event.target.value)} placeholder="Search/select supervisor" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+            <datalist id="overtime-supervisors">
+              {(setup?.supervisors || []).map((supervisor) => <option key={supervisor.id} value={supervisor.code}>{supervisor.name} {supervisor.jobTitle ? `/ ${supervisor.jobTitle}` : ''}</option>)}
+            </datalist>
+          </Field>
+          <Field label="Supervisor name">
+            <input value={authorizationForm.supervisorName} readOnly placeholder="Auto from supervisor" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none" />
+          </Field>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <Field label="OT hours">
+            <input type="number" min="0" step="0.5" value={authorizationForm.requestedHours} onChange={(event) => setAuthorizationForm((current) => ({ ...current, requestedHours: event.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </Field>
+          <Field label="Headcount">
+            <input type="number" min="1" step="1" value={authorizationForm.requestedHeadcount} onChange={(event) => setAuthorizationForm((current) => ({ ...current, requestedHeadcount: event.target.value }))} className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </Field>
+          <Field label="Project manager">
+            <input value={authorizationForm.projectManagerName} readOnly placeholder="Auto from project" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none" />
+          </Field>
+          <Field label="PM email">
+            <input type="email" value={authorizationForm.projectManagerEmail} readOnly placeholder="Auto from employee directory" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none" />
+          </Field>
+          <Field label="MD approver">
+            <input value={authorizationForm.mdApproverName} readOnly placeholder="Auto from employee directory" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none" />
+          </Field>
+          <Field label="MD email">
+            <input type="email" value={authorizationForm.mdApproverEmail} readOnly placeholder="Auto from employee directory" className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none" />
+          </Field>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
+          <Field label="Reason / production need">
+            <input value={authorizationForm.reason} onChange={(event) => setAuthorizationForm((current) => ({ ...current, reason: event.target.value }))} placeholder="Why overtime is required before work starts" className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+          </Field>
+          <button type="button" onClick={() => void createAuthorization()} disabled={busy === 'create-authorization'} className="mt-5 inline-flex h-11 items-center justify-center rounded-xl bg-blue-600 px-5 text-xs font-black text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">Submit Authorization</button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-blue-100 bg-white">
+          <table className="min-w-[1160px] w-full text-left">
+            <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
+              <tr>{['Project', 'Date', 'Supervisor', 'Hours', 'Owner', 'Status', 'Actions'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {authorizationRequests.map((item) => (
+                <tr key={item.id}>
+                  <td className="px-4 py-3"><div className="text-sm font-black text-slate-950">{item.projectCode}</div><div className="text-xs font-semibold text-slate-500">{item.projectName}</div></td>
+                  <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.workDate}</td>
+                  <td className="px-4 py-3"><div className="text-sm font-bold text-slate-800">{item.supervisorName}</div><div className="text-xs font-semibold text-slate-500">{item.supervisorCode} / {item.workCenter}</div></td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-900">{number(item.requestedHours)}h / {number(item.requestedHeadcount)} people</td>
+                  <td className="px-4 py-3"><div className="text-sm font-bold text-slate-800">{item.currentOwnerName}</div><div className="text-xs font-semibold text-slate-500">{item.currentOwnerRole}</div></td>
+                  <td className="px-4 py-3"><Chip value={item.status} tone={authorizationTone(item.status)} /></td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-2">
+                      {!['MD Approved', 'Rejected', 'Cancelled'].includes(item.status) ? (
+                        <>
+                          <button type="button" onClick={() => void actOnAuthorization(item.id, 'approve')} disabled={Boolean(busy)} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50">{role === 'Super Administrator' ? 'Approve All' : 'Approve'}</button>
+                          <button type="button" onClick={() => void actOnAuthorization(item.id, 'reject')} disabled={Boolean(busy)} className="rounded-xl bg-red-600 px-3 py-2 text-xs font-black text-white hover:bg-red-700 disabled:opacity-50">Reject</button>
+                        </>
+                      ) : <span className="text-xs font-bold text-slate-500">No pending action</span>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!authorizationRequests.length ? (
+                <tr><td colSpan={7} className="px-4 py-6 text-sm font-bold text-slate-500">No overtime authorizations yet.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Overtime Lines" value={number(payload?.summary.records)} detail="Synced from timesheets" icon={TimerReset} tone="violet" />

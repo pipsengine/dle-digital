@@ -1,0 +1,12 @@
+{
+  "assignmentBatch": "2026-06-23-scaffolders-david-emeh",
+  "assignmentGroup": "SCAFFOLDERS",
+  "supervisorEmployeeCode": "C2193",
+  "performedBy": "codex.database-import",
+  "reason": "Scaffolders supervisor assignment from provided SCAFFOLDERS schedule.",
+  "rows": [
+    { "sourceName": "IDOKO BABA", "tradeRole": "Scaffolder", "employeeCode": "C2795", "matchConfidence": "ExactReversed", "matchNote": "Database name is BABA IDOKO." },
+    { "sourceName": "LAWRENCE MAGAJ", "tradeRole": "Scaffolder", "employeeCode": "C2471", "matchConfidence": "ExactWithMiddleName", "matchNote": "Database name is TANKO LAWRENCE MAGAJI." },
+    { "sourceName": "DAVID IDIKA", "tradeRole": "Scaffolder", "employeeCode": "C2023", "matchConfidence": "Exact" }
+  ]
+}

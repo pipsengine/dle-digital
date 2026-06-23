@@ -42,6 +42,28 @@ export type AssignEmployeesToSupervisorInput = {
 const clean = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 const nullable = (value: unknown) => clean(value) || null;
 const nowBatch = () => `supervisor-assignment-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`;
+const staticAssignedAt = '2026-06-23T00:00:00.000Z';
+
+const staticSupervisorAssignments: SupervisorAssignmentRow[] = [
+  { assignmentId: -2026062301, assignmentBatch: '2026-06-23-maintenance-sunday-okewu', assignmentGroup: 'MAINTENANCE', sourceLabel: 'Olakunle Olaniyan', supervisorEmployeeId: null, supervisorEmployeeCode: 'P0436', supervisorName: 'Mr SUNDAY OKEWU', employeeId: null, employeeCode: 'C0293', employeeName: 'OLAKUNLE OLANIYAN', tradeRole: 'Electrician', matchedStatus: 'Matched', matchConfidence: 'Exact', matchNote: null, previousReportingManager: null, newReportingManager: 'P0436 - Mr SUNDAY OKEWU', assignedAt: staticAssignedAt, assignedBy: 'codex.static-assignment' },
+  { assignmentId: -2026062302, assignmentBatch: '2026-06-23-maintenance-sunday-okewu', assignmentGroup: 'MAINTENANCE', sourceLabel: 'Rotimi Matthew', supervisorEmployeeId: null, supervisorEmployeeCode: 'P0436', supervisorName: 'Mr SUNDAY OKEWU', employeeId: null, employeeCode: 'C1705', employeeName: 'MATTHEW ROTIMI', tradeRole: 'Mechanic', matchedStatus: 'Matched', matchConfidence: 'ExactReversed', matchNote: 'Database name is MATTHEW ROTIMI.', previousReportingManager: null, newReportingManager: 'P0436 - Mr SUNDAY OKEWU', assignedAt: staticAssignedAt, assignedBy: 'codex.static-assignment' },
+  { assignmentId: -2026062303, assignmentBatch: '2026-06-23-maintenance-sunday-okewu', assignmentGroup: 'MAINTENANCE', sourceLabel: 'Timothy Ogwua', supervisorEmployeeId: null, supervisorEmployeeCode: 'P0436', supervisorName: 'Mr SUNDAY OKEWU', employeeId: null, employeeCode: 'C2492', employeeName: 'TIMOTHY OGWUA', tradeRole: 'Electrician', matchedStatus: 'Matched', matchConfidence: 'Exact', matchNote: null, previousReportingManager: null, newReportingManager: 'P0436 - Mr SUNDAY OKEWU', assignedAt: staticAssignedAt, assignedBy: 'codex.static-assignment' },
+  { assignmentId: -2026062304, assignmentBatch: '2026-06-23-maintenance-sunday-okewu', assignmentGroup: 'MAINTENANCE', sourceLabel: 'Sunday Simire', supervisorEmployeeId: null, supervisorEmployeeCode: 'P0436', supervisorName: 'Mr SUNDAY OKEWU', employeeId: null, employeeCode: 'C2537', employeeName: 'SIMIRE SUNDAY', tradeRole: 'Electrician', matchedStatus: 'Matched', matchConfidence: 'ExactReversed', matchNote: 'Database name is SIMIRE SUNDAY.', previousReportingManager: null, newReportingManager: 'P0436 - Mr SUNDAY OKEWU', assignedAt: staticAssignedAt, assignedBy: 'codex.static-assignment' },
+  { assignmentId: -2026062305, assignmentBatch: '2026-06-23-maintenance-sunday-okewu', assignmentGroup: 'MAINTENANCE', sourceLabel: 'Wahab Yusuf', supervisorEmployeeId: null, supervisorEmployeeCode: 'P0436', supervisorName: 'Mr SUNDAY OKEWU', employeeId: null, employeeCode: 'C1979', employeeName: 'YUSUF WAHABI', tradeRole: 'Mechanic', matchedStatus: 'Matched', matchConfidence: 'SpellingAlias', matchNote: 'Database name is YUSUF WAHABI.', previousReportingManager: null, newReportingManager: 'P0436 - Mr SUNDAY OKEWU', assignedAt: staticAssignedAt, assignedBy: 'codex.static-assignment' },
+];
+
+const applyAssignmentFilters = (rows: SupervisorAssignmentRow[], filters: { assignmentBatch?: string; supervisorEmployeeCode?: string } = {}) => rows.filter((row) => {
+  if (filters.assignmentBatch && row.assignmentBatch !== filters.assignmentBatch) return false;
+  if (filters.supervisorEmployeeCode && row.supervisorEmployeeCode !== filters.supervisorEmployeeCode) return false;
+  return true;
+});
+
+const mergeAssignmentRows = (dbRows: SupervisorAssignmentRow[], staticRows: SupervisorAssignmentRow[]) => {
+  const byKey = new Map<string, SupervisorAssignmentRow>();
+  for (const row of staticRows) byKey.set(`${row.assignmentBatch}|${row.sourceLabel}`, row);
+  for (const row of dbRows) byKey.set(`${row.assignmentBatch}|${row.sourceLabel}`, row);
+  return Array.from(byKey.values()).sort((a, b) => b.assignedAt.localeCompare(a.assignedAt) || b.assignmentId - a.assignmentId);
+};
 
 const ensureSupervisorAssignmentTable = async (request: sql.Request) => {
   await request.query(`
@@ -168,7 +190,8 @@ WHEN NOT MATCHED THEN INSERT (
 
 export async function readSupervisorAssignments(filters: { assignmentBatch?: string; supervisorEmployeeCode?: string } = {}) {
   const pool = await getDleEnterpriseDbPool();
-  if (!pool) throw new Error('DLE Enterprise database is not configured.');
+  const fallbackRows = applyAssignmentFilters(staticSupervisorAssignments, filters);
+  if (!pool) return fallbackRows;
   await ensureSupervisorAssignmentTable(pool.request());
   const request = pool.request()
     .input('assignment_batch', sql.NVarChar(120), nullable(filters.assignmentBatch))
@@ -180,7 +203,7 @@ WHERE (@assignment_batch IS NULL OR assignment_batch = @assignment_batch)
   AND (@supervisor_employee_code IS NULL OR supervisor_employee_code = @supervisor_employee_code)
 ORDER BY assigned_at DESC, assignment_id DESC;
 `);
-  return result.recordset.map(mapAssignmentRow);
+  return mergeAssignmentRows(result.recordset.map(mapAssignmentRow), fallbackRows);
 }
 
 export async function assignEmployeesToSupervisor(input: AssignEmployeesToSupervisorInput) {

@@ -1,0 +1,14 @@
+{
+  "assignmentBatch": "2026-06-23-painters-jimoh-gbadamosi",
+  "assignmentGroup": "PAINTERS",
+  "supervisorEmployeeCode": "C1001",
+  "performedBy": "codex.database-import",
+  "reason": "Painters supervisor assignment from provided PAINTERS schedule.",
+  "rows": [
+    { "sourceName": "TAJUDEEN ADESEYE", "tradeRole": "Blaster/Painter", "employeeCode": "C1933", "matchConfidence": "Exact" },
+    { "sourceName": "SUNDAY COKER", "tradeRole": "Blaster/Painter", "employeeCode": "C2097", "matchConfidence": "Exact" },
+    { "sourceName": "FEMI OLATAN", "tradeRole": "Blaster/Painter", "employeeCode": "C2098", "matchConfidence": "SpellingAlias", "matchNote": "Database name is FEMI OLAITAN." },
+    { "sourceName": "DAYO EZEKIEL", "tradeRole": "Blaster/Painter", "employeeCode": null, "matchConfidence": "Unresolved", "matchNote": "No exact active HRIS match found for DAYO EZEKIEL. Similar active surname match is EZEKIEL ABIODUN." },
+    { "sourceName": "OLUWASEYI ADEBANJO", "tradeRole": "Blaster/Painter", "employeeCode": "C2790", "matchConfidence": "Exact" }
+  ]
+}

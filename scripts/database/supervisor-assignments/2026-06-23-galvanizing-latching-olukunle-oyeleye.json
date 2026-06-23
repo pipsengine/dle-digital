@@ -1,0 +1,10 @@
+{
+  "assignmentBatch": "2026-06-23-galvanizing-latching-olukunle-oyeleye",
+  "assignmentGroup": "GALVANIZING SECTION - LATCHING",
+  "supervisorEmployeeCode": "P0330",
+  "performedBy": "codex.database-import",
+  "reason": "Galvanizing latching supervisor assignment from provided GALVANIZING SECTION schedule.",
+  "rows": [
+    { "sourceName": "SUNDAY TAIWO", "tradeRole": "CRANE OPT", "employeeCode": "P0321", "matchConfidence": "ExactReversed", "matchNote": "Database name is Mr TAIWO SUNDAY." }
+  ]
+}
