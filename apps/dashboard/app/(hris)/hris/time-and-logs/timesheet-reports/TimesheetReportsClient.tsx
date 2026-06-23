@@ -358,7 +358,7 @@ function VisualBar({ label, value, total, tone = 'blue', trailing }: { label: st
   );
 }
 
-function DashboardKpi({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof BarChart3; tone: 'blue' | 'green' | 'violet' | 'amber' | 'teal' | 'red' }) {
+function DashboardKpi({ label, value, detail, icon: Icon, tone, onClick }: { label: string; value: string; detail: string; icon: typeof BarChart3; tone: 'blue' | 'green' | 'violet' | 'amber' | 'teal' | 'red'; onClick?: () => void }) {
   const toneMap = {
     blue: { card: 'border-blue-100 bg-blue-50/70', icon: 'bg-blue-600', trend: 'text-emerald-600' },
     green: { card: 'border-emerald-100 bg-emerald-50/70', icon: 'bg-emerald-600', trend: 'text-emerald-600' },
@@ -368,7 +368,7 @@ function DashboardKpi({ label, value, detail, icon: Icon, tone }: { label: strin
     red: { card: 'border-red-100 bg-red-50/70', icon: 'bg-red-600', trend: 'text-red-600' },
   }[tone];
   return (
-    <button type="button" className={`min-h-[92px] rounded-lg border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneMap.card}`}>
+    <button type="button" onClick={onClick} className={`min-h-[92px] rounded-lg border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/30 ${toneMap.card}`}>
       <div className="flex items-center gap-3">
         <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white ${toneMap.icon}`}><Icon className="h-5 w-5" /></span>
         <span className="min-w-0">
@@ -463,6 +463,7 @@ export default function TimesheetReportsClient() {
   const [employmentTypes, setEmploymentTypes] = useState<string[]>([]);
   const [employeeCategories, setEmployeeCategories] = useState<string[]>([]);
   const [drilldown, setDrilldown] = useState<{ groupBy: string; key: string } | null>(null);
+  const [kpiDetail, setKpiDetail] = useState<{ title: string; kind: 'total' | 'project' | 'employees' | 'overtime' | 'labour-cost' | 'payroll-ready' | 'pending' | 'exceptions' } | null>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const requestUrl = useMemo(() => {
@@ -597,9 +598,23 @@ export default function TimesheetReportsClient() {
     setEmploymentTypes([]);
     setEmployeeCategories([]);
     setDrilldown(null);
+    setKpiDetail(null);
   };
   const drilldownRows = drilldown ? (payload?.detailRows || []).filter((row) => {
-    const value = drilldown.groupBy === 'project' ? `${row.projectCode} - ${row.projectName}` : drilldown.groupBy === 'department' ? row.department : drilldown.groupBy === 'employee' ? `${row.employeeNo} - ${row.employeeName}` : drilldown.groupBy === 'supervisor' ? row.supervisorName : drilldown.groupBy === 'date' ? row.timesheetDate : row.businessUnit;
+    const value =
+      drilldown.groupBy === 'project' || drilldown.groupBy === 'projectCost' || drilldown.groupBy === 'projectResource' ? `${row.projectCode} - ${row.projectName}` :
+      drilldown.groupBy === 'department' ? row.department :
+      drilldown.groupBy === 'employee' ? `${row.employeeNo} - ${row.employeeName}` :
+      drilldown.groupBy === 'supervisor' ? row.supervisorName :
+      drilldown.groupBy === 'date' ? row.timesheetDate :
+      drilldown.groupBy === 'period' ? row.periodName :
+      drilldown.groupBy === 'status' || drilldown.groupBy === 'approvalStatus' ? row.normalizedStatus :
+      drilldown.groupBy === 'workCenter' ? row.workCenterName :
+      drilldown.groupBy === 'location' ? row.location :
+      drilldown.groupBy === 'costCentre' ? row.costCentre :
+      drilldown.groupBy === 'projectManager' ? row.projectManager :
+      drilldown.groupBy === 'exception' ? row.exceptionType :
+      row.businessUnit;
     return value === drilldown.key;
   }) : [];
   const totalHours = summary?.totalHoursWorked || 0;
@@ -607,8 +622,8 @@ export default function TimesheetReportsClient() {
   const overtimePct = ratioPct(summary?.overtimeHours || 0, totalHours);
   const nonProductivePct = ratioPct(summary?.nonProductiveHours || 0, totalHours);
   const allocatedCostPct = ratioPct(summary?.projectCostAllocation || 0, summary?.labourCost || 0);
-  const topDepartments = payload?.breakdowns.department.slice(0, 5) || [];
-  const topProjects = payload?.breakdowns.project.slice(0, 5) || [];
+  const topDepartments = payload?.breakdowns.department.slice(0, 10) || [];
+  const topProjects = payload?.breakdowns.project.slice(0, 10) || [];
   const approvalBreakdown = payload?.breakdowns.status.slice(0, 6) || [];
   const exceptionBreakdown = payload?.breakdowns.exception.slice(0, 5) || [];
   const activeTab = workspaceTabs.find((tab) => tab.reportType === reportType)?.id || 'overview';
@@ -627,14 +642,24 @@ export default function TimesheetReportsClient() {
       return map;
     }, new Map<string, { employeeNo: string; employeeName: string; projects: Map<string, number>; total: number }>()).values())
     .sort((a, b) => b.total - a.total)
-    .slice(0, 5);
+    .slice(0, 10);
   const pendingApprovalRows = [
     { stage: 'Supervisor Approval', count: approvalBreakdown.find((row) => row.label === 'Submitted')?.timesheets || 0, hours: approvalBreakdown.find((row) => row.label === 'Submitted')?.productiveHours || 0, cost: approvalBreakdown.find((row) => row.label === 'Submitted')?.labourCost || 0 },
     { stage: 'Cost Control Review', count: approvalBreakdown.find((row) => row.label === 'Project_Manager_Reviewed')?.timesheets || 0, hours: approvalBreakdown.find((row) => row.label === 'Project_Manager_Reviewed')?.productiveHours || 0, cost: approvalBreakdown.find((row) => row.label === 'Project_Manager_Reviewed')?.labourCost || 0 },
     { stage: 'Project Manager Approval', count: approvalBreakdown.find((row) => row.label === 'Supervisor_Reviewed')?.timesheets || 0, hours: approvalBreakdown.find((row) => row.label === 'Supervisor_Reviewed')?.productiveHours || 0, cost: approvalBreakdown.find((row) => row.label === 'Supervisor_Reviewed')?.labourCost || 0 },
     { stage: 'HR Approval', count: approvalBreakdown.find((row) => row.label === 'Cost_Control_Reviewed')?.timesheets || 0, hours: approvalBreakdown.find((row) => row.label === 'Cost_Control_Reviewed')?.productiveHours || 0, cost: approvalBreakdown.find((row) => row.label === 'Cost_Control_Reviewed')?.labourCost || 0 },
   ];
-  const recentRows = (payload?.detailRows || []).slice(0, 5);
+  const recentRows = (payload?.detailRows || []).slice(0, 10);
+  const kpiDetailRows = (payload?.detailRows || []).filter((row) => {
+    if (!kpiDetail) return false;
+    if (kpiDetail.kind === 'project') return row.projectCode && row.projectCode !== 'No Project';
+    if (kpiDetail.kind === 'overtime') return row.overtimeHours > 0;
+    if (kpiDetail.kind === 'labour-cost') return row.labourCostNgn > 0;
+    if (kpiDetail.kind === 'payroll-ready') return row.payrollReady;
+    if (kpiDetail.kind === 'pending') return !row.payrollReady && !['Rejected', 'Returned'].includes(row.normalizedStatus);
+    if (kpiDetail.kind === 'exceptions') return row.exceptionType !== 'None';
+    return true;
+  }).slice(0, 50);
 
   return (
     <PageTemplate
@@ -757,15 +782,50 @@ export default function TimesheetReportsClient() {
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-8">
-          <DashboardKpi label="Total Labour Hours" value={formatHours(summary?.totalHoursWorked || 0)} detail={`${pctText(summary?.resourceUtilizationPct || 0)} utilization`} icon={Clock} tone="blue" />
-          <DashboardKpi label="Project Hours" value={formatHours(projectHours || summary?.productiveHours || 0)} detail={`${pctText(ratioPct(projectHours || summary?.productiveHours || 0, summary?.productiveHours || 0))} project allocation`} icon={BriefcaseBusiness} tone="green" />
-          <DashboardKpi label="Employees Utilized" value={formatNumber(summary?.employees || 0)} detail={`${formatNumber(summary?.records || 0)} allocation lines`} icon={Users} tone="violet" />
-          <DashboardKpi label="Overtime Hours" value={formatHours(summary?.overtimeHours || 0)} detail={`${pctText(overtimePct)} of total hours`} icon={Clock} tone="amber" />
-          <DashboardKpi label="Labour Cost" value={money(summary?.labourCost || 0)} detail={`${pctText(allocatedCostPct)} allocated`} icon={Landmark} tone="teal" />
-          <DashboardKpi label="Payroll Ready Hours" value={formatHours(summary?.payrollReadyHours || 0)} detail={`${pctText(payrollReadyPct)} ready`} icon={FileText} tone="blue" />
-          <DashboardKpi label="Pending Approvals" value={formatNumber(summary?.pendingApprovals || 0)} detail={`${formatHours(pendingHours)} pending`} icon={Hourglass} tone="amber" />
-          <DashboardKpi label="Exceptions" value={formatNumber(summary?.exceptionRows || 0)} detail={`${formatNumber(summary?.missingTimesheets || 0)} attendance gaps`} icon={AlertTriangle} tone="red" />
+          <DashboardKpi label="Total Labour Hours" value={formatHours(summary?.totalHoursWorked || 0)} detail={`${pctText(summary?.resourceUtilizationPct || 0)} utilization`} icon={Clock} tone="blue" onClick={() => setKpiDetail({ title: 'Total Labour Hours Detail', kind: 'total' })} />
+          <DashboardKpi label="Project Hours" value={formatHours(projectHours || summary?.productiveHours || 0)} detail={`${pctText(ratioPct(projectHours || summary?.productiveHours || 0, summary?.productiveHours || 0))} project allocation`} icon={BriefcaseBusiness} tone="green" onClick={() => setKpiDetail({ title: 'Project Hours Detail', kind: 'project' })} />
+          <DashboardKpi label="Employees Utilized" value={formatNumber(summary?.employees || 0)} detail={`${formatNumber(summary?.records || 0)} allocation lines`} icon={Users} tone="violet" onClick={() => setKpiDetail({ title: 'Employees Utilized Detail', kind: 'employees' })} />
+          <DashboardKpi label="Overtime Hours" value={formatHours(summary?.overtimeHours || 0)} detail={`${pctText(overtimePct)} of total hours`} icon={Clock} tone="amber" onClick={() => setKpiDetail({ title: 'Overtime Hours Detail', kind: 'overtime' })} />
+          <DashboardKpi label="Labour Cost" value={money(summary?.labourCost || 0)} detail={`${pctText(allocatedCostPct)} allocated`} icon={Landmark} tone="teal" onClick={() => setKpiDetail({ title: 'Labour Cost Detail', kind: 'labour-cost' })} />
+          <DashboardKpi label="Payroll Ready Hours" value={formatHours(summary?.payrollReadyHours || 0)} detail={`${pctText(payrollReadyPct)} ready`} icon={FileText} tone="blue" onClick={() => setKpiDetail({ title: 'Payroll Ready Hours Detail', kind: 'payroll-ready' })} />
+          <DashboardKpi label="Pending Approvals" value={formatNumber(summary?.pendingApprovals || 0)} detail={`${formatHours(pendingHours)} pending`} icon={Hourglass} tone="amber" onClick={() => setKpiDetail({ title: 'Pending Approvals Detail', kind: 'pending' })} />
+          <DashboardKpi label="Exceptions" value={formatNumber(summary?.exceptionRows || 0)} detail={`${formatNumber(summary?.missingTimesheets || 0)} attendance gaps`} icon={AlertTriangle} tone="red" onClick={() => setKpiDetail({ title: 'Exceptions Detail', kind: 'exceptions' })} />
         </div>
+
+        {kpiDetail ? (
+          <section className="rounded-lg border border-blue-200 bg-blue-50/30 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-100 px-4 py-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-blue-700">KPI Drill-Down</p>
+                <h2 className="text-sm font-black text-slate-950">{kpiDetail.title}</h2>
+              </div>
+              <button type="button" onClick={() => setKpiDetail(null)} className="rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs font-black text-blue-700">Close</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] text-left text-sm">
+                <thead className="bg-white/70 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  <tr><th className="px-4 py-3">Employee</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Department</th><th className="px-4 py-3">Project</th><th className="px-4 py-3 text-right">Hours</th><th className="px-4 py-3 text-right">OT</th><th className="px-4 py-3 text-right">Cost</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Exception</th></tr>
+                </thead>
+                <tbody className="divide-y divide-blue-100 bg-white">
+                  {kpiDetailRows.map((row) => (
+                    <tr key={`${kpiDetail.kind}-${row.allocationId}`} className="hover:bg-blue-50/50">
+                      <td className="px-4 py-3"><div className="font-black text-slate-900">{row.employeeName}</div><div className="text-[11px] font-bold text-slate-500">{row.employeeNo}</div></td>
+                      <td className="px-4 py-3 font-bold">{row.timesheetDate}</td>
+                      <td className="px-4 py-3 font-bold">{row.department}</td>
+                      <td className="px-4 py-3 font-bold text-blue-800">{row.projectCode}</td>
+                      <td className="px-4 py-3 text-right font-black">{formatHours(row.productiveHours)}</td>
+                      <td className="px-4 py-3 text-right font-bold">{formatHours(row.overtimeHours)}</td>
+                      <td className="px-4 py-3 text-right font-bold">{money(row.labourCostNgn)}</td>
+                      <td className="px-4 py-3"><span className={`rounded-md px-2 py-1 text-[10px] font-black ${statusClass(row.normalizedStatus)}`}>{formatStatus(row.normalizedStatus)}</span></td>
+                      <td className="px-4 py-3 font-bold text-red-700">{row.exceptionType}</td>
+                    </tr>
+                  ))}
+                  {!kpiDetailRows.length ? <tr><td colSpan={9} className="px-4 py-8 text-center text-sm font-bold text-slate-400">No detail rows for this KPI.</td></tr> : null}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_0.7fr_0.5fr]">
           <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -783,9 +843,9 @@ export default function TimesheetReportsClient() {
                     const [code, ...nameParts] = row.label.split(' - ');
                     const status = row.exceptionRows ? 'Attention' : row.pendingApprovals ? 'Pending' : 'Approved';
                     return (
-                      <tr key={row.label} className="hover:bg-slate-50">
+                      <tr key={row.label} onClick={() => setDrilldown({ groupBy: 'project', key: row.drilldownKey })} className="cursor-pointer hover:bg-slate-50">
                         <td className="px-4 py-3 text-xs font-black text-slate-500">{index + 1}</td>
-                        <td className="px-4 py-3 font-black text-blue-800">{code}</td>
+                        <td className="px-4 py-3 font-black text-blue-800 underline-offset-2 hover:underline">{code}</td>
                         <td className="px-4 py-3 font-bold text-slate-800">{nameParts.join(' - ') || code}</td>
                         <td className="px-4 py-3 font-black">{formatHours(row.productiveHours)}</td>
                         <td className="px-4 py-3 font-bold">{formatNumber(row.employees)}</td>
@@ -1055,7 +1115,7 @@ export default function TimesheetReportsClient() {
                   {(payload?.reportRows || []).slice(0, 120).map((row, index) => {
                     if (isGroupedRow(row)) {
                       return (
-                        <tr key={`${row.label}-${index}`} className="hover:bg-slate-50">
+                        <tr key={`${row.label}-${index}`} onClick={() => setDrilldown({ groupBy: row.groupBy, key: row.drilldownKey })} className="cursor-pointer hover:bg-slate-50">
                           <td className="px-4 py-3">
                             <button type="button" onClick={() => setDrilldown({ groupBy: row.groupBy, key: row.drilldownKey })} className="text-left font-black text-blue-800 hover:underline">{formatStatus(row.label)}</button>
                             <div className="text-[11px] font-semibold text-slate-500">Drill down by {row.groupBy}</div>

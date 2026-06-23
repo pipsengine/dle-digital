@@ -385,6 +385,14 @@ export async function GET(request: Request) {
       return true;
     }).sort((a, b) => b.timesheetDate.localeCompare(a.timesheetDate) || a.employeeName.localeCompare(b.employeeName));
 
+    const masterEmployeeValues = (selector: (employee: any) => unknown) =>
+      Array.from(new Set(payrollEmployees.employees.map((employee) => clean(selector(employee))).filter(Boolean))).sort();
+    const masterCostCentres = Array.from(new Set([
+      ...masterEmployeeValues((employee) => employee.costCenter || employee.costCentre),
+      ...projects.map((project) => clean((project as any).costCenter || (project as any).costCentre || project.code)).filter(Boolean),
+      ...scopedRows.map((row) => row.costCentre).filter(Boolean),
+    ])).sort();
+
     const payload = {
       generatedAt: new Date().toISOString(),
       reportType,
@@ -449,11 +457,11 @@ export async function GET(request: Request) {
         workCenters: Array.from(new Set(scopedRows.map((row) => row.workCenterName))).sort(),
         projects: Array.from(new Set(scopedRows.map((row) => row.projectCode))).sort(),
         employees: Array.from(new Set(scopedRows.map((row) => row.employeeName))).sort(),
-        departments: Array.from(new Set(scopedRows.map((row) => row.department))).sort(),
-        sections: Array.from(new Set(scopedRows.map((row) => row.section))).sort(),
-        businessUnits: Array.from(new Set(scopedRows.map((row) => row.businessUnit))).sort(),
-        costCentres: Array.from(new Set(scopedRows.map((row) => row.costCentre))).sort(),
-        locations: Array.from(new Set(scopedRows.map((row) => row.location))).sort(),
+        departments: masterEmployeeValues((employee) => employee.department),
+        sections: masterEmployeeValues((employee) => employee.section || employee.unit),
+        businessUnits: masterEmployeeValues((employee) => employee.businessUnit),
+        costCentres: masterCostCentres,
+        locations: masterEmployeeValues((employee) => employee.location || employee.workLocation),
         jobCodes: Array.from(new Set(scopedRows.map((row) => row.jobCode))).sort(),
         activityCodes: Array.from(new Set(scopedRows.map((row) => row.activityCode))).sort(),
         projectManagers: Array.from(new Set(scopedRows.map((row) => row.projectManager))).sort(),
