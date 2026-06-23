@@ -928,7 +928,7 @@ export async function POST(request: Request) {
     if (!perms.canApprove) return jsonErr(403, 'Permission denied');
     if (existing.createdBy === role) return jsonErr(409, 'Self-approval is not allowed.');
     const payload = await buildPayload(request);
-    if (payload.summary.exceptionCount > 0) return jsonErr(409, 'Cannot approve payroll while validation exceptions are unresolved.');
+    if (payload.summary.blockedEmployees > 0) return jsonErr(409, 'Cannot approve payroll while blocked payroll setup issues are unresolved.');
     if (!['Ready for Approval', 'Submitted', 'Under Review', 'Validation'].includes(existing.status)) return jsonErr(409, `Cannot approve payroll from ${existing.status}.`);
     existing.status = 'Approved';
     existing.approvedAt = nowIso();
@@ -1002,7 +1002,7 @@ export async function POST(request: Request) {
   if (action === 'submit-run') {
     if (!perms.canManageRun) return jsonErr(403, 'Permission denied');
     const payload = await buildPayload(request);
-    if (payload.summary.exceptionCount > 0) return jsonErr(409, 'Resolve validation exceptions before submitting payroll for approval.');
+    if (payload.summary.blockedEmployees > 0) return jsonErr(409, 'Resolve blocked payroll setup issues before submitting payroll for approval.');
     if (!['Ready for Approval', 'Validated', 'Computed', 'Validation', 'Draft', 'Open'].includes(existing.status)) return jsonErr(409, `Cannot submit payroll from ${existing.status}.`);
     existing.status = 'Submitted';
     existing.submittedAt = nowIso();

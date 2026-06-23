@@ -647,9 +647,12 @@ const canRunAction = (actionItem: PayrollAction, role: Role, payload: PayrollPay
   if (actionItem.roles && !actionItem.roles.includes(role)) return { allowed: false, reason: `${role} is not authorized for this action.` };
   const run = payload?.runs[0];
   const status = run?.status || 'Draft';
-  const exceptions = payload?.summary.exceptionCount || 0;
-  if (actionItem.id === 'submit-run' && exceptions > 0) return { allowed: false, reason: 'Resolve validation exceptions before submitting payroll for approval.' };
-  if (['approve-run'].includes(actionItem.id) && exceptions > 0) return { allowed: false, reason: 'Resolve validation exceptions before approval.' };
+  const blockedEmployees = payload?.summary.blockedEmployees || 0;
+  if (actionItem.id === 'create-run' && blockedEmployees > 0) return { allowed: false, reason: 'Resolve blocked payroll setup before processing.' };
+  if (actionItem.id === 'submit-run' && blockedEmployees > 0) return { allowed: false, reason: 'Resolve blocked payroll setup before submitting payroll for approval.' };
+  if (['approve-run'].includes(actionItem.id) && blockedEmployees > 0) return { allowed: false, reason: 'Resolve blocked payroll setup before approval.' };
+  if (actionItem.id === 'submit-run' && !['Ready for Approval', 'Validated', 'Computed', 'Validation', 'Draft', 'Open'].includes(status)) return { allowed: false, reason: `Cannot submit payroll from ${status}.` };
+  if (actionItem.id === 'approve-run' && !['Ready for Approval', 'Submitted', 'Under Review', 'Validation'].includes(status)) return { allowed: false, reason: `Cannot approve payroll from ${status}.` };
   if (actionItem.id === 'release-run' && status !== 'Approved') return { allowed: false, reason: 'Payroll approval is required before release.' };
   if (['generate-payslips', 'generate-bank-schedule', 'generate-statutory-schedules', 'export-bank-file', 'post-run'].includes(actionItem.id) && !['Approved', 'Released', 'Locked', 'Posted', 'Published'].includes(status)) return { allowed: false, reason: 'Payroll approval is required first.' };
   if (actionItem.id === 'close-period' && status !== 'Posted') return { allowed: false, reason: 'Close is blocked until payslips, bank schedule, journal, and statutory schedules are complete.' };
