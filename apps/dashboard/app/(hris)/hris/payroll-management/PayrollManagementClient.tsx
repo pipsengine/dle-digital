@@ -176,6 +176,7 @@ type PayrollAuditEntry = {
 };
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
+type CurrentUser = { name: string; role: string; employeeCode: string; department: string; rbacRole?: string };
 type SectionId = 'dashboard' | 'payroll-computation-workflow' | 'salary-management' | 'earnings-management' | 'deductions-management' | 'payroll-processing' | 'compliance-statutory-management' | 'finance-integration' | 'reports-analytics';
 type DashboardPanelId = 'ready' | 'gross' | 'deductions' | 'issues' | 'status' | 'approvals';
 type WorkflowStageId = 'data' | 'validation' | 'computation' | 'approval' | 'release' | 'lock';
@@ -237,6 +238,7 @@ const money = (value: number | null | undefined, canView = true, currency = 'NGN
 };
 const recordCurrency = (record: Pick<PayrollRecord, 'payCurrency' | 'payrollGroup'>) => currencyCode(`${record.payCurrency} ${record.payrollGroup}`);
 const recordMoney = (record: Pick<PayrollRecord, 'payCurrency' | 'payrollGroup'>, value: number | null | undefined, canView = true) => money(value, canView, recordCurrency(record));
+const accessLabel = (role: Role | string) => role === 'Payroll Officer' ? 'Payroll Access' : String(role || 'Signed-in Access');
 const number = (value: number | null | undefined) => numberFmt.format(Number(value || 0));
 const payrollRate = (record: PayrollRecord, canView = true) => {
   if (!record.isDailyRate) return record.salaryStructure || record.salaryGrade || 'Unassigned';
@@ -3072,7 +3074,7 @@ function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_0.9fr]">
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-black uppercase text-slate-900">Stage Actions & Role Controls</h3>
-          <p className="mt-1 text-xs font-semibold text-slate-500">Role: {role}. Actions are RBAC checked by the payroll API and audit logged with user, role, action, timestamp, reason, and comments.</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">Access: {accessLabel(role)}. Actions are RBAC checked by the payroll API and audit logged with user, access, action, timestamp, reason, and comments.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {quickAction('validate-payroll', 'Validate Payroll', 'blue')}
             {quickAction('create-run', 'Run Payroll', 'green')}
@@ -3456,7 +3458,7 @@ function PayrollAdministrationControlCenter({
           </div>
           <div className="flex flex-wrap gap-2">
             {activeTab.legacyHref ? <Link href={activeTab.legacyHref} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">Open {activeTab.label} <ChevronRight className="h-4 w-4" /></Link> : null}
-            <span className="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-700">Role: {role}</span>
+            <span className="inline-flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-700">Access: {accessLabel(role)}</span>
           </div>
         </div>
       </section>
@@ -3668,6 +3670,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
   const [activeTabs, setActiveTabs] = useState<Record<string, string>>({});
   const [role, setRole] = useState<Role>('Payroll Officer');
   const [payload, setPayload] = useState<PayrollPayload | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -3707,10 +3710,11 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/hris/payroll-management', { headers: { 'x-hris-role': role }, cache: 'no-store' });
+      const res = await fetch('/api/hris/payroll-management', { cache: 'no-store' });
       const json = await readApiResponse<PayrollPayload>(res);
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Payroll request failed (${res.status})`);
       setPayload(json.data);
+      setRole(json.data.role);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to load payroll management');
     } finally {
@@ -3719,12 +3723,18 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
   };
 
   useEffect(() => {
+    void fetch('/api/current-user?context=hris', { cache: 'no-store' })
+      .then((res) => readApiResponse<CurrentUser>(res))
+      .then((json) => {
+        if (json.status === 'success' && json.data) setCurrentUser(json.data);
+      })
+      .catch(() => undefined);
     const timer = window.setTimeout(() => {
       void load();
     }, 0);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role]);
+  }, []);
 
   useEffect(() => {
     if (sectionId !== 'payroll-computation-workflow') return;
@@ -3733,7 +3743,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     }, 30000);
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sectionId, role]);
+  }, [sectionId]);
 
   const filteredRecords = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -3761,8 +3771,8 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     try {
       const res = await fetch('/api/hris/payroll-management', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hris-role': role },
-        body: JSON.stringify({ action, runId: currentRun?.id, reason, actor: role }),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, runId: currentRun?.id, reason }),
       });
       const json = await readApiResponse<{ run: PayrollRun }>(res);
       if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Payroll action failed');
@@ -3789,13 +3799,12 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     try {
       const res = await fetch('/api/hris/payroll-management', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hris-role': role },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           action: 'fix-payroll-setup',
           employeeId: issue.employeeId,
           ...values,
           reason: issue.issue,
-          actor: role,
         }),
       });
       const json = await readApiResponse<{ option: unknown }>(res);
@@ -3874,9 +3883,10 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none">
-            {roleOptions.map((item) => <option key={item}>{item}</option>)}
-          </select>
+          <div className="min-h-10 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-extrabold text-slate-800">
+            <span className="block leading-tight">{currentUser?.name || 'Signed-in user'}</span>
+            <span className="block text-[10px] font-bold text-slate-500">{currentUser?.employeeCode || 'Current login'} / {accessLabel(payload?.role || role)}</span>
+          </div>
           <ActionButton label={loading ? 'Refreshing' : 'Refresh'} icon={RefreshCcw} onClick={() => void load()} disabled={loading} tone="blue" />
           <ActionButton label="Export CSV" icon={Download} onClick={exportCsv} disabled={!payload?.permissions.canExport} tone="slate" />
           <ActionButton label="Export Excel" icon={FileSpreadsheet} onClick={exportExcel} disabled={!payload?.permissions.canExport} tone="green" />
@@ -4915,7 +4925,7 @@ function PayrollCommandBar({ section, activeTab, role, payload, busyAction, onAc
             Status: <span className="font-black text-slate-800">{currentStatus}</span> · Stage: <span className="font-black text-slate-800">{payload?.workflow?.approvalStage || 'Draft'}</span> · Next owner: <span className="font-black text-slate-800">{payload?.workflow?.nextOwner || 'Payroll Officer'}</span>
           </p>
         </div>
-        <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Role: {role}</span>
+        <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Access: {accessLabel(role)}</span>
       </div>
       {blocked.length ? (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -5153,7 +5163,7 @@ function PayrollNextStepPanel({
           <p className="text-xs font-black uppercase text-blue-800">Next step</p>
           <h2 className="mt-1 text-xl font-black text-slate-950">{exceptions > 0 ? 'Fix payroll issues before approval' : nextAction.label}</h2>
           <p className="mt-1 text-sm font-semibold text-slate-600">
-            Current status is <span className="font-black text-slate-900">{status}</span>. {payload?.workflow?.nextOwner ? `Next owner: ${payload.workflow.nextOwner}.` : `Active role: ${role}.`}
+            Current status is <span className="font-black text-slate-900">{status}</span>. {payload?.workflow?.nextOwner ? `Next owner: ${payload.workflow.nextOwner}.` : `Active access: ${accessLabel(role)}.`}
           </p>
         </div>
         <button

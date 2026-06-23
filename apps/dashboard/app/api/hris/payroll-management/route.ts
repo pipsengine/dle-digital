@@ -8,6 +8,7 @@ import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-stor
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { writePayrollEmployeeOption } from '@/lib/payroll-employee-options-store';
 import { buildExcelHtml, excelMimeType } from '@/lib/excel-export';
+import { AUTH_COOKIE, verifySessionToken, type SessionPayload } from '@/lib/auth/session';
 
 type Role =
   | 'Super Admin'
@@ -81,6 +82,43 @@ const nowIso = () => new Date().toISOString();
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const compact = (value: unknown) => String(value || '').trim();
 const PAYROLL_SETUP_PREVIEW_PERIOD = activePayrollPeriod();
+const cookieValue = (request: Request, name: string) => {
+  const raw = request.headers.get('cookie') || '';
+  for (const pair of raw.split(';')) {
+    const [key, ...rest] = pair.split('=');
+    if (compact(key) === name) return decodeURIComponent(rest.join('='));
+  }
+  return '';
+};
+
+const roleFromSession = (session: SessionPayload | null, fallback: unknown): Role => {
+  const text = `${session?.roles?.join(' ') || ''} ${session?.permissions?.join(' ') || ''} ${fallback || ''}`;
+  if (session?.isGlobalAdmin || /super administrator|global super|super admin|\*/i.test(text)) return 'Super Admin';
+  if (/system administrator/i.test(text)) return 'System Administrator';
+  if (/payroll administrator|payroll supervisor/i.test(text)) return 'Payroll Supervisor';
+  if (/payroll approver|payroll approval/i.test(text)) return 'Executive Management';
+  if (/payroll/i.test(text)) return 'Payroll Officer';
+  if (/finance payroll reviewer|finance manager/i.test(text)) return 'Finance Manager';
+  if (/\bcfo\b/i.test(text)) return 'CFO';
+  if (/executive director/i.test(text)) return 'Executive Director';
+  if (/executive/i.test(text)) return 'Executive Management';
+  if (/hr manager|human resources manager/i.test(text)) return 'HR Manager';
+  if (/hr officer|human resources officer/i.test(text)) return 'HR Officer';
+  if (/auditor|audit/i.test(text)) return 'Auditor';
+  const roles: Role[] = ['Super Admin', 'System Administrator', 'HR Director', 'HR Manager', 'HR Officer', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager', 'CFO', 'Executive Director', 'Executive Management', 'Auditor', 'Employee'];
+  const headerRole = compact(fallback);
+  return roles.includes(headerRole as Role) ? (headerRole as Role) : 'Employee';
+};
+
+const sessionContext = async (request: Request) => {
+  const session = await verifySessionToken(cookieValue(request, AUTH_COOKIE));
+  const role = roleFromSession(session, request.headers.get('x-hris-role'));
+  return {
+    session,
+    role,
+    actor: compact(session?.fullName || session?.username) || role,
+  };
+};
 const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirectoryRow => ({
   ...employee,
   sagePayrollEarnings: [],
@@ -88,12 +126,12 @@ const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirect
   sagePayrollContributions: undefined,
 });
 
-const getRole = (request: Request): Role => {
+const getHeaderRole = (request: Request): Role => {
   const headerValue = request.headers.get('x-hris-role');
   const authRoles = request.headers.get('x-auth-roles') || '';
   const value = /global super|super administrator|super admin/i.test(`${headerValue || ''} ${authRoles}`) ? 'Super Admin' : headerValue;
   const roles: Role[] = ['Super Admin', 'System Administrator', 'HR Director', 'HR Manager', 'HR Officer', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager', 'CFO', 'Executive Director', 'Executive Management', 'Auditor', 'Employee'];
-  return roles.includes(value as Role) ? (value as Role) : 'Payroll Officer';
+  return roles.includes(value as Role) ? (value as Role) : 'Employee';
 };
 
 const permissions = (role: Role) => {
@@ -286,7 +324,7 @@ const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollT
   });
 
 const emptyPayload = (request: Request, error: unknown) => {
-  const role = getRole(request);
+  const role = getHeaderRole(request);
   const message = error instanceof Error ? error.message : 'Payroll data is temporarily unavailable.';
   const period = PAYROLL_SETUP_PREVIEW_PERIOD;
   return {
@@ -389,7 +427,7 @@ const grouped = (records: any[], key: string) =>
     .sort((a, b) => b.netPay - a.netPay);
 
 const buildPayload = async (request: Request) => {
-  const role = getRole(request);
+  const { role } = await sessionContext(request);
   const perms = permissions(role);
   const [employeeSource, taxConfig, pensionConfig] = await Promise.all([readPayrollEmployees(), readPayrollTaxConfig(), readPayrollPensionConfig()]);
   const employeeRows = employeeSource.employees;
@@ -754,13 +792,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const role = getRole(request);
+  const { role, actor: sessionActor } = await sessionContext(request);
   const perms = permissions(role);
   const body = await request.json().catch(() => ({}));
   const action = compact(body.action);
   const runId = compact(body.runId) || `payroll-${monthPeriod()}`;
   const existing = runStore.get(runId);
-  const actor = compact(body.actor) || role;
+  const actor = sessionActor;
   const reason = compact(body.reason);
   const comment = compact(body.comment);
 
