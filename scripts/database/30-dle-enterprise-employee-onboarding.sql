@@ -287,6 +287,9 @@ BEGIN
     basic_salary decimal(19,4) NULL,
     pay_frequency nvarchar(50) NULL,
     bank_name nvarchar(150) NULL,
+    bank_code nvarchar(50) NULL,
+    branch_name nvarchar(150) NULL,
+    branch_code nvarchar(50) NULL,
     account_number nvarchar(50) NULL,
     account_name nvarchar(250) NULL,
     pension_provider nvarchar(150) NULL,
@@ -324,6 +327,9 @@ IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'rate_per_hour') IS NULL ALTER TABL
 IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'rate_per_day') IS NULL ALTER TABLE [hris].[EmployeePayrollSetup] ADD rate_per_day decimal(19,4) NULL;
 IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'hours_per_day') IS NULL ALTER TABLE [hris].[EmployeePayrollSetup] ADD hours_per_day decimal(9,4) NULL;
 IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'hours_per_period') IS NULL ALTER TABLE [hris].[EmployeePayrollSetup] ADD hours_per_period decimal(9,4) NULL;
+IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'bank_code') IS NULL ALTER TABLE [hris].[EmployeePayrollSetup] ADD bank_code nvarchar(50) NULL;
+IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'branch_name') IS NULL ALTER TABLE [hris].[EmployeePayrollSetup] ADD branch_name nvarchar(150) NULL;
+IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'branch_code') IS NULL ALTER TABLE [hris].[EmployeePayrollSetup] ADD branch_code nvarchar(50) NULL;
 GO
 
 IF OBJECT_ID(N'[hris].[EmployeeOnboardingChecklist]', N'U') IS NULL

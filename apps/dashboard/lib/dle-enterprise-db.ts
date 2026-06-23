@@ -83,6 +83,9 @@ export type DleEmployeeDirectoryRow = {
   paymentRun: string;
   paymentType: string;
   bankName?: string;
+  bankCode?: string;
+  branchName?: string;
+  branchCode?: string;
   accountNo?: string;
   accountName?: string;
   pensionProvider?: string;
@@ -854,6 +857,9 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       payroll.payment_run,
       payroll.payment_type,
       payroll.bank_name,
+      payroll.bank_code,
+      payroll.branch_name,
+      payroll.branch_code,
       payroll.account_number,
       payroll.account_name,
       payroll.pension_provider,
@@ -975,6 +981,9 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       paymentRun: str(row.payment_run),
       paymentType: str(row.payment_type),
       bankName: str(row.bank_name),
+      bankCode: str(row.bank_code),
+      branchName: str(row.branch_name),
+      branchCode: str(row.branch_code),
       accountNo: str(row.account_number),
       accountName: str(row.account_name),
       pensionProvider: str(row.pension_provider),

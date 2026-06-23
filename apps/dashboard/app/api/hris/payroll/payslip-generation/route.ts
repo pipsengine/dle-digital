@@ -58,14 +58,14 @@ const isPermanentEmployee = (employee: DleEmployeeDirectoryRow) => {
     .toLowerCase();
   return text.includes('permanent') && !/contract|lumpsum|lump sum|daily|day rate|temporary|nysc|intern|industrial training/.test(text);
 };
-const requiredPermanentIdentityIssues = (employee: DleEmployeeDirectoryRow, identity?: PayslipEmployeeIdentity) => {
+const requiredPermanentIdentityIssues = (employee: DleEmployeeDirectoryRow, identity?: PayslipEmployeeIdentity, options?: { pensionEmployee?: number }) => {
   if (!isPermanentEmployee(employee)) return [];
   const employeeAny = employee as Record<string, unknown>;
+  const hasPensionSetup = compact(identity?.pensionProvider || employee.pensionProvider) || Number(options?.pensionEmployee || 0) > 0;
   return [
     ...!compact(identity?.bankName || employee.bankName) ? ['Permanent employee bank name is missing'] : [],
     ...!compact(identity?.accountNo || employee.accountNo || employeeAny.accountNumber) ? ['Permanent employee account number is missing'] : [],
-    ...!compact(identity?.pensionProvider || employee.pensionProvider) ? ['Permanent employee pension fund administrator is missing'] : [],
-    ...!compact(identity?.pensionPin || employee.pensionPin) ? ['Permanent employee pension number is missing'] : [],
+    ...!hasPensionSetup ? ['Permanent employee pension fund administrator is missing'] : [],
     ...!compact(identity?.taxIdentificationNumber || employee.taxIdentificationNumber || employeeAny.taxNo) ? ['Permanent employee tax number is missing'] : [],
   ];
 };
@@ -350,7 +350,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       ...amounts.grossPay <= 0 ? ['Gross pay is missing'] : [],
       ...netPay <= 0 && amounts.grossPay > 0 ? ['Net pay is zero after deductions'] : [],
       ...!employee.setupAssignedToPayroll ? ['Payroll setup is not assigned'] : [],
-      ...requiredPermanentIdentityIssues(employee, identity),
+      ...requiredPermanentIdentityIssues(employee, identity, { pensionEmployee }),
       ...dailyRateEmployee && ratePerDay <= 0 ? ['Daily rate is missing'] : [],
       ...dailyRateEmployee && dailyAttendance.daysWorked <= 0 ? ['No payroll-ready daily timesheet found'] : [],
       ...!compact(employee.payrollGroup) ? ['Payroll group is missing'] : [],
@@ -388,8 +388,8 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       accountName: identity?.accountName || employee.accountName || '',
       maskedAccount: maskAccount(identity?.accountNo || employee.accountNo),
       taxIdentificationNumber: identity?.taxIdentificationNumber || employee.taxIdentificationNumber || '',
-      pensionProvider: identity?.pensionProvider || employee.pensionProvider || '',
-      pensionPinMasked: maskAccount(identity?.pensionPin || employee.pensionPin),
+      pensionProvider: identity?.pensionProvider || employee.pensionProvider || (pensionEmployee > 0 ? 'Pension Fund' : ''),
+      pensionPinMasked: compact(identity?.pensionPin || employee.pensionPin) ? maskAccount(identity?.pensionPin || employee.pensionPin) : '',
       period: requestedPeriod,
       periodLabel: periodLabel(requestedPeriod),
       payPeriodStart: periodStartDate(requestedPeriod),

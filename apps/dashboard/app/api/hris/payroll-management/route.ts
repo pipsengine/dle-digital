@@ -7,6 +7,8 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { writePayrollEmployeeOption } from '@/lib/payroll-employee-options-store';
+import { payslipIdentityMap, type PayslipEmployeeIdentity } from '@/lib/payroll-payslip-identity-store';
+import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { buildExcelHtml, excelMimeType } from '@/lib/excel-export';
 import { AUTH_COOKIE, verifySessionToken, type SessionPayload } from '@/lib/auth/session';
 
@@ -285,8 +287,15 @@ const riskFor = (employee: DleEmployeeDirectoryRow, cost: ReturnType<typeof empl
   return { issues, severity };
 };
 
-const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollTaxVersion, pensionVersion: PensionVersion) =>
+const identityFor = (employee: DleEmployeeDirectoryRow, identities?: Map<string, PayslipEmployeeIdentity>) =>
+  identities?.get(normalizePayrollMatchKey(employee.employeeCode))
+  || identities?.get(normalizePayrollMatchKey(employee.employeeId))
+  || identities?.get(normalizePayrollMatchKey(employee.sourceEmployeeId))
+  || null;
+
+const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollTaxVersion, pensionVersion: PensionVersion, identities?: Map<string, PayslipEmployeeIdentity>) =>
   employees.map((employee) => {
+    const identity = identityFor(employee, identities);
     const cost = employeeCost(employee, taxVersion, pensionVersion);
     const risk = riskFor(employee, cost);
     const dailyRateEmployee = isDailyRateEmployee(employee, cost.earningProfileId);
@@ -313,6 +322,13 @@ const buildRecords = (employees: DleEmployeeDirectoryRow[], taxVersion: PayrollT
       payCurrency,
       paymentRun: employee.paymentRun || 'Monthly',
       paymentType: employee.paymentType || 'Bank Transfer',
+      bankName: employee.bankName || identity?.bankName || '',
+      accountNo: employee.accountNo || identity?.accountNo || '',
+      accountName: employee.accountName || identity?.accountName || employee.fullName,
+      bankCode: employee.bankCode || identity?.bankCode || '',
+      branchName: employee.branchName || identity?.branchName || '',
+      branchCode: employee.branchCode || identity?.branchCode || '',
+      sortCode: employee.branchCode || identity?.branchCode || employee.bankCode || identity?.bankCode || '',
       nhfApplicable: (cost.deductionLines || []).some((line) => line.code === 'NHF' && line.amount > 0),
       setupAssignedToPayroll: employee.setupAssignedToPayroll,
       payrollStatus,
@@ -429,7 +445,7 @@ const grouped = (records: any[], key: string) =>
 const buildPayload = async (request: Request) => {
   const { role } = await sessionContext(request);
   const perms = permissions(role);
-  const [employeeSource, taxConfig, pensionConfig] = await Promise.all([readPayrollEmployees(), readPayrollTaxConfig(), readPayrollPensionConfig()]);
+  const [employeeSource, taxConfig, pensionConfig, identities] = await Promise.all([readPayrollEmployees(), readPayrollTaxConfig(), readPayrollPensionConfig(), payslipIdentityMap()]);
   const employeeRows = employeeSource.employees;
   const taxVersion = activeTaxVersion(taxConfig);
   const pensionVersion = activePensionVersion(pensionConfig);
@@ -439,7 +455,7 @@ const buildPayload = async (request: Request) => {
   } catch (error) {
     console.warn('Payroll leave allowance sync skipped:', error);
   }
-  const records = buildRecords(employeeRows, taxVersion, pensionVersion);
+  const records = buildRecords(employeeRows, taxVersion, pensionVersion, identities);
   const eligible = records.filter((record) => !['Terminated', 'Resigned', 'Retired', 'Inactive'].includes(record.employmentStatus));
   const ready = records.filter((record) => record.payrollStatus === 'Ready');
   const blocked = records.filter((record) => record.payrollStatus === 'Blocked');
@@ -737,20 +753,15 @@ const reportExport = (records: any[], report: string) => {
   }
   if (report === 'bank-payment-report' || report === 'bank-schedule') {
     return {
-      columns: ['S/N', 'Employee ID', 'Employee Name', 'Department', 'Location', 'Payment Type', 'Currency', 'Gross Salary', 'Deductions', 'Net Salary / Bank Amount', 'Payroll Status', 'Finance Note'],
-      rows: records.map((r, index) => [
-        index + 1,
+      columns: ['Employee Code', 'Employee Name', 'Bank', 'Account No', 'Sort Code', 'NET Salary', 'Location'],
+      rows: records.map((r) => [
         r.employeeId,
         r.fullName,
-        r.department,
-        r.location,
-        r.paymentType,
-        r.payCurrency,
-        r.grossPay ?? 0,
-        r.deductions ?? 0,
+        r.bankName || '',
+        r.accountNo || '',
+        r.sortCode || r.branchCode || r.bankCode || '',
         r.netPay ?? 0,
-        r.payrollStatus,
-        (r.exceptions || []).join('; ') || 'Ready for bank schedule',
+        r.location || '',
       ]),
     };
   }

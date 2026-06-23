@@ -65,6 +65,8 @@ export type SagePayrollEmployee = {
   paymentType: string | null;
   remunerationDefinition: string | null;
   taxNo: string | null;
+  pensionProvider: string | null;
+  pensionPin: string | null;
   bankName: string | null;
   bankCode: string | null;
   branchName: string | null;
@@ -139,7 +141,7 @@ const config = () => {
     options: {
       encrypt: false,
       trustServerCertificate: true,
-      instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE || 'MSSQLSERVERPEOPL',
+      ...(process.env.SAGE_PAYROLL_DB_INSTANCE ? { instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE } : {}),
     },
     connectionTimeout: Number(process.env.SAGE_PAYROLL_DB_CONNECT_TIMEOUT || 15000),
     requestTimeout: Number(process.env.SAGE_PAYROLL_DB_REQUEST_TIMEOUT || 30000),
@@ -319,9 +321,9 @@ latestPayslipDeductions AS (
   SELECT
     lp.EmployeeID,
     SUM(CASE WHEN dd.DefCode = 'PAYE' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS paye,
-    SUM(CASE WHEN dd.DefCode = 'PENSION_EE' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS pensionEmployee,
+    SUM(CASE WHEN (UPPER(dd.DefCode) IN ('PENSION', 'PENSION_EE', 'PENSION_EE2', 'PENSION_BONGA', 'PENARR', 'VOLPENS') OR UPPER(dd.ShortDescription) LIKE '%PENSION%') AND UPPER(dd.DefCode) <> 'SUSPENSION' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS pensionEmployee,
     SUM(CASE WHEN dd.DefCode = 'NHF' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS nhf,
-    SUM(CASE WHEN dd.DefCode NOT IN ('PAYE', 'PENSION_EE', 'NHF') THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS otherDeductions,
+    SUM(CASE WHEN dd.DefCode NOT IN ('PAYE', 'PENSION_EE', 'NHF') AND NOT ((UPPER(dd.DefCode) IN ('PENSION', 'PENSION_EE2', 'PENSION_BONGA', 'PENARR', 'VOLPENS') OR UPPER(dd.ShortDescription) LIKE '%PENSION%') AND UPPER(dd.DefCode) <> 'SUSPENSION') THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS otherDeductions,
     SUM(ISNULL(pdl.Total, 0)) AS totalDeductions
   FROM latestPayslipPeriods lp
   JOIN Payroll.PayslipDeductionLine pdl
@@ -488,7 +490,12 @@ SELECT
   ed.PaymentTypeCode AS paymentTypeCode,
   ed.PaymentType AS paymentType,
   ed.RemunerationDefinitionHeaderDisplay AS remunerationDefinition,
-  ed.TaxNo AS taxNo,
+  COALESCE(NULLIF(LTRIM(RTRIM(ed.TaxNo)), ''), NULLIF(LTRIM(RTRIM(ge.TaxNo)), '')) AS taxNo,
+  CASE
+    WHEN ISNULL(lpd.pensionEmployee, 0) <> 0 OR ISNULL(lpc.pensionEmployer, 0) <> 0 THEN 'Pension Fund'
+    ELSE NULL
+  END AS pensionProvider,
+  NULL AS pensionPin,
   ed.BankName AS bankName,
   ed.BankCode AS bankCode,
   ed.BranchName AS branchName,
@@ -780,9 +787,9 @@ deductions AS (
   SELECT
     lp.EmployeeID,
     SUM(CASE WHEN dd.DefCode = 'PAYE' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS paye,
-    SUM(CASE WHEN dd.DefCode = 'PENSION_EE' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS pensionEmployee,
+    SUM(CASE WHEN (UPPER(dd.DefCode) IN ('PENSION', 'PENSION_EE', 'PENSION_EE2', 'PENSION_BONGA', 'PENARR', 'VOLPENS') OR UPPER(dd.ShortDescription) LIKE '%PENSION%') AND UPPER(dd.DefCode) <> 'SUSPENSION' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS pensionEmployee,
     SUM(CASE WHEN dd.DefCode = 'NHF' THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS nhf,
-    SUM(CASE WHEN dd.DefCode NOT IN ('PAYE', 'PENSION_EE', 'NHF') THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS otherDeductions,
+    SUM(CASE WHEN dd.DefCode NOT IN ('PAYE', 'PENSION_EE', 'NHF') AND NOT ((UPPER(dd.DefCode) IN ('PENSION', 'PENSION_EE2', 'PENSION_BONGA', 'PENARR', 'VOLPENS') OR UPPER(dd.ShortDescription) LIKE '%PENSION%') AND UPPER(dd.DefCode) <> 'SUSPENSION') THEN ISNULL(pdl.Total, 0) ELSE 0 END) AS otherDeductions,
     SUM(ISNULL(pdl.Total, 0)) AS totalDeductions
   FROM latest lp
   JOIN Payroll.PayslipDeductionLine pdl

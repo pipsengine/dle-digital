@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { importSagePayrollEmployeesToDb, loadWorkspaceEnv, readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
-import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines } from '@/lib/sage-people-payroll-store';
+import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines, readSagePayrollEmployeeBankDetails } from '@/lib/sage-people-payroll-store';
 
 export type PayrollEmployeeSource = {
   employees: DleEmployeeDirectoryRow[];
@@ -122,8 +122,16 @@ const sageLineItems = (raw: string | null | undefined) => {
 
 const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
   try {
-    const sageEmployees = await withTimeout(readActiveSagePayrollEmployeesWithLatestPayslipLines(), Number(process.env.SAGE_PAYROLL_ENRICH_TIMEOUT_MS || 20000), 'Sage payroll enrichment timed out.');
+    const [sageEmployees, sageBankDetails] = await withTimeout(
+      Promise.all([
+        readActiveSagePayrollEmployeesWithLatestPayslipLines(),
+        readSagePayrollEmployeeBankDetails().catch(() => []),
+      ]),
+      Number(process.env.SAGE_PAYROLL_ENRICH_TIMEOUT_MS || 20000),
+      'Sage payroll enrichment timed out.'
+    );
     void importSagePayrollEmployeesToDb(sageEmployees).catch(() => undefined);
+    const bankByEmployeeId = new Map(sageBankDetails.map((detail) => [Number(detail.employeeId), detail]));
     const sageByKey = new Map(sageEmployees.flatMap((employee) => {
       const keys = [employee.directoryEmployeeCode, employee.employeeCode, employee.employeeCodeDisplay].map(normalizePayrollMatchKey).filter(Boolean);
       return keys.map((key) => [key, employee] as const);
@@ -131,8 +139,9 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
     return employees.map((employee) => {
       const sage = sageByKey.get(normalizePayrollMatchKey(employee.employeeCode)) || sageByKey.get(normalizePayrollMatchKey(employee.employeeId));
       if (!sage) return employee;
-      const pensionProvider = jsonValue(sage.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName']);
-      const pensionPin = jsonValue(sage.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'RSAPIN', 'RsaPin']);
+      const bankDetail = bankByEmployeeId.get(Number(sage.employeeId));
+      const pensionProvider = str(sage.pensionProvider) || jsonValue(sage.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName']);
+      const pensionPin = str(sage.pensionPin) || jsonValue(sage.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'RSAPIN', 'RsaPin']);
       const earningLines = sageLineItems(sage.latestEarningLinesJson);
       const deductionLines = sageLineItems(sage.latestDeductionLinesJson);
       const contributionLines = sageLineItems(sage.latestContributionLinesJson);
@@ -149,9 +158,12 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
         : moneyFrom(employee.periodSalary, sage.periodSalary, ratePerDay ? ratePerDay * workingDays : null);
       return {
         ...employee,
-        bankName: employee.bankName || sage.bankName || '',
-        accountNo: employee.accountNo || sage.accountNo || '',
-        accountName: employee.accountName || sage.accountName || '',
+        bankName: employee.bankName || bankDetail?.bankName || sage.bankName || '',
+        bankCode: employee.bankCode || bankDetail?.bankCode || sage.bankCode || '',
+        branchName: employee.branchName || bankDetail?.branchName || sage.branchName || '',
+        branchCode: employee.branchCode || bankDetail?.branchCode || sage.branchCode || '',
+        accountNo: employee.accountNo || bankDetail?.accountNo || sage.accountNo || '',
+        accountName: employee.accountName || bankDetail?.accountName || sage.accountName || '',
         pensionProvider: employee.pensionProvider || pensionProvider,
         pensionPin: employee.pensionPin || pensionPin,
         taxIdentificationNumber: employee.taxIdentificationNumber || sage.taxNo || '',
@@ -250,6 +262,9 @@ const emptyEmployee = (employeeId: string, fullName: string): DleEmployeeDirecto
   paymentRun: 'Monthly',
   paymentType: 'Bank Transfer',
   bankName: '',
+  bankCode: '',
+  branchName: '',
+  branchCode: '',
   accountNo: '',
   accountName: '',
   pensionProvider: '',

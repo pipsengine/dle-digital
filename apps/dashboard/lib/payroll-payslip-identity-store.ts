@@ -74,11 +74,11 @@ const IDENTITY_PATHS = [
 ].filter(Boolean);
 
 const pensionProviderFromSage = (employee: SagePayrollEmployee) => {
-  return jsonValue(employee.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName', 'PensionAdministrator']);
+  return firstValue(employee.pensionProvider, jsonValue(employee.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName', 'PensionAdministrator']));
 };
 
 const pensionPinFromSage = (employee: SagePayrollEmployee) => {
-  return jsonValue(employee.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'PfaNumber', 'RSAPIN', 'RsaPin', 'RetirementSavingsAccountNo']);
+  return firstValue(employee.pensionPin, jsonValue(employee.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'PfaNumber', 'RSAPIN', 'RsaPin', 'RetirementSavingsAccountNo']));
 };
 
 export const payslipIdentityFromSage = (employee: SagePayrollEmployee, options?: { employeeId?: string; migratedBy?: string; bankDetail?: SagePayrollBankDetail }): PayslipEmployeeIdentity => ({
@@ -111,6 +111,42 @@ export const payslipIdentityFromSage = (employee: SagePayrollEmployee, options?:
 });
 
 export const hasPayslipBankIdentity = (identity: PayslipEmployeeIdentity) => Boolean(compact(identity.accountNo));
+export const hasPayslipStatutoryIdentity = (identity: PayslipEmployeeIdentity) =>
+  Boolean(compact(identity.taxIdentificationNumber) || compact(identity.pensionProvider) || compact(identity.pensionPin));
+
+const mergeIdentity = (current: PayslipEmployeeIdentity | undefined, incoming: PayslipEmployeeIdentity): PayslipEmployeeIdentity => {
+  const pick = (next: unknown, previous: unknown) => compact(next) || compact(previous) || undefined;
+  return {
+    ...current,
+    ...incoming,
+    employeeId: pick(incoming.employeeId, current?.employeeId) || '',
+    employeeCode: pick(incoming.employeeCode, current?.employeeCode),
+    sourceEmployeeCode: pick(incoming.sourceEmployeeCode, current?.sourceEmployeeCode),
+    fullName: pick(incoming.fullName, current?.fullName),
+    jobTitle: pick(incoming.jobTitle, current?.jobTitle),
+    department: pick(incoming.department, current?.department),
+    businessUnit: pick(incoming.businessUnit, current?.businessUnit),
+    location: pick(incoming.location, current?.location),
+    payrollGroup: pick(incoming.payrollGroup, current?.payrollGroup),
+    salaryGrade: pick(incoming.salaryGrade, current?.salaryGrade),
+    payCurrency: pick(incoming.payCurrency, current?.payCurrency),
+    paymentRun: pick(incoming.paymentRun, current?.paymentRun),
+    paymentType: pick(incoming.paymentType, current?.paymentType),
+    bankName: pick(incoming.bankName, current?.bankName),
+    bankCode: pick(incoming.bankCode, current?.bankCode),
+    branchName: pick(incoming.branchName, current?.branchName),
+    branchCode: pick(incoming.branchCode, current?.branchCode),
+    accountNo: pick(incoming.accountNo, current?.accountNo),
+    accountName: pick(incoming.accountName, current?.accountName),
+    accountTypeId: incoming.accountTypeId ?? current?.accountTypeId ?? null,
+    pensionProvider: pick(incoming.pensionProvider, current?.pensionProvider),
+    pensionPin: pick(incoming.pensionPin, current?.pensionPin),
+    taxIdentificationNumber: pick(incoming.taxIdentificationNumber, current?.taxIdentificationNumber),
+    migratedAt: incoming.migratedAt || current?.migratedAt || new Date().toISOString(),
+    migratedBy: pick(incoming.migratedBy, current?.migratedBy),
+    sourceSystem: incoming.sourceSystem || current?.sourceSystem || 'DLE HRIS',
+  };
+};
 
 export const readPayslipEmployeeIdentities = async (): Promise<PayslipEmployeeIdentity[]> => {
   for (const identityPath of IDENTITY_PATHS) {
@@ -127,18 +163,26 @@ export const readPayslipEmployeeIdentities = async (): Promise<PayslipEmployeeId
 export const payslipIdentityMap = async () => {
   const identities = await readPayslipEmployeeIdentities();
   const map = new Map<string, PayslipEmployeeIdentity>();
+  const setAlias = (raw: string | undefined, identity: PayslipEmployeeIdentity) => {
+    const key = normalizePayrollMatchKey(raw);
+    if (!key) return;
+    map.set(key, identity);
+    if (/^\d+$/.test(key)) map.set(`P${key.padStart(4, '0')}`, identity);
+    if (/^P\d+$/i.test(key)) {
+      const numeric = key.replace(/^P/i, '').replace(/^0+/, '') || '0';
+      map.set(numeric, identity);
+      map.set(numeric.padStart(4, '0'), identity);
+    }
+  };
   identities.forEach((identity) => {
-    [identity.employeeId, identity.employeeCode, identity.sourceEmployeeCode]
-      .map(normalizePayrollMatchKey)
-      .filter(Boolean)
-      .forEach((key) => map.set(key, identity));
+    [identity.employeeId, identity.employeeCode, identity.sourceEmployeeCode].forEach((key) => setAlias(key, identity));
   });
   return map;
 };
 
 export const syncPayslipIdentitiesFromSage = async (options?: { force?: boolean; migratedBy?: string }) => {
   const current = await readPayslipEmployeeIdentities();
-  if (!options?.force && current.some(hasPayslipBankIdentity)) return { synced: 0, skipped: true };
+  if (!options?.force && current.some(hasPayslipBankIdentity) && current.some(hasPayslipStatutoryIdentity)) return { synced: 0, skipped: true };
   const [sageEmployees, sageBankDetails] = await Promise.all([
     readActiveSagePayrollEmployees(),
     readSagePayrollEmployeeBankDetails().catch(() => [] as SagePayrollBankDetail[]),
@@ -159,7 +203,7 @@ export const writePayslipEmployeeIdentities = async (records: PayslipEmployeeIde
   });
   records.forEach((record) => {
     const key = normalizePayrollMatchKey(record.employeeId || record.employeeCode || record.sourceEmployeeCode);
-    if (key) next.set(key, record);
+    if (key) next.set(key, mergeIdentity(next.get(key), record));
   });
   const payload = JSON.stringify(Array.from(next.values()).sort((a, b) => compact(a.employeeId).localeCompare(compact(b.employeeId))), null, 2);
   const writePaths = [

@@ -82,6 +82,13 @@ type PayrollRecord = {
   payCurrency: string;
   paymentRun: string;
   paymentType: string;
+  bankName?: string;
+  accountNo?: string;
+  accountName?: string;
+  bankCode?: string;
+  branchName?: string;
+  branchCode?: string;
+  sortCode?: string;
   setupAssignedToPayroll: boolean;
   payrollStatus: 'Ready' | 'Review' | 'Blocked';
   riskSeverity: 'Low' | 'Medium' | 'High';
@@ -2116,7 +2123,7 @@ function BankFinanceWorkspace({
   );
   const canGenerateBankSchedule = ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(currentRun?.status || '');
   const canPostJournal = ['Released', 'Locked', 'Published'].includes(currentRun?.status || '') || Boolean(currentRun?.bankScheduleGeneratedAt);
-  const bankScheduleExportUrl = `/api/hris/payroll-management?format=xls&report=bank-schedule&status=Ready`;
+  const bankScheduleExportUrl = `/api/hris/payroll-management?format=xls&report=bank-schedule`;
   const financeCards = [
     { id: 'payments' as const, title: 'Payment Value', value: money(netPay, canViewMoney), detail: `${number(readyRows.length)} payroll-ready employees`, icon: Banknote, tone: 'green' as Tone },
     { id: 'bank-file' as const, title: 'Bank Schedule', value: currentRun?.bankScheduleGeneratedAt ? 'Generated' : 'Pending', detail: currentRun?.bankScheduleGeneratedAt ? new Date(currentRun.bankScheduleGeneratedAt).toLocaleString('en-GB') : 'Requires released payroll', icon: CreditCard, tone: currentRun?.bankScheduleGeneratedAt ? 'green' as Tone : 'amber' as Tone },
@@ -2272,30 +2279,26 @@ function BankFinanceWorkspace({
         <div className="overflow-x-auto">
           <table className="min-w-[1080px] w-full text-left">
             <thead className="bg-slate-900 text-xs font-black uppercase text-white">
-              <tr>{['#', 'Employee', 'Department / Location', 'Payment Type', 'Currency', 'Gross Salary', 'Deductions', 'Net Salary', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              <tr>{['Employee Code', 'Employee Name', 'Bank', 'Account No', 'Sort Code', 'NET Salary', 'Location'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {bankSchedulePreviewRows.map((record, index) => (
+              {bankSchedulePreviewRows.map((record) => (
                 <tr key={record.employeeId} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-xs font-black text-slate-500">{index + 1}</td>
-                  <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId}</p></td>
-                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.department || 'Unassigned'}<br /><span className="text-slate-400">{record.location || 'No location'}</span></td>
-                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.paymentType || 'Cash'}</td>
-                  <td className="px-4 py-3 text-xs font-black text-slate-700">{record.payCurrency || 'NGN'}</td>
-                  <td className="px-4 py-3 text-sm font-black text-slate-950">{money(record.grossPay, canViewMoney)}</td>
-                  <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.deductions, canViewMoney)}</td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-950">{record.employeeId}</td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-950">{record.fullName}</td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.bankName || 'Not configured'}</td>
+                  <td className="px-4 py-3 text-xs font-black text-slate-700">{record.accountNo || 'Not configured'}</td>
+                  <td className="px-4 py-3 text-xs font-black text-slate-700">{record.sortCode || record.branchCode || record.bankCode || 'Not configured'}</td>
                   <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
-                  <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
+                  <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.location || 'No location'}</td>
                 </tr>
               ))}
-              {!bankSchedulePreviewRows.length ? <tr><td colSpan={9} className="px-4 py-6 text-sm font-black text-slate-700">No bank schedule salary lines are ready for preview.</td></tr> : null}
+              {!bankSchedulePreviewRows.length ? <tr><td colSpan={7} className="px-4 py-6 text-sm font-black text-slate-700">No bank schedule salary lines are ready for preview.</td></tr> : null}
             </tbody>
             {bankSchedulePreviewRows.length ? (
               <tfoot className="bg-slate-50">
                 <tr>
                   <td colSpan={5} className="px-4 py-3 text-right text-xs font-black uppercase text-slate-600">Visible schedule total</td>
-                  <td className="px-4 py-3 text-sm font-black text-slate-950">{money(bankSchedulePreviewRows.reduce((sum, record) => sum + Number(record.grossPay || 0), 0), canViewMoney)}</td>
-                  <td className="px-4 py-3 text-sm font-black text-violet-700">{money(bankSchedulePreviewRows.reduce((sum, record) => sum + Number(record.deductions || 0), 0), canViewMoney)}</td>
                   <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(bankSchedulePreviewRows.reduce((sum, record) => sum + Number(record.netPay || 0), 0), canViewMoney)}</td>
                   <td className="px-4 py-3"></td>
                 </tr>

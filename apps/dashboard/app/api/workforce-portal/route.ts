@@ -59,6 +59,28 @@ const maskAccount = (value: string) => {
   return `${'*'.repeat(Math.max(0, text.length - 4))}${text.slice(-4)}`;
 };
 const configured = (value: unknown) => compact(value) || 'Not configured';
+const employeeCodeText = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) =>
+  compact(employee.employeeCode || employee.employeeId || employee.sourceEmployeeId).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const employeeGroupText = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) =>
+  [employee.payrollGroup, employee.staffCategory, employee.employeeCategory, employee.employmentType, employee.jobTitle, employee.designation]
+    .map(compact)
+    .join(' ')
+    .toUpperCase();
+const essNonPermanentPayrollEmployee = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) => {
+  const code = employeeCodeText(employee);
+  const text = employeeGroupText(employee);
+  return /^(C|L|NYSC|IT)\d+/.test(code)
+    || /\b(DAILY RATE|DAY RATE|LUMPSUM|LUMP SUM|NYSC|NATIONAL YOUTH SERVICE|INDUSTRIAL TRAINING|INDUSTRIAL TRAINEE|INTERN)\b/.test(text);
+};
+const essEmployeeCategory = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) => {
+  const code = employeeCodeText(employee);
+  const text = employeeGroupText(employee);
+  if (/^C\d+/.test(code) || /\b(DAILY RATE|DAY RATE)\b/.test(text)) return 'Contract - Daily Rate';
+  if (/^L\d+/.test(code) || /\b(LUMPSUM|LUMP SUM)\b/.test(text)) return 'Contract - Lump Sum';
+  if (/^NYSC\d+/.test(code) || /\b(NYSC|NATIONAL YOUTH SERVICE)\b/.test(text)) return 'NYSC';
+  if (/^IT\d+/.test(code) || /\b(INDUSTRIAL TRAINING|INDUSTRIAL TRAINEE|INTERN)\b/.test(text)) return 'Industrial Training';
+  return compact(employee.employeeCategory || employee.staffCategory || employee.employmentType || employee.payrollGroup) || 'Permanent';
+};
 const employeeAddress = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) => {
   const street = compact(employee.residentialAddress) || compact(employee.permanentAddress);
   const parts = [street, employee.city, employee.state, employee.country].map(compact).filter(Boolean);
@@ -256,6 +278,7 @@ export async function GET(request: Request) {
     const employeeAny = employee as any;
     let leaveContext = { annualEntitlement: 0, leaveUsed: 0, leaveBalance: 0, carryForward: 0 };
     const payrollForPeriod = (period: string, includeAdjustments = false) => {
+      const nonPermanentPayroll = essNonPermanentPayrollEmployee(employee);
       const earnings = calculatePayrollEarnings(employee, { period, includePeriodAdjustments: includeAdjustments });
       const taxInput = {
         ...payrollInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }),
@@ -263,7 +286,7 @@ export async function GET(request: Request) {
         monthlyTaxablePay: earnings.taxablePay,
       };
       const tax = taxVersion ? calculatePayrollTax(taxInput, taxVersion) : null;
-      const pension = pensionVersion ? calculatePension(pensionInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }), pensionVersion) : null;
+      const pension = !nonPermanentPayroll && pensionVersion ? calculatePension(pensionInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }), pensionVersion) : null;
       const paye = roundMoney(tax?.monthlyPaye ?? 0);
       const pensionEmployee = roundMoney(pension?.employeeContribution ?? 0);
       const nhf = roundMoney((tax?.statutoryItems.find((item) => item.id === 'nhf')?.amount || 0) / 12);
@@ -302,12 +325,12 @@ export async function GET(request: Request) {
           { code: 'ITF', label: 'ITF Levy', units: itf > 0 ? 1 : 0, amount: itf },
           { code: 'GROUP_LIFE', label: 'Group Life Insurance', units: 0, amount: 0 },
           { code: 'OTHER_EMPLOYER', label: 'Other Employer Contributions', units: 0, amount: 0 },
-        ],
+        ].filter((line) => Math.abs(Number(line.amount || 0)) > 0.004),
         totalEmployerContributions,
         employeeInfo: {
           employeeCode: employee.employeeCode || employee.employeeId,
           employeeName: employee.fullName,
-          employeeCategory: employee.employeeCategory || employee.staffCategory || employee.employmentType || 'Permanent',
+          employeeCategory: essEmployeeCategory(employee),
           department: employee.department || 'Unassigned',
           unit: employee.businessUnit || employee.division || 'DLE',
           designation: employee.jobTitle || employee.designation || 'Employee',
@@ -320,11 +343,11 @@ export async function GET(request: Request) {
         statutoryInfo: {
           bankName: payslipIdentity?.bankName || employeeAny.bankName || 'Not configured',
           accountNumber: maskAccount(payslipIdentity?.accountNo || employeeAny.accountNo || employeeAny.accountNumber),
-          pensionFundAdministrator: configured(payslipIdentity?.pensionProvider || employeeAny.pensionProvider),
-          pensionNumber: configured(payslipIdentity?.pensionPin || employeeAny.pensionPin),
-          nhfNumber: employeeAny.nhfNumber || 'Not applicable',
+          pensionFundAdministrator: nonPermanentPayroll ? '' : configured(payslipIdentity?.pensionProvider || employeeAny.pensionProvider),
+          pensionNumber: nonPermanentPayroll ? '' : configured(payslipIdentity?.pensionPin || employeeAny.pensionPin),
+          nhfNumber: nonPermanentPayroll ? '' : employeeAny.nhfNumber || 'Not applicable',
           taxNumber: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
-          nhiaNumber: employeeAny.nhiaNumber || 'Not applicable',
+          nhiaNumber: nonPermanentPayroll ? '' : employeeAny.nhiaNumber || 'Not applicable',
         },
         leaveInfo: {
           annualLeaveEntitlement: leaveContext.annualEntitlement,

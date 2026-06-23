@@ -361,7 +361,7 @@ const matchesPayrollLine = (line: PayrollLine, matchers: string[]) => {
   return matchers.some((matcher) => text.includes(matcher));
 };
 
-const lineAmount = (lines: PayrollLine[] | undefined, matchers: string[]) => {
+const lineAmount = (lines: PayrollLine[] | undefined, matchers: string[]): PayrollLine | null => {
   const matched = (lines || []).filter((line) => matchesPayrollLine(line, matchers));
   if (!matched.length) return null;
   const first = matched[0];
@@ -372,14 +372,30 @@ const lineAmount = (lines: PayrollLine[] | undefined, matchers: string[]) => {
   };
 };
 
+const nonZeroPayrollLine = (line: Pick<PayrollLine, 'amount'>) => Math.abs(Number(line.amount || 0)) > 0.004;
+
 const standardLines = (lines: PayrollLine[] | undefined, defs: Array<[string, string[]]>) => {
   const source = lines || [];
-  const standard = defs.map(([label, matchers]) => lineAmount(source, matchers) || { label, units: 0, amount: 0 });
+  const standard = defs
+    .map(([, matchers]) => lineAmount(source, matchers))
+    .filter((line): line is PayrollLine => line !== null && nonZeroPayrollLine(line));
   const unmatched = source.filter((line) =>
-    Number(line.amount || 0) !== 0 &&
+    nonZeroPayrollLine(line) &&
     !defs.some(([, matchers]) => matchesPayrollLine(line, matchers))
   );
   return [...standard, ...unmatched];
+};
+
+const nonZeroSummaryRow = ([, value]: [string, string]) => {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  const numeric = Number(text.replace(/[^\d.-]/g, ''));
+  return !Number.isFinite(numeric) || Math.abs(numeric) > 0.004;
+};
+const visibleInfoRow = ([, value]: [string, unknown]) => {
+  const text = String(value || '').trim();
+  if (!text || text === '-') return false;
+  return !/^(not configured|not applicable|n\/a)$/i.test(text);
 };
 
 function PayslipWorkspace({ payload, employee }: { payload: Payload | null; employee?: Payload['employee'] }) {
@@ -435,7 +451,7 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
     ['Other Employer Contributions', ['OTHER EMPLOYER']],
   ]);
   const totalEmployer = selected.totalEmployerContributions ?? employerLines.reduce((sum, line) => sum + line.amount, 0);
-  const employeeRows = [
+  const employeeRows: Array<[string, unknown]> = [
     ['Employee Code', info.employeeCode || employee?.employeeCode],
     ['Employee Name', info.employeeName || employee?.fullName],
     ['Employee Category', info.employeeCategory || employee?.payrollGroup],
@@ -447,7 +463,7 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
     ['Date of Employment', fmtDate(String(info.dateOfEmployment || ''))],
     ['Employee Status', info.employeeStatus || 'Active'],
   ];
-  const bankRows = [
+  const bankRows: Array<[string, unknown]> = [
     ['Bank Name', statutory.bankName || 'Stanbic IBTC'],
     ['Account Number', statutory.accountNumber || 'Not configured'],
     ['Pension Fund Administrator', statutory.pensionFundAdministrator || 'Not configured'],
@@ -456,6 +472,19 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
     ['Tax Number', statutory.taxNumber || selected.payeReference || 'Not configured'],
     ['NHIA Number', statutory.nhiaNumber || 'Not applicable'],
     ['Employee Address', info.address || 'Not configured'],
+  ];
+  const leaveRows: Array<[string, string]> = [
+    ['Annual Leave Entitlement', `${leave.annualLeaveEntitlement} days`],
+    ['Leave Taken', `${leave.leaveTaken} days`],
+    ['Leave Balance', `${leave.leaveBalance} days`],
+    ['Carry Forward Leave', `${leave.carryForwardLeave} days`],
+  ];
+  const ytdRows: Array<[string, string]> = [
+    ['YTD Gross Earnings', money2(ytd.grossEarnings)],
+    ['YTD Tax Paid', money2(ytd.taxPaid)],
+    ['YTD Pension Contribution', money2(ytd.pensionContribution)],
+    ['YTD Deductions', money2(ytd.deductions)],
+    ['YTD Net Earnings', money2(ytd.netEarnings)],
   ];
 
   const printPayslip = () => window.print();
@@ -620,7 +649,7 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
         <section className="mt-3 rounded-lg border border-[#2f67b1]">
           <h3 className="border-b border-[#2f67b1] px-3 py-1.5 text-xs font-black uppercase text-[#123f82]">Employee Information</h3>
           <div className="grid grid-cols-1 gap-0 md:grid-cols-2">
-            {[employeeRows, bankRows].map((rows, idx) => (
+            {[employeeRows.filter(visibleInfoRow), bankRows.filter(visibleInfoRow)].map((rows, idx) => (
               <div key={idx ? 'bank' : 'employee'} className={`grid grid-cols-[128px_10px_1fr] gap-y-1 p-3 ${idx ? 'md:border-l md:border-[#9bb9df]' : ''}`}>
                 {rows.map(([label, value]) => <Fragment key={label}><p className="font-black">{label}</p><p>:</p><p>{String(value || '-')}</p></Fragment>)}
               </div>
@@ -647,19 +676,8 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
         </section>
 
         <section className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-          <SummaryBlock title="Leave Information" rows={[
-            ['Annual Leave Entitlement', `${leave.annualLeaveEntitlement} days`],
-            ['Leave Taken', `${leave.leaveTaken} days`],
-            ['Leave Balance', `${leave.leaveBalance} days`],
-            ['Carry Forward Leave', `${leave.carryForwardLeave} days`],
-          ]} />
-          <SummaryBlock title="Year-To-Date Summary" rows={[
-            ['YTD Gross Earnings', money2(ytd.grossEarnings)],
-            ['YTD Tax Paid', money2(ytd.taxPaid)],
-            ['YTD Pension Contribution', money2(ytd.pensionContribution)],
-            ['YTD Deductions', money2(ytd.deductions)],
-            ['YTD Net Earnings', money2(ytd.netEarnings)],
-          ]} />
+          <SummaryBlock title="Leave Information" rows={leaveRows.filter(nonZeroSummaryRow)} />
+          <SummaryBlock title="Year-To-Date Summary" rows={ytdRows.filter(nonZeroSummaryRow)} />
         </section>
 
         <footer className="mt-3 rounded-lg border border-[#9bb9df] p-3">
@@ -686,6 +704,7 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
 }
 
 function PayslipTable({ title, lines, totalLabel, total, wide = false }: { title: string; lines: PayrollLine[]; totalLabel: string; total: number; wide?: boolean }) {
+  const visibleLines = lines.filter(nonZeroPayrollLine);
   return (
     <div className={`${wide ? '' : 'rounded-lg border border-[#2f67b1]'} overflow-hidden`}>
       <h3 className="bg-[#123f82] px-2 py-1.5 text-center text-xs font-black uppercase text-white">{title}</h3>
@@ -694,7 +713,7 @@ function PayslipTable({ title, lines, totalLabel, total, wide = false }: { title
           <tr><th className="border border-[#9bb9df] px-2 py-1.5 text-left">Description</th><th className="border border-[#9bb9df] px-2 py-1.5 text-center">Units</th><th className="border border-[#9bb9df] px-2 py-1.5 text-right">Amount (NGN)</th></tr>
         </thead>
         <tbody>
-          {lines.map((line) => (
+          {visibleLines.map((line) => (
             <tr key={`${title}-${line.code || line.label}`}>
               <td className="border border-[#d7e4f4] px-2 py-1 font-semibold">{line.label}</td>
               <td className="border border-[#d7e4f4] px-2 py-1 text-center">{Number(line.units || 0).toFixed(2)}</td>
@@ -712,6 +731,7 @@ function PayslipTable({ title, lines, totalLabel, total, wide = false }: { title
 }
 
 function SummaryBlock({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+  if (!rows.length) return null;
   return (
     <section className="rounded-lg border border-[#2f67b1]">
       <h3 className="border-b border-[#9bb9df] px-3 py-1.5 text-xs font-black uppercase text-[#123f82]">{title}</h3>
