@@ -4903,8 +4903,8 @@ function PayrollCommandBar({ section, activeTab, role, payload, busyAction, onAc
   const actions = actionsFor(section, activeTab);
   const currentStatus = payload?.workflow?.currentStatus || payload?.runs[0]?.status || 'Draft';
   const blocked = payload?.workflow?.blockedActions || [];
-  const primaryIds = ['validate-payroll', 'view-exceptions', 'create-run', 'submit-run', 'approve-run', 'release-run', 'generate-payslips', 'generate-report'];
-  const visibleActions = actions.filter((item) => primaryIds.includes(item.id)).slice(0, 6);
+  const primaryIds = ['validate-payroll', 'view-exceptions', 'create-run', 'submit-run', 'approve-run', 'approve-entire-workflow', 'release-run', 'generate-payslips', 'generate-report'];
+  const visibleActions = actions.filter((item) => primaryIds.includes(item.id)).slice(0, 7);
   const advancedActions = actions.filter((item) => !visibleActions.some((visible) => visible.id === item.id));
   return (
     <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
