@@ -280,6 +280,7 @@ permissionCatalog.push(
   node('Payroll Controls', 'Approval', 'HR Payroll Review', 'HR Payroll Approval Stage', 'Workflow', 'L2 - HR Admin', 'Company', 'payroll.workflow.hr-review'),
   node('Payroll Controls', 'Approval', 'Finance Payroll Review', 'Finance Payroll Approval Stage', 'Workflow', 'L3 - Finance Approver', 'Company', 'payroll.workflow.finance-review'),
   node('Payroll Controls', 'Approval', 'CFO Approval', 'Final Payroll Approval', 'Workflow', 'L3 - Finance Approver', 'Company', 'payroll.workflow.cfo-approval'),
+  node('Payroll Controls', 'Approval', 'Global Payroll Workflow Override', 'Approve Entire Payroll Workflow End-to-End', 'Button', 'L3 - Super Admin', 'Global', 'payroll.workflow.global-override', true),
   node('Payroll Controls', 'Release', 'Release Payroll', 'Release Approved Payroll', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.release'),
   node('Payroll Controls', 'Locking', 'Payroll Lock', 'Lock Payroll Period and Transactions', 'Button', 'L3 - Payroll Approver', 'Company', 'button.payroll.lock'),
   node('Payroll Controls', 'Reopening', 'Payroll Reopening', 'Reopen Closed Payroll Period', 'Workflow', 'L3 - Finance Approver', 'Company', 'payroll.workflow.reopen'),

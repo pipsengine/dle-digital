@@ -456,7 +456,7 @@ const payrollPeriodTabs: TabConfig[] = [
 const payrollPeriodStatuses = ['Draft', 'Open', 'In Progress', 'Under Validation', 'Awaiting Approval', 'Approved', 'Paid', 'Closed', 'Reopened', 'Cancelled'];
 const payrollPeriodReadiness = ['RBAC controlled', 'Approval workflow enabled', 'Audit trail active', 'Notifications ready', 'Payroll locking enforced', 'Statutory compliance mapped', 'Multi-company ready', 'Multi-location ready', 'Category filtering ready', 'Sage ERP ready'];
 
-const roleOptions: Role[] = ['Payroll Officer', 'Payroll Supervisor', 'HR Manager', 'Finance Manager', 'CFO', 'Executive Director', 'System Administrator', 'Auditor'];
+const roleOptions: Role[] = ['Super Admin', 'Payroll Officer', 'Payroll Supervisor', 'HR Manager', 'Finance Manager', 'CFO', 'Executive Director', 'System Administrator', 'Auditor'];
 const payrollMakerRoles: Role[] = ['Payroll Officer', 'Payroll Supervisor', 'Super Admin'];
 const payrollApprovalRoles: Role[] = ['HR Manager', 'Finance Manager', 'Finance Controller', 'CFO', 'Executive Director', 'Executive Management', 'Super Admin'];
 const financeRoles: Role[] = ['Finance Manager', 'Finance Controller', 'CFO', 'Super Admin'];
@@ -473,6 +473,7 @@ const dashboardActions = [
   action('create-run', 'Process Payroll', 'primary', payrollMakerRoles, true),
   action('submit-run', 'Submit Payroll for Approval', 'workflow', payrollMakerRoles, true),
   action('approve-run', 'Approve Payroll', 'workflow', payrollApprovalRoles, true),
+  action('approve-entire-workflow', 'Approve Entire Workflow', 'workflow', ['Super Admin'], true),
   action('release-run', 'Release Payroll', 'workflow', [...payrollMakerRoles, ...financeRoles], true),
   action('generate-payslips', 'Generate Payslips', 'secondary', payrollMakerRoles, true),
   action('generate-bank-schedule', 'Generate Bank Schedule', 'secondary', financeRoles, true),
@@ -539,6 +540,7 @@ const actionsBySection: Partial<Record<SectionId, PayrollAction[]>> = {
     action('validate-payroll', 'Run Validation', 'workflow', payrollMakerRoles),
     action('submit-run', 'Submit for Approval', 'workflow', payrollMakerRoles, true),
     action('approve-run', 'Approve Payroll', 'workflow', payrollApprovalRoles, true),
+    action('approve-entire-workflow', 'Approve Entire Workflow', 'workflow', ['Super Admin'], true),
     action('release-run', 'Release Payroll', 'workflow', [...payrollMakerRoles, ...financeRoles], true),
     action('reject-run', 'Reject Payroll', 'workflow', payrollApprovalRoles, true, true),
     action('request-revision', 'Request Revision', 'workflow', payrollApprovalRoles, true, true),
@@ -623,6 +625,7 @@ const canRunAction = (actionItem: PayrollAction, role: Role, payload: PayrollPay
   if (role === 'Auditor' && actionItem.group !== 'audit' && !actionItem.id.startsWith('export') && !actionItem.id.startsWith('view')) {
     return { allowed: false, reason: 'Auditors can view reports, exports, history, and audit trails only.' };
   }
+  if (actionItem.id === 'approve-entire-workflow' && role !== 'Super Admin') return { allowed: false, reason: 'Only the Global Super Administrator can approve the entire payroll workflow end-to-end.' };
   if (actionItem.roles && !actionItem.roles.includes(role)) return { allowed: false, reason: `${role} is not authorized for this action.` };
   const run = payload?.runs[0];
   const status = run?.status || 'Draft';
@@ -632,7 +635,7 @@ const canRunAction = (actionItem: PayrollAction, role: Role, payload: PayrollPay
   if (actionItem.id === 'release-run' && status !== 'Approved') return { allowed: false, reason: 'Payroll approval is required before release.' };
   if (['generate-payslips', 'generate-bank-schedule', 'generate-statutory-schedules', 'export-bank-file', 'post-run'].includes(actionItem.id) && !['Approved', 'Released', 'Locked', 'Posted', 'Published'].includes(status)) return { allowed: false, reason: 'Payroll approval is required first.' };
   if (actionItem.id === 'close-period' && status !== 'Posted') return { allowed: false, reason: 'Close is blocked until payslips, bank schedule, journal, and statutory schedules are complete.' };
-  if (status === 'Closed' && !['reopen-period', 'view-audit', 'generate-report', 'export-csv', 'export-excel', 'export-pdf'].includes(actionItem.id)) return { allowed: false, reason: 'Closed periods are locked until approved reopening.' };
+  if (status === 'Closed' && !['approve-entire-workflow', 'reopen-period', 'view-audit', 'generate-report', 'export-csv', 'export-excel', 'export-pdf'].includes(actionItem.id)) return { allowed: false, reason: 'Closed periods are locked until approved reopening.' };
   return { allowed: true, reason: '' };
 };
 
@@ -3381,6 +3384,7 @@ function PayrollAdministrationControlCenter({
     { id: 'create-run', label: 'Run Payroll', icon: PlayCircle, tone: 'green' as Tone, disabled: !payload?.permissions.canManageRun },
     { id: 'submit-run', label: 'Submit for Approval', icon: Send, tone: 'violet' as Tone, disabled: !payload?.permissions.canManageRun },
     { id: 'approve-run', label: 'Approve Payroll', icon: BadgeCheck, tone: 'green' as Tone, disabled: !payload?.permissions.canApprove },
+    { id: 'approve-entire-workflow', label: 'Approve Entire Workflow', icon: ShieldCheck, tone: 'red' as Tone, disabled: role !== 'Super Admin' },
     { id: 'release-run', label: 'Release Payroll', icon: ShieldCheck, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun && !payload?.permissions.canPost },
     { id: 'generate-payslips', label: 'Publish Payslips', icon: ReceiptText, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun },
     { id: 'generate-report', label: 'Generate Reports', icon: FileBarChart, tone: 'slate' as Tone, disabled: !payload?.permissions.canExport },
@@ -3981,6 +3985,7 @@ function DashboardWorkspace({
     { label: 'Validate Payroll', action: 'validate-payroll', icon: ClipboardCheck, tone: 'blue' as Tone, disabled: !payload?.permissions.canManageRun },
     { label: 'Review Issues', action: 'view-exceptions', icon: AlertTriangle, tone: issues.length ? 'red' as Tone : 'green' as Tone, disabled: false },
     { label: 'Submit Approval', action: 'submit-run', icon: Send, tone: 'amber' as Tone, disabled: !payload?.permissions.canManageRun },
+    { label: 'Approve Entire Workflow', action: 'approve-entire-workflow', icon: ShieldCheck, tone: 'red' as Tone, disabled: role !== 'Super Admin' },
     { label: 'Publish Payslips', action: 'generate-payslips', icon: ReceiptText, tone: 'cyan' as Tone, disabled: !payload?.permissions.canManageRun },
   ];
   const activity = [

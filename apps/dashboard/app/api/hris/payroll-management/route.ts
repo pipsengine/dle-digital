@@ -89,7 +89,9 @@ const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirect
 });
 
 const getRole = (request: Request): Role => {
-  const value = request.headers.get('x-hris-role');
+  const headerValue = request.headers.get('x-hris-role');
+  const authRoles = request.headers.get('x-auth-roles') || '';
+  const value = /global super|super administrator|super admin/i.test(`${headerValue || ''} ${authRoles}`) ? 'Super Admin' : headerValue;
   const roles: Role[] = ['Super Admin', 'System Administrator', 'HR Director', 'HR Manager', 'HR Officer', 'Payroll Officer', 'Payroll Supervisor', 'Finance Controller', 'Finance Manager', 'CFO', 'Executive Director', 'Executive Management', 'Auditor', 'Employee'];
   return roles.includes(value as Role) ? (value as Role) : 'Payroll Officer';
 };
@@ -557,6 +559,79 @@ const reportTitle = (report: string) => ({
 const filterExportRecords = (records: any[], status: string | null) =>
   status && status !== 'All' ? records.filter((record) => record.payrollStatus === status) : records;
 
+const applySuperAdminEndToEndApproval = (request: Request, run: PayrollRun, actor: string, role: Role, payload: Awaited<ReturnType<typeof buildPayload>>, reason: string, comment: string) => {
+  const stamp = nowIso();
+  const auditStep = (action: string, oldValue: string | null, newValue: string, detail?: string) =>
+    logAudit(request, {
+      user: actor,
+      role,
+      action,
+      record: run.id,
+      oldValue,
+      newValue,
+      reason: reason || 'Global Super Administrator end-to-end payroll workflow approval',
+      comment: detail || comment || 'Approved through Global Super Administrator end-to-end workflow override.',
+    });
+
+  const setStatus = (action: string, status: PayrollRunStatus, detail?: string) => {
+    const oldValue = run.status;
+    run.status = status;
+    auditStep(action, oldValue, status, detail);
+  };
+
+  run.employeeCount = payload.summary.payrollEligible;
+  run.grossPay = payload.summary.grossPay;
+  run.deductions = payload.summary.deductions;
+  run.netPay = payload.summary.netPay;
+
+  if (!run.createdAt) {
+    run.createdAt = stamp;
+    run.createdBy = actor;
+    auditStep('create-period', null, 'Draft');
+  }
+
+  run.validatedAt = run.validatedAt || stamp;
+  run.validatedBy = run.validatedBy || actor;
+  setStatus('validate-payroll', payload.summary.exceptionCount > 0 ? 'Validation' : 'Validated', `${payload.summary.exceptionCount} validation exceptions recorded before Super Administrator override.`);
+
+  setStatus('create-run', 'Computed');
+
+  run.submittedAt = run.submittedAt || stamp;
+  run.submittedBy = run.submittedBy || actor;
+  setStatus('submit-run', 'Submitted');
+
+  run.approvedAt = run.approvedAt || stamp;
+  run.approvedBy = actor;
+  setStatus('approve-run', 'Approved', 'All approval stages approved by Global Super Administrator.');
+
+  run.releasedAt = run.releasedAt || stamp;
+  run.releasedBy = actor;
+  run.lockedAt = run.lockedAt || stamp;
+  setStatus('release-run', 'Released');
+
+  run.payslipsGeneratedAt = run.payslipsGeneratedAt || stamp;
+  run.payslipsGeneratedBy = actor;
+  setStatus('generate-payslips', 'Published', 'Payslips published as part of end-to-end workflow approval.');
+
+  run.bankScheduleGeneratedAt = run.bankScheduleGeneratedAt || stamp;
+  run.bankScheduleGeneratedBy = actor;
+  auditStep('generate-bank-schedule', run.status, 'Bank schedule generated');
+
+  run.statutorySchedulesGeneratedAt = run.statutorySchedulesGeneratedAt || stamp;
+  run.statutorySchedulesGeneratedBy = actor;
+  auditStep('generate-statutory-schedules', run.status, 'Statutory schedules generated');
+
+  run.postedAt = run.postedAt || stamp;
+  run.postedBy = actor;
+  setStatus('post-run', 'Posted');
+
+  run.closedAt = run.closedAt || stamp;
+  run.lockedAt = run.lockedAt || stamp;
+  setStatus('close-period', 'Closed', 'Payroll period closed through Global Super Administrator end-to-end approval.');
+
+  return run;
+};
+
 const reportExport = (records: any[], report: string) => {
   if (report === 'payroll-summary' || report === 'executive-analytics') {
     return {
@@ -722,6 +797,17 @@ export async function POST(request: Request) {
     runStore.set(run.id, run);
     logAudit(request, { user: actor, role, action: 'create-run', record: run.id, oldValue: null, newValue: run.status, reason, comment });
     return jsonOk({ run });
+  }
+
+  if (action === 'approve-entire-workflow') {
+    if (role !== 'Super Admin') return jsonErr(403, 'Only the Global Super Administrator can approve the entire payroll workflow end-to-end.');
+    const payload = await buildPayload(request);
+    const targetRun = runStore.get(runId) || getCurrentRun();
+    if (!targetRun) return jsonErr(404, 'Payroll run not found');
+    if (targetRun.status === 'Closed') return jsonOk({ run: targetRun, message: 'Payroll workflow is already closed.' });
+    const approvedRun = applySuperAdminEndToEndApproval(request, targetRun, actor, role, payload, reason, comment);
+    runStore.set(approvedRun.id, approvedRun);
+    return jsonOk({ run: approvedRun, message: 'Global Super Administrator approved the entire payroll workflow end-to-end.' });
   }
 
   if (!existing) return jsonErr(404, 'Payroll run not found');
