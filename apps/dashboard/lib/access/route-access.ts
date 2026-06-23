@@ -28,8 +28,40 @@ export const isHrPortalUser = (session: SessionLike) => {
 
 export const hrisRoutePermissionOptions = (pathname: string): string[] | null => {
   const path = normalizePath(pathname);
+  if (path.startsWith('/hris/workforce-management/overtime-management')) {
+    return [
+      'page.hris.workforce-management.overtime-management.view',
+      'overtime.authorization.view',
+      'overtime.authorization.create',
+      'overtime.authorization.approve',
+      'overtime.authorization.project-manager.approve',
+      'overtime.authorization.md.approve',
+      'overtime.authorization.override.override',
+      'workforce.view',
+      'workforce.manage',
+      'operations.view',
+      'operations.timesheets.view',
+      'operations.timesheets.submit',
+      'operations.timesheets.approve',
+      'operations.timesheets.export',
+    ];
+  }
+  if (path.startsWith('/hris/reporting-line') || path.startsWith('/hris/employees/reporting-line')) {
+    return [
+      'reporting-line.bulk-reassignment.assign',
+      'reporting-line.maintenance-assignment.assign',
+      'employees.edit',
+      'employees.assign',
+      'hris.view',
+    ];
+  }
   if (path === '/hris/workforce-management/timesheet-entry' || path === '/hris/time-and-logs/timesheet-entry' || path === '/hris/time-and-logs/project-sites') {
     return [
+      'timesheet.entry.view',
+      'timesheet.controls.supervisor-search.view',
+      'timesheet.controls.location-search.view',
+      'timesheet.controls.work-center-search.view',
+      'timesheet.work-center.view',
       'operations.timesheets.view',
       'operations.timesheets.create',
       'operations.timesheets.edit',
@@ -49,7 +81,7 @@ export const hrisRoutePermissionOptions = (pathname: string): string[] | null =>
     return ['operations.timesheets.view', 'operations.timesheets.export', 'timesheet.view', 'timesheet.export'];
   }
   if (path === '/hris/workforce-management/timesheet-period' || path === '/hris/time-and-logs/timesheet-period') {
-    return ['timesheet.period.manage', 'timesheet.manage'];
+    return ['timesheet.period.manage', 'timesheet.manage', 'timesheet.work-center.configure'];
   }
   if (path.startsWith('/hris/payroll') || path.startsWith('/hris/payroll-management')) {
     return ['payroll.view', 'page.payroll.management.view'];

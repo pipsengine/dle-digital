@@ -129,7 +129,6 @@ const parseList = (value: string | null) => (value || '').split(',').map((item) 
 const clean = (value: unknown) => String(value ?? '').trim();
 const lower = (value: unknown) => clean(value).toLowerCase();
 const includes = (value: unknown, needle: string) => lower(value).includes(needle.toLowerCase());
-const daysBetween = (from: string, to: string) => Math.max(1, Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000) + 1);
 const hoursBetween = (from: string | null | undefined, to: string | null | undefined) =>
   from && to ? Math.max(0, (new Date(to).getTime() - new Date(from).getTime()) / 3600000) : 0;
 
@@ -281,7 +280,9 @@ export async function GET(request: Request) {
         const lineProductive = normalizePaidWorkHours(line.usedHours);
         const lineTotal = normalizePaidWorkHours(line.totalHours);
         const lineOvertime = Math.max(0, lineProductive - 8);
-        const labourRate = Number((employee as any)?.ratePerHour || (employee as any)?.dailyRate || 2500);
+        const hourlyRate = Number((employee as any)?.ratePerHour || 0);
+        const dailyRate = Number((employee as any)?.dailyRate || 0);
+        const labourRate = hourlyRate > 0 ? hourlyRate : dailyRate > 0 ? round(dailyRate / 8, 2) : 2500;
 
         for (const allocation of safeAllocations) {
           const project = projectByCode.get(lower(allocation.projectCode));
@@ -384,11 +385,6 @@ export async function GET(request: Request) {
       return true;
     }).sort((a, b) => b.timesheetDate.localeCompare(a.timesheetDate) || a.employeeName.localeCompare(b.employeeName));
 
-    const dateFrom = from || filteredRows.at(-1)?.timesheetDate || new Date().toISOString().slice(0, 10);
-    const dateTo = to || filteredRows[0]?.timesheetDate || dateFrom;
-    const expectedLines = new Set(filteredRows.map((row) => `${row.employeeId}|${row.timesheetDate}`)).size;
-    const expectedWorkdays = Math.max(1, new Set(filteredRows.map((row) => row.employeeId)).size * daysBetween(dateFrom, dateTo));
-
     const payload = {
       generatedAt: new Date().toISOString(),
       reportType,
@@ -403,7 +399,7 @@ export async function GET(request: Request) {
       },
       summary: {
         ...summarizeRows(filteredRows),
-        missingTimesheets: Math.max(0, expectedWorkdays - expectedLines),
+        missingTimesheets: filteredRows.filter((row) => row.exceptionType === 'Missing Attendance').length,
       },
       reportRows: reportRowsForType(filteredRows, reportType).slice(0, 500),
       detailRows: filteredRows.slice(0, 1000),

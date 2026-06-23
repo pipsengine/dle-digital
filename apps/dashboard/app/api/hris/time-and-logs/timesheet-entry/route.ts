@@ -1001,12 +1001,12 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     permissions: {
       actor: session?.fullName || uiPermissions.actor,
       role: uiPermissions.role,
-      canEdit: true,
-      canExport: true,
-      canApprove: true,
-      canManagePeriod: true,
-      canViewCosts: true,
-      canViewAudit: true,
+      canEdit: uiPermissions.canEditAttendance || uiPermissions.canEditWorkforce,
+      canExport: uiPermissions.canViewAudit || uiPermissions.canApproveTimesheet || uiPermissions.canEditWorkforce,
+      canApprove: uiPermissions.canApproveTimesheet,
+      canManagePeriod: uiPermissions.canManageTimesheetPeriods,
+      canViewCosts: uiPermissions.canApproveTimesheet || uiPermissions.canViewAudit,
+      canViewAudit: uiPermissions.canViewAudit,
     },
     summary,
     filterOptions: {

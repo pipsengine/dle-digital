@@ -42,6 +42,8 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-auth-user', session.username);
   requestHeaders.set('x-auth-roles', session.roles.join(','));
+  requestHeaders.set('x-auth-permissions', session.permissions.join(','));
+  requestHeaders.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
   requestHeaders.set('x-hris-actor', session.fullName || session.username);
   if (!requestHeaders.get('x-hris-role')) {
     requestHeaders.set('x-hris-role', session.roles.includes('Super Administrator') ? 'Super Administrator' : 'OrganizationAdmin');
@@ -50,6 +52,7 @@ export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set('x-auth-user', session.username);
   response.headers.set('x-auth-roles', session.roles.join(','));
+  response.headers.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
   if (pathname.startsWith('/hris') || pathname.startsWith('/api/hris')) {
     response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     response.headers.set('Pragma', 'no-cache');

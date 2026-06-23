@@ -269,6 +269,12 @@ type Payload = {
   aiInsights: StructureInsight[];
 };
 
+type SearchableOption = {
+  value: string;
+  label: string;
+  searchText?: string;
+};
+
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
 const todayDateInputValue = () => {
@@ -1065,64 +1071,50 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               ) : null}
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Supervisor</p>
-                <select
+                <SearchablePicker
                   value={selectedSupervisor}
-                  onChange={(e) => {
-                    setSelectedSupervisor(e.target.value);
+                  options={(payload?.filterOptions.supervisors || []).map((s) => {
+                    const item = supervisorDirectory.find((entry) => entry.value === s);
+                    return { value: s, label: item?.label || s, searchText: `${s} ${item?.label || ''} ${item?.employeeCode || ''} ${item?.fullName || ''}` };
+                  })}
+                  placeholder="Search supervisor"
+                  className="max-w-[280px]"
+                  onChange={(value) => {
+                    setSelectedSupervisor(value);
                     setSelectedEmployees([]);
                     setQuery('');
                   }}
-                  className="max-w-[260px] bg-transparent text-sm font-black text-slate-900 focus:outline-none"
-                >
-                  {!selectedSupervisor && <option value="">Select supervisor</option>}
-                  {payload?.filterOptions.supervisors.map((s) => {
-                    const item = supervisorDirectory.find((entry) => entry.value === s);
-                    return (
-                      <option key={s} value={s}>
-                        {item?.label || s}
-                      </option>
-                    );
-                  })}
-                </select>
+                />
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Location</p>
-                <select
+                <SearchablePicker
                   value={selectedLocation}
-                  onChange={(e) => {
-                    setSelectedLocation(e.target.value);
+                  options={locationOptions.map((location) => ({ value: location, label: location }))}
+                  placeholder={locationOptions.length === 0 ? 'No location' : 'Search location'}
+                  className="max-w-[220px]"
+                  onChange={(value) => {
+                    setSelectedLocation(value);
                     setSelectedEmployees([]);
                     setQuery('');
                   }}
-                  className="bg-transparent text-sm font-black text-slate-900 focus:outline-none"
-                >
-                  {locationOptions.length === 0 && <option value="">No location</option>}
-                  {locationOptions.map((location) => (
-                    <option key={location} value={location}>
-                      {location}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Work Center</p>
                 <div className="flex items-center justify-end gap-2">
                   {workCenterOptions.length > 0 ? (
-                    <select
+                    <SearchablePicker
                       value={selectedWorkCenter}
-                      onChange={(e) => {
-                        setSelectedWorkCenter(e.target.value);
+                      options={workCenterOptions.map((workCenter) => ({ value: workCenter, label: workCenter }))}
+                      placeholder="Search work center"
+                      className="max-w-[220px]"
+                      onChange={(value) => {
+                        setSelectedWorkCenter(value);
                         setSelectedEmployees([]);
                         setQuery('');
                       }}
-                      className="max-w-[180px] truncate bg-white text-sm font-black text-slate-900 focus:outline-none"
-                    >
-                      {workCenterOptions.map((workCenter) => (
-                        <option key={workCenter} value={workCenter}>
-                          {workCenter}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   ) : (
                     <span className="block max-w-[180px] truncate text-sm font-black text-slate-900">
                       No work center
@@ -1967,6 +1959,90 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
         </div>
       )}
     </PageTemplate>
+  );
+}
+
+function SearchablePicker({
+  value,
+  options,
+  placeholder,
+  onChange,
+  className = '',
+}: {
+  value: string;
+  options: SearchableOption[];
+  placeholder: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value);
+  const visibleOptions = options
+    .filter((option) => {
+      const query = searchText.trim().toLowerCase();
+      if (!query) return true;
+      return `${option.label} ${option.value} ${option.searchText || ''}`.toLowerCase().includes(query);
+    })
+    .slice(0, 80);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [open]);
+
+  return (
+    <div ref={wrapperRef} className={`relative inline-block text-left ${className}`}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((current) => !current);
+          setSearchText('');
+        }}
+        className="flex min-h-8 w-full min-w-[160px] items-center justify-end gap-2 rounded-lg bg-transparent px-2 py-1 text-right text-sm font-black text-slate-900 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+      >
+        <span className="truncate">{selected?.label || value || placeholder}</span>
+        <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open ? (
+        <div className="absolute right-0 z-50 mt-2 w-[min(340px,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-2 text-left shadow-2xl">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              autoFocus
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder={placeholder}
+              className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            />
+          </div>
+          <div className="mt-2 max-h-72 overflow-y-auto">
+            {visibleOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                  setSearchText('');
+                }}
+                className={`block w-full rounded-lg px-3 py-2 text-left text-sm font-bold hover:bg-indigo-50 ${option.value === value ? 'bg-slate-100 text-slate-950' : 'text-slate-700'}`}
+              >
+                <span className="block truncate">{option.label}</span>
+              </button>
+            ))}
+            {!visibleOptions.length ? (
+              <div className="px-3 py-4 text-sm font-bold text-slate-500">No match found.</div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

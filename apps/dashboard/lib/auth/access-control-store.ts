@@ -313,6 +313,24 @@ permissionCatalog.push(
   node('Administration', 'Notifications', 'Notification Rules', 'Email and In-App Notification Configuration', 'System', 'L3 - Super Admin', 'Global', 'admin.notifications'),
   node('Administration', 'Data Retention', 'Retention Policies', 'Retention, Archive, Purge Controls', 'System', 'L3 - Super Admin', 'Global', 'admin.retention'),
   node('Administration', 'Impersonation', 'User Impersonation', 'Support Impersonation with Audit', 'System', 'L3 - Super Admin', 'Global', 'admin.impersonation', true),
+
+  node('Page Access', 'Workforce Management', 'Overtime Management', 'Overtime Management Page', 'Page', 'L2 - Manager', 'Company', 'page.hris.workforce-management.overtime-management'),
+  node('Overtime Authorization', 'Request', 'Pre-Overtime Authorization', 'Create Production Overtime Authorization', 'Workflow', 'L2 - Production Manager', 'Company', 'overtime.authorization'),
+  node('Overtime Authorization', 'Project Manager Approval', 'Project Manager Overtime Approval', 'Approve or Reject Project Overtime', 'Workflow', 'L2 - Project Manager', 'Company', 'overtime.authorization.project-manager'),
+  node('Overtime Authorization', 'MD Approval', 'MD Overtime Approval', 'Final MD Overtime Approval', 'Workflow', 'L3 - Executive Approver', 'Company', 'overtime.authorization.md'),
+  node('Overtime Authorization', 'Super Administrator Override', 'Approve Entire Overtime Workflow', 'Override Remaining Overtime Stages', 'Button', 'L3 - Super Admin', 'Global', 'overtime.authorization.override', true),
+  node('Overtime Authorization', 'Email Actions', 'Email Approve/Reject Links', 'Tokenized Email Approval Endpoint', 'API', 'L3 - Approver', 'Company', 'overtime.authorization.email-action'),
+  node('Overtime Authorization', 'Supervisor Notification', 'Approved Overtime Booking Notice', 'Notify Supervisor After Final Approval', 'Workflow', 'L2 - Supervisor', 'Team', 'overtime.authorization.supervisor-notify'),
+  node('Overtime Authorization', 'Email Notifications', 'Overtime Approval Email Delivery', 'Send Approval Emails and Outbox Records', 'API', 'L3 - IT Admin', 'Global', 'overtime.notification.email'),
+  node('Overtime Authorization', 'Bell Notifications', 'Overtime In-App Notifications', 'Send Bell Notifications', 'API', 'L2 - Manager', 'Company', 'overtime.notification.in-app'),
+
+  node('Timesheet Controls', 'Searchable Selectors', 'Search Supervisor Dropdown', 'Search and Select Supervisor', 'Dropdown', 'L2 - Manager', 'Company', 'timesheet.controls.supervisor-search'),
+  node('Timesheet Controls', 'Searchable Selectors', 'Search Location Dropdown', 'Search and Select Location', 'Dropdown', 'L2 - Manager', 'Company', 'timesheet.controls.location-search'),
+  node('Timesheet Controls', 'Searchable Selectors', 'Search Work Center Dropdown', 'Search and Select Work Center', 'Dropdown', 'L2 - Manager', 'Company', 'timesheet.controls.work-center-search'),
+  node('Timesheet Controls', 'Work Centers', 'Manage Work Centers', 'Add, Edit, or Disable Work Centers', 'Button', 'L2 - HR Admin', 'Company', 'timesheet.work-center'),
+  node('Timesheet Controls', 'Work Centers', 'Maintenance Work Center', 'Maintenance Work Center Access', 'Dropdown', 'L2 - Manager', 'Company', 'timesheet.work-center.maintenance'),
+  node('Reporting Line', 'Supervisor Assignment', 'Maintenance Manager Assignment', 'Assign Maintenance Employees to Maintenance Manager', 'Workflow', 'L2 - HR Admin', 'Department', 'reporting-line.maintenance-assignment'),
+  node('Reporting Line', 'Supervisor Assignment', 'Bulk Supervisor Reassignment', 'Bulk Update Reporting Manager', 'Button', 'L2 - HR Admin', 'Department', 'reporting-line.bulk-reassignment'),
 );
 
 const allCatalogPermissions = () => permissionCatalog.flatMap((item) => accessActions.map((action) => `${item.permissionPrefix}.${action}`));
