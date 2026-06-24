@@ -492,7 +492,7 @@ const sageEmployeeType = (employeeCode: string) => {
   if (employeeCode.startsWith('N')) return 'NYSC';
   if (employeeCode.startsWith('I')) return 'IT';
   if (employeeCode.startsWith('L')) return 'Lumpsum';
-  if (employeeCode.startsWith('C')) return 'Daily Rate';
+  if (employeeCode.startsWith('C')) return 'Contract';
   return 'Permanent';
 };
 

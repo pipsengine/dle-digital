@@ -1,14 +1,16 @@
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { calculatePayrollEarnings, resolvePayrollEarningProfile } from '@/lib/payroll-earnings-engine';
+import { isDailyRatePayrollEmployee } from '@/lib/payroll-employee-classification';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
 import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { normalizePayrollMatchKey, readSagePayrollPeriodTotals } from '@/lib/sage-people-payroll-store';
-import { readTimesheetPayrollUpdates } from '@/lib/timesheet-entry-store';
+import { buildTimesheetHoursMapForPayrollPeriod } from '@/lib/timesheet-entry-store';
 import { payrollPeriodLabel } from '@/lib/payroll-period-store';
+import { partitionPayrollIssues, payrollToleranceActive } from '@/lib/payroll-tolerance';
 
 export type PayrollRecordStatus = 'Ready' | 'Review' | 'Blocked';
 export type PayrollTone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
@@ -72,6 +74,7 @@ export type PayrollCalculationRecord = {
   riskSeverity: 'High' | 'Medium' | 'Low';
   exceptionCount: number;
   exceptions: string[];
+  deferredWarnings: string[];
   deductions: number;
   pension: number;
   isDailyRate: boolean;
@@ -115,6 +118,7 @@ export type PayrollCalculationSummary = {
   netVariance: number;
   discrepancyCount: number;
   exceptionCount: number;
+  deferredExceptionCount: number;
   averageDeductionRatio: number;
   payrollCoveragePct: number;
 };
@@ -135,6 +139,7 @@ export type PayrollCalculationResult = {
     byComponent: Array<{ id: string; label: string; amount: number; tone: PayrollTone; payer: 'Employee' | 'Employer' | 'Both' }>;
   };
   controls: Array<{ id: string; label: string; status: string; detail: string; tone: PayrollTone }>;
+  toleranceMode: boolean;
 };
 
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
@@ -158,14 +163,8 @@ const statusFromIssues = (issues: string[]): PayrollRecordStatus => {
   return issues.length ? 'Review' : 'Ready';
 };
 
-const isDailyRateEmployee = (employee: DleEmployeeDirectoryRow, profileId?: string) => {
-  const code = compact(employee.employeeCode || employee.employeeId).toUpperCase();
-  const text = [employee.employmentType, employee.payrollGroup, employee.paymentRun, employee.paymentType, employee.staffCategory, employee.employeeCategory]
-    .map(compact)
-    .join(' ')
-    .toLowerCase();
-  return code.startsWith('C') || profileId === 'contract-day-rate' || text.includes('daily') || text.includes('day rate');
-};
+const isDailyRateEmployee = (employee: DleEmployeeDirectoryRow, profileId?: string) =>
+  isDailyRatePayrollEmployee(employee, profileId);
 
 const dailyRateValues = (employee: DleEmployeeDirectoryRow, dailyRateEmployee: boolean) => {
   const hoursPerDay = Number(employee.hoursPerDay || 8) || 8;
@@ -187,25 +186,9 @@ const dailyRateValues = (employee: DleEmployeeDirectoryRow, dailyRateEmployee: b
   return { ratePerDay, ratePerHour, hoursPerDay, workingDays };
 };
 
-const timesheetPeriodId = (period: string) => `per-${period}`;
+const timesheetPeriodId = (period: string) => `per-${period.replace(/^per-/, '')}`;
 
-export const readApprovedTimesheetHoursForPayrollPeriod = async (period: string) => {
-  const map = new Map<string, { daysWorked: number; bookedHours: number }>();
-  const periodId = timesheetPeriodId(period);
-  try {
-    const updates = await readTimesheetPayrollUpdates();
-    const update = updates.find((item) => item.periodId === periodId || compact(item.periodName).includes(period));
-    if (update) {
-      for (const employee of update.employeeAttendance) {
-        const keys = [employee.employeeId, normalizePayrollMatchKey(employee.employeeId)].filter(Boolean);
-        keys.forEach((key) => map.set(key, { daysWorked: Number(employee.daysWorked || 0), bookedHours: Number(employee.bookedHours || 0) }));
-      }
-    }
-  } catch (error) {
-    console.warn('[PayrollCalculation] Timesheet payroll updates unavailable:', error instanceof Error ? error.message : error);
-  }
-  return map;
-};
+export const readApprovedTimesheetHoursForPayrollPeriod = async (period: string) => buildTimesheetHoursMapForPayrollPeriod(period);
 
 const applyDailyRateFromTimesheets = (
   employee: DleEmployeeDirectoryRow,
@@ -254,6 +237,7 @@ const grouped = (records: PayrollCalculationRecord[], key: keyof PayrollCalculat
     .sort((a, b) => b.grossPay - a.grossPay);
 
 export const calculatePayrollForPeriod = async (requestedPeriod: string): Promise<PayrollCalculationResult> => {
+  const toleranceMode = payrollToleranceActive(requestedPeriod);
   const [
     employeeSource,
     taxConfig,
@@ -345,21 +329,27 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
       ...!compact(employee.payrollGroup) ? ['Payroll group is missing'] : [],
       ...!compact(employee.payCurrency) ? ['Pay currency is missing'] : [],
       ...!activeStatus(employee.status) ? ['Employee is not payroll active'] : [],
-      ...dailyRateEmployee && !timesheet ? ['Approved timesheet hours are not available for daily-rate payroll'] : [],
-      ...pension.issues.filter((issue) => issue !== 'RSA PIN is not on file' && issue !== 'PFA provider is not assigned').map((issue) => `Pension: ${issue}`),
+      ...dailyRateEmployee && !timesheet && amounts.grossPay <= 0 ? ['Approved timesheet hours are not available for daily-rate payroll'] : [],
+      ...(!dailyRateEmployee
+        ? pension.issues
+        : pension.issues.filter((issue) => !/employment type is not eligible/i.test(issue))
+      )
+        .filter((issue) => issue !== 'RSA PIN is not on file' && issue !== 'PFA provider is not assigned')
+        .map((issue) => `Pension: ${issue}`),
       ...funds.issues.map((issue) => `Statutory: ${issue}`),
       ...loans.flatMap((loan) => loan.issues.filter((issue) => issue !== 'Loan is not approved for payroll recovery').map((issue) => `Loan: ${issue}`)),
       ...deductionRatio > 45 ? ['Deduction ratio exceeds 45% control threshold'] : [],
       ...netPay <= 0 && amounts.grossPay > 0 ? ['Net pay is zero after deductions'] : [],
-      ...!sageActual ? ['Sage period comparison unavailable'] : [],
-      ...grossVariance !== null && Math.abs(grossVariance) > 1 ? [`Sage gross variance ${grossVariance}`] : [],
-      ...netVariance !== null && Math.abs(netVariance) > 1 ? [`Sage net variance ${netVariance}`] : [],
+      ...!toleranceMode && !sageActual ? ['Sage period comparison unavailable'] : [],
+      ...!toleranceMode && grossVariance !== null && Math.abs(grossVariance) > 1 ? [`Sage gross variance ${grossVariance}`] : [],
+      ...!toleranceMode && netVariance !== null && Math.abs(netVariance) > 1 ? [`Sage net variance ${netVariance}`] : [],
     ];
 
-    const status = statusFromIssues(issues);
-    const riskSeverity: 'High' | 'Medium' | 'Low' = issues.some((issue) => /not payroll active|Gross pay is missing|Payroll setup/.test(issue))
+    const { blocking, deferred } = partitionPayrollIssues(issues, toleranceMode);
+    const status = statusFromIssues(blocking);
+    const riskSeverity: 'High' | 'Medium' | 'Low' = blocking.some((issue) => /not payroll active|Gross pay is missing|Payroll setup/.test(issue))
       ? 'High'
-      : issues.length
+      : blocking.length
         ? 'Medium'
         : 'Low';
 
@@ -419,11 +409,12 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
         deductionVariance,
       },
       status,
-      issues,
+      issues: blocking,
       payrollStatus: status,
       riskSeverity,
-      exceptionCount: issues.length,
-      exceptions: issues,
+      exceptionCount: blocking.length,
+      exceptions: blocking,
+      deferredWarnings: deferred,
       deductions: totalDeductions,
       pension: roundMoney(employeePension),
       isDailyRate: dailyRateEmployee,
@@ -467,6 +458,7 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
       netPay: sum.netPay + record.netPay,
       employerCost: sum.employerCost + record.employerCost,
       exceptionCount: sum.exceptionCount + record.exceptionCount,
+      deferredExceptionCount: sum.deferredExceptionCount + record.deferredWarnings.length,
       sageGrossPay: sum.sageGrossPay + Number(record.sageActual?.grossPay || 0),
       sageNetPay: sum.sageNetPay + Number(record.sageActual?.netPay || 0),
       grossVariance: sum.grossVariance + Number(record.discrepancies.grossVariance || 0),
@@ -487,6 +479,7 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
       netPay: 0,
       employerCost: 0,
       exceptionCount: 0,
+      deferredExceptionCount: 0,
       sageGrossPay: 0,
       sageNetPay: 0,
       grossVariance: 0,
@@ -522,6 +515,7 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
     netVariance: roundMoney(totals.netVariance),
     discrepancyCount: totals.discrepancyCount,
     exceptionCount: totals.exceptionCount,
+    deferredExceptionCount: totals.deferredExceptionCount,
     averageDeductionRatio: totals.grossPay ? roundMoney((totals.totalDeductions / totals.grossPay) * 100) : 0,
     payrollCoveragePct: records.length
       ? Math.round((records.filter((record) => record.setupAssignedToPayroll).length / records.length) * 1000) / 10
@@ -561,10 +555,12 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
     controls: [
       { id: 'employees', label: 'Employee Source', status: employeeSource.databaseAvailable ? 'Passed' : 'Review', detail: `${employeeSource.employees.length} employees loaded from ${employeeSource.source}`, tone: employeeSource.databaseAvailable ? 'green' : 'amber' },
       { id: 'config', label: 'Configuration Versions', status: 'Passed', detail: 'PAYE, pension, statutory funds, and loan policies resolved by active effective versions.', tone: 'blue' },
-      { id: 'timesheets', label: 'Timesheet Payroll Feed', status: timesheetHours.size > 0 ? 'Passed' : 'Review', detail: timesheetHours.size > 0 ? `${timesheetHours.size} daily-rate timesheet records loaded.` : 'No approved timesheet payroll update found for this period.', tone: timesheetHours.size > 0 ? 'green' : 'amber' },
-      { id: 'exceptions', label: 'Exception Gate', status: summary.blocked > 0 ? 'Blocked' : summary.review > 0 ? 'Review' : 'Passed', detail: `${summary.blocked} blocked, ${summary.review} review, ${summary.exceptionCount} total flags.`, tone: summary.blocked > 0 ? 'red' : summary.review > 0 ? 'amber' : 'green' },
-      { id: 'sage-discrepancy', label: 'Sage May Discrepancy Check', status: summary.discrepancyCount > 0 ? 'Review' : 'Matched', detail: `${summary.discrepancyCount} generated-vs-Sage discrepancy records. Gross variance ${roundMoney(summary.grossVariance)}.`, tone: summary.discrepancyCount > 0 ? 'amber' : 'green' },
+      { id: 'timesheets', label: 'Timesheet Payroll Feed', status: timesheetHours.size > 0 ? 'Passed' : toleranceMode ? 'Deferred' : 'Review', detail: timesheetHours.size > 0 ? `${timesheetHours.size} daily-rate timesheet records loaded.` : toleranceMode ? 'Timesheet gaps deferred to June remediation. Salary fallback used where available.' : 'No approved timesheet payroll update found for this period.', tone: timesheetHours.size > 0 ? 'green' : toleranceMode ? 'blue' : 'amber' },
+      { id: 'exceptions', label: 'Exception Gate', status: summary.blocked > 0 ? 'Blocked' : summary.review > 0 ? 'Review' : 'Passed', detail: toleranceMode ? `${summary.blocked} blocked, ${summary.review} review. ${summary.deferredExceptionCount} items deferred to June.` : `${summary.blocked} blocked, ${summary.review} review, ${summary.exceptionCount} total flags.`, tone: summary.blocked > 0 ? 'red' : summary.review > 0 ? 'amber' : 'green' },
+      { id: 'sage-discrepancy', label: 'Sage Comparison', status: toleranceMode ? 'Deferred' : summary.discrepancyCount > 0 ? 'Review' : 'Matched', detail: toleranceMode ? `${summary.discrepancyCount} Sage variances deferred to June reconciliation.` : `${summary.discrepancyCount} generated-vs-Sage discrepancy records. Gross variance ${roundMoney(summary.grossVariance)}.`, tone: toleranceMode ? 'blue' : summary.discrepancyCount > 0 ? 'amber' : 'green' },
+      ...(toleranceMode ? [{ id: 'tolerance', label: 'May Cutover Tolerance', status: 'Active', detail: 'Timesheet, pension setup, and Sage variance checks are deferred. Only blocking master-data issues stop payroll.', tone: 'blue' as PayrollTone }] : []),
     ],
+    toleranceMode,
   };
 };
 

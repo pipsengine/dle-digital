@@ -1671,6 +1671,66 @@ export async function readTimesheetPayrollUpdates(): Promise<TimesheetPayrollUpd
   }));
 }
 
+const synthesizeTimesheetHoursForPeriod = async (periodId: string) => {
+  const { headers, lines } = await readTimesheetData();
+  const periodHeaders = headers.filter((header) => header.periodId === periodId && normalizeTimesheetStatus(header.status) === 'HR_Acknowledged');
+  const headerIds = new Set(periodHeaders.map((header) => header.id));
+  const headerById = new Map(periodHeaders.map((header) => [header.id, header]));
+  const totals = new Map<string, { daysWorked: number; bookedHours: number }>();
+  const countedEmployeeDates = new Set<string>();
+
+  for (const line of lines.filter((item) => headerIds.has(item.headerId))) {
+    const header = headerById.get(line.headerId);
+    const dateKey = header?.timesheetDate || '';
+    const paidDay = Boolean(line.clockIn || isTimesheetPaidLeaveLine(line));
+    const employeeDateKey = `${line.employeeId}::${dateKey}`;
+    if (paidDay && dateKey && countedEmployeeDates.has(employeeDateKey)) continue;
+    if (paidDay && dateKey) countedEmployeeDates.add(employeeDateKey);
+    const current = totals.get(line.employeeId) || { daysWorked: 0, bookedHours: 0 };
+    current.daysWorked += paidDay ? 1 : 0;
+    current.bookedHours = Math.round((current.bookedHours + normalizePaidWorkHours(line.totalHours)) * 10) / 10;
+    totals.set(line.employeeId, current);
+  }
+  return totals;
+};
+
+/** Approved timesheet hours for payroll — uses payroll updates when present, otherwise HR-acknowledged entries. */
+export async function buildTimesheetHoursMapForPayrollPeriod(period: string) {
+  const map = new Map<string, { daysWorked: number; bookedHours: number }>();
+  const periodId = period.startsWith('per-') ? period : `per-${period}`;
+  const periodToken = period.replace(/^per-/, '');
+
+  const addEmployee = (employeeId: string, data: { daysWorked: number; bookedHours: number }) => {
+    const keys = [employeeId, normalizePayrollMatchKey(employeeId)].filter(Boolean);
+    keys.forEach((key) => map.set(key, data));
+  };
+
+  try {
+    const updates = await readTimesheetPayrollUpdates();
+    const update = updates.find((item) => item.periodId === periodId || String(item.periodName || '').includes(periodToken));
+    if (update) {
+      for (const employee of update.employeeAttendance) {
+        addEmployee(employee.employeeId, {
+          daysWorked: Number(employee.daysWorked || 0),
+          bookedHours: Number(employee.bookedHours || 0),
+        });
+      }
+      if (map.size > 0) return map;
+    }
+  } catch (error) {
+    console.warn('[Timesheet] Payroll update feed unavailable:', error instanceof Error ? error.message : error);
+  }
+
+  try {
+    const synthesized = await synthesizeTimesheetHoursForPeriod(periodId);
+    synthesized.forEach((data, employeeId) => addEmployee(employeeId, data));
+  } catch (error) {
+    console.warn('[Timesheet] Unable to synthesize payroll hours from entries:', error instanceof Error ? error.message : error);
+  }
+
+  return map;
+}
+
 export async function writeTimesheetPayrollUpdates(updates: TimesheetPayrollUpdate[]) {
   const pool = await db();
   const tx = new sql.Transaction(pool);

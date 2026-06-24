@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { contractEmployeeCode, isDailyRatePayrollEmployee } from '@/lib/payroll-employee-classification';
 import { leaveAllowanceEventsForEmployeePeriod } from '@/lib/payroll-leave-allowance-store';
 
 export type PayrollEarningProfileId =
@@ -322,9 +323,7 @@ export const monthlyGrossFromEmployee = (employee: DleEmployeeDirectoryRow) => {
   if (periodSalary > 0) return roundMoney(periodSalary);
   const annualSalary = num(employee.annualSalary);
   if (annualSalary > 0) return roundMoney(annualSalary / 12);
-  const employeeCode = compact(employee.employeeCode || employee.employeeId).toUpperCase();
-  const groupText = [employee.payrollGroup, employee.staffCategory, employee.employeeCategory, employee.employmentType].map(compact).join(' ').toUpperCase();
-  const isDailyRate = /^C\d+/.test(employeeCode) || /DAILY RATE|DAY RATE/.test(groupText);
+  const isDailyRate = isDailyRatePayrollEmployee(employee);
   if (isDailyRate) {
     const ratePerDay = num(employee.ratePerDay) || (num(employee.ratePerHour) > 0 ? num(employee.ratePerHour) * (num(employee.hoursPerDay) || 8) : 0);
     const workingDays = num(employee.hoursPerPeriod) > 0 && (num(employee.hoursPerDay) || 8) > 0
@@ -354,7 +353,8 @@ export const resolvePayrollEarningProfile = (employee: DleEmployeeDirectoryRow):
   const employeeCode = compact(employee.employeeCode || employee.employeeId).toUpperCase();
   if (/^(P?IT|IT|I|P?NYSC|NYSC|N)\d+/.test(employeeCode) || /\b(INDUSTRIAL TRAINING|INDUSTRIAL TRAINEE|INTERN|NYSC|NATIONAL YOUTH SERVICE)\b/.test(stipendGroupText)) return 'stipend-non-taxable';
   if (/^L\d+/.test(employeeCode) || /LUMPSUM|LUMP SUM/.test(groupText)) return 'contract-lumpsum';
-  if (/^C\d+/.test(employeeCode) || /DAILY RATE|DAY RATE/.test(groupText)) return 'contract-day-rate';
+  if (isDailyRatePayrollEmployee(employee) || /DAILY RATE|DAY RATE/.test(groupText)) return 'contract-day-rate';
+  if (contractEmployeeCode(employee)) return 'fallback';
   const isOtherContract = /CONTRACT|TEMPORARY|CASUAL/.test(groupText);
   if (isOtherContract) return 'fallback';
   if (employeeGradeKey(employee) === 'MGT7') return 'senior-management-permanent';

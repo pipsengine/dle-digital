@@ -168,7 +168,9 @@ export const buildManagementPayload = async (request: Request, requestedPeriod?:
       basePay: roundMoney(calculation.summary.basePay),
       allowances: roundMoney(calculation.summary.allowances),
       exceptionCount: calculation.summary.exceptionCount,
+      deferredExceptionCount: calculation.summary.deferredExceptionCount,
     },
+    toleranceMode: calculation.toleranceMode,
     runs: runs.map((item) => ({
       id: item.id,
       period: item.period,
@@ -241,5 +243,6 @@ export const buildManagementPayload = async (request: Request, requestedPeriod?:
     },
     auditTrail,
     artifacts: workflowRun?.artifacts || [],
+    deferredExceptionCount: calculation.summary.deferredExceptionCount,
   };
 };

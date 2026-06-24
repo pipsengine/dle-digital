@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { updateEmployeeDailyRatePayInDb } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { isDailyRatePayrollEmployee } from '@/lib/payroll-employee-classification';
 import { calculateTimesheetPeriod, isTimesheetPaidLeaveLine, normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { calculateContractDayRateEarnings } from '@/lib/payroll-earnings-engine';
@@ -67,7 +68,7 @@ const buildPayload = async (request: Request) => {
   const perms = permissions(role);
   const employeeSource = await readPayrollEmployees();
   const employees = employeeSource.employees;
-  const dailyEmployees = employees.filter((employee) => employee.employmentType === 'Daily Rate' || employee.employeeCode.startsWith('C'));
+  const dailyEmployees = employees.filter((employee) => isDailyRatePayrollEmployee(employee));
   const { headers, lines } = await readTimesheetData();
   const payrollUpdates = await readTimesheetPayrollUpdates();
   const period = (await readTimesheetPeriods()).find((item) => item.id === periodId) || calculateTimesheetPeriod(new Date(`${payrollPeriod}-15T00:00:00`));

@@ -154,10 +154,13 @@ type PayrollPayload = {
     basePay: number;
     allowances: number;
     exceptionCount: number;
+    deferredExceptionCount?: number;
   };
   runs: PayrollRun[];
   records: PayrollRecord[];
   exceptions: { id: string; employeeId: string; employeeName: string; issue: string; severity: 'Low' | 'Medium' | 'High'; owner: string }[];
+  toleranceMode?: boolean;
+  deferredExceptionCount?: number;
   breakdowns: {
     byPayrollGroup: { label: string; employees: number; grossPay: number; netPay: number; exceptions: number }[];
     byDepartment: { label: string; employees: number; grossPay: number; netPay: number; exceptions: number }[];
@@ -4047,6 +4050,15 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
 
       {error ? <div className="mt-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
       {toast ? <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+      {payload?.toleranceMode ? (
+        <div className="mt-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+          <p className="font-black">May payroll tolerance is active for {payload.periodLabel}.</p>
+          <p className="mt-1 font-semibold">
+            Timesheet gaps, pension setup, and Sage variance checks are deferred to June ({number(payload.deferredExceptionCount || payload.summary.deferredExceptionCount)} items).
+            Only employees with missing pay or inactive status are blocked. You can run the full payroll workflow now.
+          </p>
+        </div>
+      ) : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Ready Employees" value={number(payload?.summary.payrollEligible)} detail={`${number(payload?.summary.totalEmployees)} employees loaded`} icon={Users} tone="blue" active={section.id === 'dashboard' && dashboardPanel === 'ready'} onClick={() => openDashboardPanel('ready')} />
@@ -4482,7 +4494,9 @@ function DashboardWorkspace({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-black text-slate-950">Issues to Fix</h3>
-                <p className="mt-1 text-xs font-semibold text-slate-500">Only items blocking approval or release appear here.</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">
+                  {payload?.toleranceMode ? 'Blocking issues only. Deferred items will be corrected in June.' : 'Only items blocking approval or release appear here.'}
+                </p>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-black ${groupedIssues.length ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>{number(groupedIssues.length)} employees</span>
             </div>
@@ -4498,7 +4512,7 @@ function DashboardWorkspace({
                 <button type="button" onClick={() => onFixIssue(issue)} className="h-9 rounded-lg bg-slate-900 px-3 text-[11px] font-black text-white hover:bg-slate-800">Fix now</button>
               </div>
             ))}
-            {!issues.length ? <div className="p-4 text-sm font-black text-emerald-800">No open payroll issues.</div> : null}
+            {!issues.length ? <div className="p-4 text-sm font-black text-emerald-800">{payload?.toleranceMode ? 'No blocking payroll issues. Deferred checks will be resolved in June.' : 'No open payroll issues.'}</div> : null}
           </div>
         </div>
 

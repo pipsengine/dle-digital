@@ -42,15 +42,11 @@ const num = (value: unknown) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 };
+import { isDailyRatePayrollEmployee } from '@/lib/payroll-employee-classification';
+
 const activeEmployee = (employee: DleEmployeeDirectoryRow) => !compact(employee.status).toLowerCase().match(/terminated|resigned|retired|inactive|deceased/);
-const isDailyRateEmployee = (employee: DleEmployeeDirectoryRow, earningProfileId?: string) => {
-  const code = compact(employee.employeeCode || employee.employeeId).toUpperCase();
-  const text = [employee.employmentType, employee.payrollGroup, employee.paymentRun, employee.paymentType, employee.staffCategory, employee.employeeCategory]
-    .map(compact)
-    .join(' ')
-    .toLowerCase();
-  return code.startsWith('C') || earningProfileId === 'contract-day-rate' || text.includes('daily') || text.includes('day rate');
-};
+const isDailyRateEmployee = (employee: DleEmployeeDirectoryRow, earningProfileId?: string) =>
+  isDailyRatePayrollEmployee(employee, earningProfileId);
 const isPermanentEmployee = (employee: DleEmployeeDirectoryRow) => {
   const text = [employee.employmentType, employee.employeeCategory, employee.staffCategory, employee.payrollGroup]
     .map(compact)
