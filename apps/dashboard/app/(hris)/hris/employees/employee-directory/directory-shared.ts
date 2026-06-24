@@ -35,6 +35,8 @@ export type DirectoryEmployee = {
   documentCount?: number;
   emergencyContactsComplete?: boolean;
   hasManagerAssigned?: boolean;
+  hasPhoto?: boolean;
+  photoUrl?: string;
 };
 
 export type EmployeeDirectoryPayload = {
@@ -66,6 +68,9 @@ const numberValue = (value: unknown, fallback = 0) => {
 export const normalizeDirectoryEmployee = (record: Partial<DirectoryEmployee>): DirectoryEmployee => {
   const employeeId = text(record.employeeId || record.employeeCode || record.id, 'Unknown');
   const fullName = text(record.fullName, employeeId);
+  const employeeCode = optionalText(record.employeeCode) || employeeId;
+  const hasPhoto = record.hasPhoto === true;
+  const photoUrl = text(record.photoUrl) || (hasPhoto ? `/api/hris/employees/${encodeURIComponent(employeeCode)}/photo` : undefined);
   return {
     ...record,
     id: text(record.id, employeeId),
@@ -91,6 +96,8 @@ export const normalizeDirectoryEmployee = (record: Partial<DirectoryEmployee>): 
     documentCount: numberValue(record.documentCount),
     emergencyContactsComplete: record.emergencyContactsComplete === true,
     hasManagerAssigned: record.hasManagerAssigned === true,
+    hasPhoto,
+    photoUrl,
   };
 };
 

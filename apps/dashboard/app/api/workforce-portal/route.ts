@@ -502,7 +502,9 @@ export async function GET(request: Request) {
         manager: employee.hasManagerAssigned ? 'Assigned manager' : 'Manager assignment pending',
         email: employee.officialEmail || employee.email || employee.personalEmail || `${employee.employeeId.toLowerCase()}@dormanlongeng.com`,
         phone: employee.primaryPhone || employee.phone,
-        photoUrl: '/brand/dorman-long-logo.jpg',
+        photoUrl: employee.hasPhoto
+          ? `/api/hris/employees/${encodeURIComponent(employee.employeeCode || employee.employeeId)}/photo`
+          : '/brand/dorman-long-logo.jpg',
         status: currentLeaveNow ? 'On Leave' : employee.status || 'Active',
         yearsOfService: round(Number(employee.yearsOfService || 0)),
         payrollGroup: employee.payrollGroup || 'Monthly Payroll',

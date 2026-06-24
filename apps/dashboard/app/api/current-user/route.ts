@@ -186,7 +186,9 @@ export async function GET(request: Request) {
       role: employee ? displayJobTitle(employee) : sessionRole,
       employeeCode: employee?.employeeCode || employee?.employeeId || sessionCode || 'SIGNED-IN',
       department: employee?.department || employee?.businessUnit || sessionDepartment,
-      photoUrl: envFirst(`${context.toUpperCase()}_USER_PHOTO_URL`, 'CURRENT_USER_PHOTO_URL') || '/brand/dorman-long-logo.jpg',
+      photoUrl: employee?.hasPhoto
+        ? `/api/hris/employees/${encodeURIComponent(employee.employeeCode || employee.employeeId)}/photo`
+        : envFirst(`${context.toUpperCase()}_USER_PHOTO_URL`, 'CURRENT_USER_PHOTO_URL') || '/brand/dorman-long-logo.jpg',
       profileHref: employee ? profileHref(context, employee) : '/hris/administration/user-management/user-accounts',
       email: employee?.officialEmail || employee?.email || employee?.personalEmail || '',
       grade: employee?.salaryGrade || employee?.jobGrade || 'Unassigned',

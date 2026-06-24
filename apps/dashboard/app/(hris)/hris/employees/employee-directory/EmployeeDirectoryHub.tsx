@@ -23,6 +23,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import {
   ApiResponse,
   categoryStyles,
@@ -33,7 +34,6 @@ import {
   formatNumber,
   formatPct,
   formatRelativeTime,
-  initialsFor,
   normalizeDirectoryEmployee,
   resolveWorkforceCategory,
   statusTone,
@@ -153,9 +153,14 @@ function EmployeeCard({
       }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-slate-100 to-white text-lg font-bold text-slate-700 ring-2 ring-white">
-          {initialsFor(employee.fullName)}
-        </div>
+        <EmployeeAvatar
+          fullName={employee.fullName}
+          employeeCode={employee.employeeCode}
+          employeeId={employee.employeeId}
+          photoUrl={employee.photoUrl}
+          hasPhoto={employee.hasPhoto}
+          size="xl"
+        />
         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${style.bg} ${style.text}`}>
           <span className={`h-2 w-2 rounded-full ${style.dot}`} />
           {style.label}
@@ -540,7 +545,19 @@ export default function EmployeeDirectoryHub({ initialNow }: { initialNow: strin
                     <tbody>
                       {pageRows.map((employee) => (
                         <tr key={employee.id} className="border-t border-[#E5E7EB] hover:bg-[#F8FAFC]">
-                          <td className="px-4 py-3 font-medium">{employee.fullName}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <EmployeeAvatar
+                                fullName={employee.fullName}
+                                employeeCode={employee.employeeCode}
+                                employeeId={employee.employeeId}
+                                photoUrl={employee.photoUrl}
+                                hasPhoto={employee.hasPhoto}
+                                size="sm"
+                              />
+                              <span className="font-medium">{employee.fullName}</span>
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-[#64748B]">{employee.employeeCode || employee.employeeId}</td>
                           <td className="px-4 py-3">{employee.jobTitle}</td>
                           <td className="px-4 py-3">{employee.department}</td>
@@ -646,7 +663,14 @@ export default function EmployeeDirectoryHub({ initialNow }: { initialNow: strin
               <div className="mt-3 space-y-3">
                 {recentlyAdded.map((employee) => (
                   <button key={employee.id} type="button" onClick={() => openDrawer(employee)} className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left hover:bg-[#F8FAFC]">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">{initialsFor(employee.fullName)}</div>
+                    <EmployeeAvatar
+                      fullName={employee.fullName}
+                      employeeCode={employee.employeeCode}
+                      employeeId={employee.employeeId}
+                      photoUrl={employee.photoUrl}
+                      hasPhoto={employee.hasPhoto}
+                      size="md"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-[#0F172A]">{employee.fullName}</p>
                       <p className="truncate text-xs text-[#64748B]">{employee.employeeCode || employee.employeeId} · {categoryStyles[employee.workforceCategory].label}</p>
@@ -681,7 +705,14 @@ export default function EmployeeDirectoryHub({ initialNow }: { initialNow: strin
           <div className="absolute right-0 top-0 h-full w-full max-w-[500px] overflow-hidden bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex h-16 items-center justify-between border-b border-[#E5E7EB] px-5">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-700">{initialsFor(drawerEmployee.fullName)}</div>
+                <EmployeeAvatar
+                  fullName={drawerEmployee.fullName}
+                  employeeCode={drawerEmployee.employeeCode}
+                  employeeId={drawerEmployee.employeeId}
+                  photoUrl={drawerEmployee.photoUrl}
+                  hasPhoto={drawerEmployee.hasPhoto}
+                  size="lg"
+                />
                 <div className="min-w-0">
                   <p className="truncate text-base font-semibold text-[#0F172A]">{drawerEmployee.fullName}</p>
                   <p className="truncate text-xs text-[#64748B]">{drawerEmployee.employeeCode || drawerEmployee.employeeId} · {drawerEmployee.jobTitle}</p>

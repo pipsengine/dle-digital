@@ -132,10 +132,16 @@ const toDirectoryEmployee = (employee: any) => {
     sageStatusCode,
     sageStatusName,
     aiRiskScore,
+    hasPhoto,
     ...directoryEmployee
   } = employee;
 
-  return directoryEmployee;
+  const code = directoryEmployee.employeeCode || directoryEmployee.employeeId;
+  return {
+    ...directoryEmployee,
+    hasPhoto: hasPhoto === true,
+    photoUrl: hasPhoto && code ? `/api/hris/employees/${encodeURIComponent(code)}/photo` : undefined,
+  };
 };
 
 const nextSeq = () => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import { useRouter } from 'next/navigation';
 import { ContractPayrollClassificationPanel, type ContractPayrollClassificationView } from '../components/ContractPayrollClassificationUi';
 import { AnimatePresence, motion } from 'motion/react';
@@ -537,13 +538,16 @@ const ProfileHeader = ({
     <Card className="p-6">
       <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
         <div className="flex items-start gap-5 min-w-0">
-          <div className="w-16 h-16 rounded-xl border border-blue-200 overflow-hidden bg-blue-600/10 text-blue-700 shrink-0 flex items-center justify-center text-lg font-black">
-            {profile.photoUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={profile.photoUrl} alt={profile.fullName} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-            ) : (
-              initialsFor(profile.fullName)
-            )}
+          <div className="w-16 h-16 rounded-xl border border-blue-200 overflow-hidden bg-blue-600/10 shrink-0">
+            <EmployeeAvatar
+              fullName={profile.fullName}
+              employeeId={profile.employeeId}
+              photoUrl={profile.photoUrl}
+              tryPhoto={Boolean(profile.photoUrl)}
+              hasPhoto={Boolean(profile.photoUrl)}
+              size="xl"
+              className="h-full w-full rounded-xl ring-0"
+            />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">

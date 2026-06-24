@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import {
   AlertTriangle,
   BadgeCheck,
@@ -66,14 +67,6 @@ const displayStatus = (item: AppRecord) => {
   if (item.approvalStatus && item.approvalStatus !== item.status) return item.approvalStatus;
   return item.status;
 };
-
-const initials = (name: string) =>
-  name
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || '')
-    .join('');
 
 export default function LeaveTransactionsCommandCenter({
   payload,
@@ -236,9 +229,7 @@ export default function LeaveTransactionsCommandCenter({
                     <tr key={item.id} className="border-t border-[#E5E7EB] hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2563EB]/10 text-xs font-bold text-[#2563EB]">
-                            {initials(item.fullName)}
-                          </span>
+                          <EmployeeAvatar fullName={item.fullName} employeeId={item.employeeId} size="sm" tryPhoto />
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{item.fullName}</p>
                             <p className="text-xs text-slate-500">{item.employeeId}</p>

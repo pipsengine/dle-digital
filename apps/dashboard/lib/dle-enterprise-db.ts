@@ -883,7 +883,11 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       payroll.setup_assigned_to_payroll,
       ec.emergency_contact_count,
       doc.document_count,
-      CASE WHEN pinfo.photo_data IS NOT NULL AND DATALENGTH(pinfo.photo_data) > 0 THEN 1 ELSE 0 END AS has_photo
+      CASE
+        WHEN pinfo.photo_data IS NOT NULL AND DATALENGTH(pinfo.photo_data) > 0 THEN 1
+        WHEN pinfo.photo_size_bytes IS NOT NULL AND pinfo.photo_size_bytes > 0 THEN 1
+        ELSE 0
+      END AS has_photo
     FROM [hris].[EmployeeMasterView] v
     LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = v.employee_id
