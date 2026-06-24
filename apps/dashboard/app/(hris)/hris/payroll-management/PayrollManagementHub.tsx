@@ -247,7 +247,7 @@ export default function PayrollManagementHub({
     },
     {
       id: 'compliance-statutory-management',
-      tab: 'paye-management',
+      tab: 'overview',
       title: 'Statutory',
       description: 'Manage statutory schedules, compliance and submissions.',
       icon: ShieldCheck,
@@ -257,7 +257,7 @@ export default function PayrollManagementHub({
     },
     {
       id: 'finance-integration',
-      tab: 'bank-payment-schedule',
+      tab: 'overview',
       title: 'Bank & Finance',
       description: 'Generate bank schedules, journals and finance outputs.',
       icon: Landmark,
@@ -276,7 +276,7 @@ export default function PayrollManagementHub({
     },
     {
       id: 'reports-analytics',
-      tab: 'payroll-register',
+      tab: 'standard-reports',
       title: 'Reports',
       description: 'Payroll reports, audit reports and compliance outputs.',
       icon: FileText,

@@ -7,6 +7,9 @@ import PayrollManagementHub, { type HubQuickLinkId, type HubWorkspaceId } from '
 import PaySetupHub, { type PaySetupTabId } from './PaySetupHub';
 import EarningsManagementHub, { type EarningsTabId } from './EarningsManagementHub';
 import DeductionsManagementHub, { type DeductionsTabId } from './DeductionsManagementHub';
+import StatutoryComplianceHub, { type StatutoryTabId } from './StatutoryComplianceHub';
+import BankFinanceHub, { type BankFinanceTabId } from './BankFinanceHub';
+import PayrollReportsHub, { type ReportsTabId } from './PayrollReportsHub';
 import {
   Bar,
   BarChart,
@@ -422,50 +425,48 @@ const sections: SectionConfig[] = [
     id: 'compliance-statutory-management',
     label: 'Statutory',
     title: 'Statutory Deductions',
-    description: 'PAYE, pension, NHF, NSITF, ITF, schedules, and compliance reports.',
+    description: 'Manage PAYE, Pension, NHF, NSITF, ITF, schedules, compliance, and regulatory reporting.',
     icon: ShieldCheck,
     tone: 'red',
     tabs: [
-      { id: 'paye-management', label: 'PAYE Management', description: 'PAYE calculations, schedules, remittance reports, and monitoring.', legacyHref: '/hris/payroll/tax-paye', items: ['PAYE calculations', 'PAYE schedules', 'Tax remittance reports', 'Tax compliance monitoring'] },
-      { id: 'pension-management', label: 'Pension Management', description: 'Employee and employer pension contributions, remittance schedules, and reports.', legacyHref: '/hris/payroll/pension', items: ['Employee contributions', 'Employer contributions', 'Pension remittance schedules', 'Pension reports'] },
-      { id: 'nhf-nsitf-itf', label: 'NHF / NSITF / ITF Management', description: 'Regulatory calculations, monitoring, remittance, and reporting.', legacyHref: '/hris/payroll/nhf-nsitf-itf', items: ['Regulatory calculations', 'Compliance monitoring', 'Remittance schedules', 'Regulatory reporting'] },
-      { id: 'returns-regulatory-reports', label: 'Returns & Regulatory Reports', description: 'Monthly and annual returns, certificates, and submission tracking.', items: ['Monthly returns', 'Annual returns', 'Compliance certificates', 'Submission tracking'] },
+      { id: 'overview', label: 'Overview', description: 'Statutory readiness, compliance health, workspace shortcuts, and top exceptions.', items: ['Statutory status', 'Compliance health', 'Workspace shortcuts', 'Schedule generation'] },
+      { id: 'paye', label: 'PAYE', description: 'PAYE calculations, schedules, remittance reports, and monitoring.', legacyHref: '/hris/payroll/tax-paye', items: ['Tax bands', 'Employee tax setup', 'PAYE validation', 'PAYE compliance'] },
+      { id: 'pension', label: 'Pension', description: 'Employee and employer pension contributions, remittance schedules, and reports.', legacyHref: '/hris/payroll/pension', items: ['Pension rules', 'RSA setup', 'Contribution review', 'Pension compliance'] },
+      { id: 'nhf', label: 'NHF', description: 'NHF setup, employee registration, validation and remittance.', legacyHref: '/hris/payroll/nhf-nsitf-itf', items: ['NHF setup', 'Employee registration', 'NHF validation', 'NHF remittance'] },
+      { id: 'nsitf', label: 'NSITF', description: 'NSITF employer contributions and compliance reporting.', legacyHref: '/hris/payroll/nhf-nsitf-itf', items: ['NSITF rules', 'Employer contribution', 'NSITF validation', 'NSITF returns'] },
+      { id: 'itf', label: 'ITF', description: 'ITF employer levy calculations and regulatory submissions.', legacyHref: '/hris/payroll/nhf-nsitf-itf', items: ['ITF rules', 'Employer levy', 'ITF validation', 'ITF returns'] },
+      { id: 'compliance-reports', label: 'Compliance Reports', description: 'Monthly and annual returns, certificates, and submission tracking.', items: ['Monthly returns', 'Annual returns', 'Compliance certificates', 'Submission tracking'] },
+      { id: 'exceptions', label: 'Exceptions', description: 'Statutory exception register and resolution workflow.', items: ['Exception register', 'Resolution workflow', 'Audit trail'] },
     ],
   },
   {
     id: 'finance-integration',
     label: 'Bank & Finance',
     title: 'Bank & Finance',
-    description: 'Bank schedules, payment files, journals, GL mapping, and reconciliation.',
+    description: 'Manage bank schedules, payment files, payroll journals, reconciliation, and finance outputs from one centralized workspace.',
     icon: Landmark,
     tone: 'slate',
     tabs: [
-      { id: 'bank-payment-schedule', label: 'Bank Payment Schedule', description: 'Salary scheduling, payment batches, and payment status tracking.', items: ['Salary payment scheduling', 'Payment batch management', 'Payment status tracking'] },
-      { id: 'salary-payment-files', label: 'Salary Payment Files', description: 'Bank file generation and electronic payment export templates.', items: ['Bank file generation', 'Electronic payment formats', 'Bank export templates'] },
-      { id: 'payroll-journal', label: 'Payroll Journal', description: 'Accounting entries, journal generation, and journal approval workflows.', items: ['Payroll accounting entries', 'Journal generation', 'Journal approval workflows'] },
-      { id: 'general-ledger-mapping', label: 'General Ledger Mapping', description: 'GL mapping and cost, project, department allocations.', items: ['GL account mapping', 'Cost center allocation', 'Project allocation', 'Department allocation'] },
-      { id: 'reconciliation', label: 'Reconciliation', description: 'Payroll, bank, and accounting reconciliation controls.', items: ['Payroll reconciliation', 'Bank reconciliation', 'Accounting reconciliation'] },
+      { id: 'overview', label: 'Overview', description: 'Finance readiness, workspace shortcuts, finance health, and top exceptions.', items: ['Payment readiness', 'Workspace shortcuts', 'Finance health', 'Quick actions'] },
+      { id: 'bank-schedule', label: 'Bank Schedule', description: 'Salary scheduling, payment batches, and payment status tracking.', items: ['Schedule generation', 'Employee payment schedule', 'Validation', 'Export'] },
+      { id: 'payment-files', label: 'Payment Files', description: 'Bank file generation and electronic payment export templates.', items: ['Bank file generation', 'File validation', 'Export history'] },
+      { id: 'payroll-journal', label: 'Payroll Journal', description: 'Accounting entries, journal generation, and journal approval workflows.', items: ['Journal mapping', 'Journal posting', 'Posting history'] },
+      { id: 'reconciliation', label: 'Reconciliation', description: 'Payroll, bank, and accounting reconciliation controls.', items: ['Bank reconciliation', 'Payroll reconciliation', 'Variance review'] },
+      { id: 'exceptions', label: 'Finance Exceptions', description: 'Finance exception register and resolution workflow.', items: ['Exception register', 'Resolution workflow', 'Audit trail'] },
     ],
   },
   {
     id: 'reports-analytics',
     label: 'Reports',
     title: 'Payroll Reports',
-    description: 'Payroll reports, exports, audit reports, and management summaries.',
+    description: 'Access standard payroll reports, create custom reports, schedule automated reports, and export payroll intelligence.',
     icon: FileBarChart,
     tone: 'blue',
     tabs: [
-      { id: 'payroll-summary-reports', label: 'Payroll Summary Reports', description: 'Period and company-level payroll summaries.', items: ['Payroll Summary Reports'] },
-      { id: 'payroll-register', label: 'Payroll Register', description: 'Employee-level payroll register with filtering and export.', items: ['Payroll Register'] },
-      { id: 'salary-analysis-reports', label: 'Salary Analysis Reports', description: 'Salary distribution and grade analysis reports.', items: ['Salary Analysis Reports'] },
-      { id: 'tax-reports', label: 'Tax Reports', description: 'Tax schedules, remittance, and PAYE reports.', items: ['Tax Reports'] },
-      { id: 'pension-reports', label: 'Pension Reports', description: 'Pension schedules and remittance reports.', items: ['Pension Reports'] },
-      { id: 'deduction-reports', label: 'Deduction Reports', description: 'Statutory, loan, and other deduction reports.', items: ['Deduction Reports'] },
-      { id: 'variance-reports', label: 'Variance Reports', description: 'Period-to-period payroll variance reporting.', items: ['Variance Reports'] },
-      { id: 'bank-payment-reports', label: 'Bank Payment Reports', description: 'Payment status and bank file audit reports.', items: ['Bank Payment Reports'] },
-      { id: 'compliance-reports', label: 'Compliance Reports', description: 'Compliance monitoring and statutory submissions.', items: ['Compliance Reports'] },
-      { id: 'audit-reports', label: 'Audit Reports', description: 'Audit trails and payroll change logs.', items: ['Audit Reports'] },
-      { id: 'executive-payroll-analytics', label: 'Executive Payroll Analytics', description: 'Graphical analytics and executive drill-downs.', items: ['Executive Payroll Analytics'] },
+      { id: 'standard-reports', label: 'Standard Reports', description: 'Browse standard payroll report categories and templates.', items: ['Payroll summary', 'Payroll register', 'Earnings analysis', 'Statutory reports'] },
+      { id: 'custom-reports', label: 'Custom Reports', description: 'Build custom reports with selected columns, filters, and export formats.', items: ['Report designer', 'Column selection', 'Filters', 'Save template'] },
+      { id: 'scheduled-reports', label: 'Scheduled Reports', description: 'Manage recurring automated payroll reports.', items: ['Monthly schedules', 'Quarterly schedules', 'Run now', 'Disable schedule'] },
+      { id: 'report-exports', label: 'Report Exports', description: 'Download previously generated reports and export history.', items: ['PDF exports', 'Excel exports', 'CSV exports', 'Export history'] },
     ],
   },
 ];
@@ -690,6 +691,7 @@ const sectionAliases: Record<string, SectionId> = {
   'compliance-and-statutory-management': 'compliance-statutory-management',
   'bank-and-finance': 'finance-integration',
   'bank-payments-and-finance-integration': 'finance-integration',
+  'bank-finance': 'finance-integration',
   reports: 'reports-analytics',
   'reports-and-analytics': 'reports-analytics',
 };
@@ -711,6 +713,9 @@ const defaultTabIdForSection = (section: SectionConfig) => {
   if (section.id === 'salary-management') return 'overview';
   if (section.id === 'earnings-management') return 'overview';
   if (section.id === 'deductions-management') return 'overview';
+  if (section.id === 'compliance-statutory-management') return 'overview';
+  if (section.id === 'finance-integration') return 'overview';
+  if (section.id === 'reports-analytics') return 'standard-reports';
   return section.tabs[0]?.id || 'overview';
 };
 
@@ -727,6 +732,9 @@ const sectionHref = (id: SectionId) => {
   if (id === 'salary-management') return '/hris/payroll-management/pay-setup';
   if (id === 'earnings-management') return '/hris/payroll-management/earnings';
   if (id === 'deductions-management') return '/hris/payroll-management/deductions';
+  if (id === 'compliance-statutory-management') return '/hris/payroll-management/statutory';
+  if (id === 'finance-integration') return '/hris/payroll-management/bank-finance';
+  if (id === 'reports-analytics') return '/hris/payroll-management/reports';
   return `/hris/payroll-management/${id}`;
 };
 
@@ -4122,15 +4130,19 @@ export default function PayrollManagementClient({
     window.location.href = '/api/hris/payroll-management?format=xls';
   };
 
+  const exportPdf = () => {
+    triggerAction(action('export-pdf', 'Export PDF', 'secondary'));
+  };
+
   const navigateFromCommandCenter = (tab: CommandCenterNavTab) => {
     const targets: Record<CommandCenterNavTab, { section: SectionId; tab?: string } | null> = {
       overview: null,
       processing: { section: 'payroll-processing', tab: 'payroll-run' },
       approvals: { section: 'payroll-processing', tab: 'payroll-approval' },
       exceptions: { section: 'payroll-processing', tab: 'payroll-validation' },
-      outputs: { section: 'finance-integration', tab: 'bank-payment-schedule' },
-      analytics: { section: 'reports-analytics', tab: 'executive-analytics' },
-      reports: { section: 'reports-analytics', tab: 'payroll-register' },
+      outputs: { section: 'finance-integration', tab: 'bank-schedule' },
+      analytics: { section: 'reports-analytics', tab: 'standard-reports' },
+      reports: { section: 'reports-analytics', tab: 'standard-reports' },
     };
     const target = targets[tab];
     if (!target) {
@@ -4193,6 +4205,193 @@ export default function PayrollManagementClient({
   const deductionsActiveTab: DeductionsTabId = deductionsTabIds.includes(activeTabId as DeductionsTabId)
     ? (activeTabId as DeductionsTabId)
     : 'overview';
+
+  const statutoryTabIds: StatutoryTabId[] = [
+    'overview',
+    'paye',
+    'pension',
+    'nhf',
+    'nsitf',
+    'itf',
+    'compliance-reports',
+    'exceptions',
+  ];
+  const statutoryActiveTab: StatutoryTabId = statutoryTabIds.includes(activeTabId as StatutoryTabId)
+    ? (activeTabId as StatutoryTabId)
+    : 'overview';
+
+  const bankFinanceTabIds: BankFinanceTabId[] = [
+    'overview',
+    'bank-schedule',
+    'payment-files',
+    'payroll-journal',
+    'reconciliation',
+    'exceptions',
+  ];
+  const bankFinanceActiveTab: BankFinanceTabId = bankFinanceTabIds.includes(activeTabId as BankFinanceTabId)
+    ? (activeTabId as BankFinanceTabId)
+    : 'overview';
+
+  const reportsTabIds: ReportsTabId[] = ['standard-reports', 'custom-reports', 'scheduled-reports', 'report-exports'];
+  const reportsActiveTab: ReportsTabId = reportsTabIds.includes(activeTabId as ReportsTabId)
+    ? (activeTabId as ReportsTabId)
+    : 'standard-reports';
+
+  if (section.id === 'reports-analytics') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <PayrollReportsHub
+          key={`${payload?.period || viewPeriod || 'reports'}-${reportsActiveTab}`}
+          payload={payload}
+          activeTab={reportsActiveTab}
+          loading={loading}
+          lastLoaded={lastLoaded}
+          viewPeriod={viewPeriod}
+          onRefresh={() => void load()}
+          onExportCsv={exportCsv}
+          onExportExcel={exportExcel}
+          onExportPdf={exportPdf}
+          onSelectTab={(tab) => {
+            setActiveTabs((prev) => ({ ...prev, 'reports-analytics': tab }));
+            window.history.pushState(null, '', sectionHref('reports-analytics'));
+          }}
+          onReportAction={(actionId) => {
+            const reportActions = actionsBySection['reports-analytics'] || [];
+            const actionItem = reportActions.find((item) => item.id === actionId) || action(actionId, actionId, 'secondary');
+            triggerAction(actionItem);
+          }}
+          onSelectPeriod={(period) => {
+            setViewPeriod(period);
+            void load(period);
+          }}
+        />
+        {confirmAction ? (
+          <ConfirmationModal
+            actionItem={confirmAction}
+            payload={payload}
+            reason={actionReason}
+            setReason={setActionReason}
+            onCancel={() => setConfirmAction(null)}
+            onConfirm={confirmSensitiveAction}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (section.id === 'finance-integration') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <BankFinanceHub
+          key={`${payload?.period || viewPeriod || 'bank-finance'}-${bankFinanceActiveTab}`}
+          payload={payload}
+          activeTab={bankFinanceActiveTab}
+          loading={loading}
+          lastLoaded={lastLoaded}
+          viewPeriod={viewPeriod}
+          canViewMoney={canViewMoney}
+          onRefresh={() => void load()}
+          onExportCsv={exportCsv}
+          onExportExcel={exportExcel}
+          onSelectTab={(tab) => {
+            setActiveTabs((prev) => ({ ...prev, 'finance-integration': tab }));
+            window.history.pushState(null, '', sectionHref('finance-integration'));
+          }}
+          onFixException={(id) => {
+            const issue = payload?.exceptions.find((item) => item.id === id);
+            if (issue) setFixIssue(issue);
+          }}
+          onViewAllExceptions={() => openSection('payroll-processing', 'payroll-validation')}
+          onFinanceAction={(actionId) => {
+            const financeActions = actionsBySection['finance-integration'] || [];
+            const actionItem = financeActions.find((item) => item.id === actionId) || action(actionId, actionId, 'workflow');
+            triggerAction(actionItem);
+          }}
+          onSelectPeriod={(period) => {
+            setViewPeriod(period);
+            void load(period);
+          }}
+        />
+        {fixIssue ? (
+          <IssueFixDrawer
+            issue={fixIssue}
+            record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+            busy={busyAction === `fix-${fixIssue.id}`}
+            onClose={() => setFixIssue(null)}
+            onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+          />
+        ) : null}
+        {confirmAction ? (
+          <ConfirmationModal
+            actionItem={confirmAction}
+            payload={payload}
+            reason={actionReason}
+            setReason={setActionReason}
+            onCancel={() => setConfirmAction(null)}
+            onConfirm={confirmSensitiveAction}
+          />
+        ) : null}
+        {auditOpen ? <AuditPanel payload={payload} onClose={() => setAuditOpen(false)} /> : null}
+      </div>
+    );
+  }
+
+  if (section.id === 'compliance-statutory-management') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <StatutoryComplianceHub
+          key={`${payload?.period || viewPeriod || 'statutory'}-${statutoryActiveTab}`}
+          payload={payload}
+          activeTab={statutoryActiveTab}
+          loading={loading}
+          lastLoaded={lastLoaded}
+          viewPeriod={viewPeriod}
+          onRefresh={() => void load()}
+          onExportCsv={exportCsv}
+          onExportExcel={exportExcel}
+          onSelectTab={(tab) => {
+            setActiveTabs((prev) => ({ ...prev, 'compliance-statutory-management': tab }));
+            window.history.pushState(null, '', sectionHref('compliance-statutory-management'));
+          }}
+          onFixException={(id) => {
+            const issue = payload?.exceptions.find((item) => item.id === id);
+            if (issue) setFixIssue(issue);
+          }}
+          onViewAllExceptions={() => openSection('payroll-processing', 'payroll-validation')}
+          onGenerateSchedule={() => triggerAction(action('generate-statutory-schedules', 'Generate Statutory Schedules', 'workflow'))}
+          onSelectPeriod={(period) => {
+            setViewPeriod(period);
+            void load(period);
+          }}
+        />
+        {fixIssue ? (
+          <IssueFixDrawer
+            issue={fixIssue}
+            record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+            busy={busyAction === `fix-${fixIssue.id}`}
+            onClose={() => setFixIssue(null)}
+            onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+          />
+        ) : null}
+        {confirmAction ? (
+          <ConfirmationModal
+            actionItem={confirmAction}
+            payload={payload}
+            reason={actionReason}
+            setReason={setActionReason}
+            onCancel={() => setConfirmAction(null)}
+            onConfirm={confirmSensitiveAction}
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   if (section.id === 'deductions-management') {
     return (
@@ -4552,12 +4751,6 @@ export default function PayrollManagementClient({
               ) : (
                 <ProcessPayrollWorkspace payload={payload} canViewMoney={canViewMoney} onAction={triggerAction} busyAction={busyAction} role={role} />
               )
-            ) : section.id === 'compliance-statutory-management' ? (
-              <StatutoryWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
-            ) : section.id === 'finance-integration' ? (
-              <BankFinanceWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
-            ) : section.id === 'reports-analytics' ? (
-              <ReportsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
             ) : (
               <FeaturePanel tab={activeTab} section={section} payload={payload} canViewMoney={canViewMoney} />
             )}
@@ -4689,7 +4882,7 @@ function DashboardWorkspace({
     { no: 8, title: 'Submit for Approval', detail: 'Send the clean run to HR, Finance, and executive approval.', section: 'payroll-processing' as SectionId, tab: 'payroll-approval', action: 'submit-run', owner: 'Payroll Officer', done: Boolean(currentRun?.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
     { no: 9, title: 'Approve Payroll', detail: 'Approve only after exceptions, changes, variances, and totals are reviewed.', section: 'payroll-processing' as SectionId, tab: 'payroll-approval', action: 'approve-run', owner: 'HR / Finance / CFO', done: Boolean(currentRun?.approvedAt) || ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
     { no: 10, title: 'Release Payroll', detail: 'Release approved payroll for payslips, bank schedule, statutory schedules, and journal posting.', section: 'payroll-computation-workflow' as SectionId, tab: undefined, action: 'release-run', owner: 'Payroll / Finance', done: Boolean(currentRun?.releasedAt) || ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
-    { no: 11, title: 'Generate Outputs', detail: 'Publish payslips, generate bank schedule, statutory schedules, and post the payroll journal.', section: 'finance-integration' as SectionId, tab: 'bank-payment-schedule', action: undefined, owner: 'Payroll / Finance', done: Boolean(currentRun?.payslipsGeneratedAt && currentRun.bankScheduleGeneratedAt && currentRun.statutorySchedulesGeneratedAt && currentRun.postedAt) },
+    { no: 11, title: 'Generate Outputs', detail: 'Publish payslips, generate bank schedule, statutory schedules, and post the payroll journal.', section: 'finance-integration' as SectionId, tab: 'bank-schedule', action: undefined, owner: 'Payroll / Finance', done: Boolean(currentRun?.payslipsGeneratedAt && currentRun.bankScheduleGeneratedAt && currentRun.statutorySchedulesGeneratedAt && currentRun.postedAt) },
     { no: 12, title: 'Close or Reopen Period', detail: 'Close after all outputs are complete; reopen closed periods only with approval and a reason.', section: 'payroll-processing' as SectionId, tab: 'payroll-closing', action: 'close-period', owner: 'Payroll Supervisor', done: runStatus === 'Closed' },
   ];
   const runbookAction = (step: (typeof endToEndSteps)[number]) => {
