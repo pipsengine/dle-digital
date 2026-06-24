@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import PayrollCommandCenter, { type CommandCenterNavTab } from './PayrollCommandCenter';
+import PayrollManagementHub, { type HubQuickLinkId, type HubWorkspaceId } from './PayrollManagementHub';
 import {
   Bar,
   BarChart,
@@ -223,7 +224,17 @@ type PayrollAuditEntry = {
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 type CurrentUser = { name: string; role: string; employeeCode: string; department: string; rbacRole?: string };
-type SectionId = 'dashboard' | 'payroll-computation-workflow' | 'salary-management' | 'earnings-management' | 'deductions-management' | 'payroll-processing' | 'compliance-statutory-management' | 'finance-integration' | 'reports-analytics';
+type SectionId =
+  | 'dashboard'
+  | 'process-payroll'
+  | 'payroll-computation-workflow'
+  | 'salary-management'
+  | 'earnings-management'
+  | 'deductions-management'
+  | 'payroll-processing'
+  | 'compliance-statutory-management'
+  | 'finance-integration'
+  | 'reports-analytics';
 type DashboardPanelId = 'ready' | 'gross' | 'deductions' | 'issues' | 'status' | 'approvals';
 type WorkflowStageId = 'data' | 'validation' | 'computation' | 'approval' | 'release' | 'lock';
 
@@ -665,20 +676,41 @@ const sectionAliases: Record<string, SectionId> = {
   'deductions-management': 'deductions-management',
   statutory: 'compliance-statutory-management',
   'compliance-and-statutory-management': 'compliance-statutory-management',
-  'process-payroll': 'payroll-processing',
   'bank-and-finance': 'finance-integration',
   'bank-payments-and-finance-integration': 'finance-integration',
   reports: 'reports-analytics',
   'reports-and-analytics': 'reports-analytics',
 };
 
+const hubSection: SectionConfig = {
+  id: 'process-payroll',
+  label: 'Hub',
+  title: 'Payroll Management',
+  description: 'Manage payroll setup, processing, statutory compliance, outputs and reporting from a centralized workspace.',
+  icon: WalletCards,
+  tone: 'blue',
+  tabs: [],
+};
+
+const emptyTab = (id = 'overview'): TabConfig => ({ id, label: 'Overview', description: '', items: [] });
+
+const defaultTabIdForSection = (section: SectionConfig) => {
+  if (section.id === 'payroll-processing') return 'payroll-run';
+  return section.tabs[0]?.id || 'overview';
+};
+
 const sectionById = (id?: string) => {
   const normalized = id || 'dashboard';
+  if (normalized === 'process-payroll') return hubSection;
   const resolved = sectionAliases[normalized] || normalized;
   return sections.find((section) => section.id === resolved) || sections[0];
 };
 
-const sectionHref = (id: SectionId) => `/hris/payroll-management/${id === 'dashboard' ? 'dashboard' : id}`;
+const sectionHref = (id: SectionId) => {
+  if (id === 'dashboard') return '/hris/payroll-management/dashboard';
+  if (id === 'process-payroll') return '/hris/payroll-management/process-payroll';
+  return `/hris/payroll-management/${id}`;
+};
 
 const actionsFor = (section: SectionConfig, tab: TabConfig) => {
   if (section.id === 'dashboard') return dashboardActions;
@@ -3877,8 +3909,8 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
   const loadSeq = useRef(0);
 
   const section = sectionById(sectionId);
-  const activeTabId = activeTabs[section.id] || (section.id === 'payroll-processing' ? 'payroll-run' : section.tabs[0].id);
-  const activeTab = section.tabs.find((tab) => tab.id === activeTabId) || section.tabs[0];
+  const activeTabId = activeTabs[section.id] || defaultTabIdForSection(section);
+  const activeTab = section.tabs.find((tab) => tab.id === activeTabId) || section.tabs[0] || emptyTab(activeTabId);
   const canViewMoney = Boolean(payload?.permissions.canViewMoney);
   const currentRun = payrollRunFor(payload);
   const lastLoaded = payload?.generatedAt || initialNow;
@@ -4078,6 +4110,44 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     }
     openSection(target.section, target.tab);
   };
+
+  const navigateFromHub = (workspace: HubWorkspaceId, tab?: string) => {
+    openSection(workspace as SectionId, tab);
+  };
+
+  const navigateHubQuickLink = (link: HubQuickLinkId) => {
+    const targets: Record<HubQuickLinkId, { section: SectionId; tab?: string }> = {
+      'payroll-calendar': { section: 'payroll-processing', tab: 'payroll-period-management' },
+      'approval-center': { section: 'payroll-processing', tab: 'payroll-approval' },
+      'payslip-publishing': { section: 'payroll-processing', tab: 'payslip-generation' },
+      'audit-trail': { section: 'payroll-computation-workflow', tab: 'workflow-status' },
+      'period-lock': { section: 'payroll-processing', tab: 'payroll-closing' },
+      settings: { section: 'salary-management', tab: 'employee-salary-setup' },
+    };
+    const target = targets[link];
+    openSection(target.section, target.tab);
+    if (link === 'audit-trail') setAuditOpen(true);
+  };
+
+  if (section.id === 'process-payroll') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <PayrollManagementHub
+          key={payload?.period || viewPeriod || 'hub'}
+          payload={payload}
+          currentRun={currentRun}
+          loading={loading}
+          onOpenWorkspace={navigateFromHub}
+          onQuickLink={navigateHubQuickLink}
+          onReviewIssues={() => openSection('payroll-processing', 'payroll-validation')}
+          onChangePeriod={() => openSection('payroll-processing', 'payroll-period-management')}
+        />
+        {auditOpen ? <AuditPanel payload={payload} onClose={() => setAuditOpen(false)} /> : null}
+      </div>
+    );
+  }
 
   if (section.id === 'dashboard') {
     return (
