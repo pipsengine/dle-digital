@@ -34,6 +34,7 @@ const titleOverrides: Record<string, string> = {
   '/hris/organization/company-structure': 'Company Structure',
   '/hris/organization/departments': 'Departments',
   '/hris/organization/locations-sites': 'Locations & Sites',
+  '/hris/organization/job-grades': 'Job Grades',
   '/hris/employees/profile-management': 'Employee Profile Management',
   '/hris/employees/employee-profile-management': 'Employee Profile Management',
   '/hris/employees': 'Employee Directory',
