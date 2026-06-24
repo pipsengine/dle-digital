@@ -344,7 +344,7 @@ const sections: SectionConfig[] = [
     id: 'payroll-processing',
     label: 'Processing',
     title: 'Payroll Processing',
-    description: 'Payroll period management, runs, validation, approval, payslip generation, reversal, closing, and reopening controls.',
+    description: 'Run payroll end-to-end: validate, compute, approve, release outputs, post journal, and close the period from one guided workflow.',
     icon: PlayCircle,
     tone: 'amber',
     tabs: [
@@ -571,6 +571,8 @@ const actionsBySection: Partial<Record<SectionId, PayrollAction[]>> = {
     action('reject-run', 'Reject Payroll', 'workflow', payrollApprovalRoles, true, true),
     action('request-revision', 'Request Revision', 'workflow', payrollApprovalRoles, true, true),
     action('generate-payslips', 'Publish Payslips to ESS', 'workflow', payrollMakerRoles, true),
+    action('generate-bank-schedule', 'Generate Bank Schedule', 'workflow', financeRoles, true),
+    action('generate-statutory-schedules', 'Generate Statutory Schedules', 'workflow', payrollMakerRoles),
     action('post-run', 'Post Journal', 'workflow', financeRoles, true),
     action('close-period', 'Close Period', 'workflow', [...payrollApprovalRoles, ...payrollMakerRoles], true),
     action('reopen-period', 'Reopen Period', 'workflow', ['CFO', 'Executive Director', 'Super Admin'], true, true),
@@ -1517,18 +1519,28 @@ function PaySetupCharts({
   );
 }
 
+const resolveProcessingAction = (id: string): PayrollAction => {
+  const pool = [
+    ...dashboardActions,
+    ...(actionsBySection['payroll-processing'] || []),
+    ...(actionsBySection['finance-integration'] || []),
+    ...(actionsBySection['compliance-statutory-management'] || []),
+  ];
+  return pool.find((item) => item.id === id) || action(id, id.replace(/-/g, ' '), 'workflow', payrollMakerRoles);
+};
+
 function ProcessPayrollWorkspace({
-  activeTab,
   payload,
   canViewMoney,
-  runAction,
+  onAction,
   busyAction,
+  role,
 }: {
-  activeTab: TabConfig;
   payload: PayrollPayload | null;
   canViewMoney: boolean;
-  runAction: (action: string, reason?: string) => void;
+  onAction: (actionItem: PayrollAction) => void;
   busyAction: string;
+  role: Role;
 }) {
   const [processView, setProcessView] = useState<'ready' | 'issues' | 'outputs' | 'audit'>('ready');
   const currentRun = payload?.runs[0] || null;
@@ -1536,26 +1548,49 @@ function ProcessPayrollWorkspace({
   const records = payload?.records || [];
   const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
   const issueRows = records.filter((record) => record.payrollStatus !== 'Ready' || record.exceptionCount > 0);
+  const blockedCount = payload?.summary.blockedEmployees || 0;
+  const reviewCount = payload?.summary.reviewEmployees || 0;
   const readiness = payload?.summary.payrollEligible ? Math.round(((payload?.summary.readyEmployees || 0) / payload.summary.payrollEligible) * 100) : 0;
-  const canProcess = (payload?.summary.blockedEmployees || 0) === 0 && (payload?.summary.exceptionCount || 0) === 0;
-  const steps = [
-    { label: 'Validate', detail: 'Check master data and exceptions', action: 'validate-payroll', done: Boolean(currentRun?.validatedAt) || ['Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'blue' as Tone },
-    { label: 'Run Payroll', detail: 'Compute gross, deductions and net pay', action: 'create-run', done: ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'green' as Tone },
-    { label: 'Submit', detail: 'Send payroll for approval', action: 'submit-run', done: Boolean(currentRun?.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'amber' as Tone },
-    { label: 'Approve', detail: 'HR / Finance / CFO review', action: 'approve-run', done: Boolean(currentRun?.approvedAt) || ['Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'violet' as Tone },
-    { label: 'Release', detail: 'Release payroll for outputs', action: 'release-run', done: Boolean(currentRun?.releasedAt) || ['Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(status), tone: 'cyan' as Tone },
-    { label: 'Publish', detail: 'Generate payslips and reports', action: 'generate-payslips', done: Boolean(currentRun?.payslipsGeneratedAt) || ['Published', 'Closed'].includes(status), tone: 'green' as Tone },
-  ];
-  const outputs = [
-    { label: 'Payslips', done: Boolean(currentRun?.payslipsGeneratedAt), icon: ReceiptText },
-    { label: 'Bank Schedule', done: Boolean(currentRun?.bankScheduleGeneratedAt), icon: CreditCard },
-    { label: 'Statutory Schedules', done: Boolean(currentRun?.statutorySchedulesGeneratedAt), icon: FileCheck2 },
-    { label: 'Journal Posted', done: Boolean(currentRun?.postedAt), icon: Send },
-  ];
+  const releasedStatuses = ['Released', 'Locked', 'Posted', 'Published', 'Closed'];
+  const approvedStatuses = ['Approved', ...releasedStatuses];
+  const computedStatuses = ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', ...approvedStatuses];
+  const submittedStatuses = ['Submitted', 'Under Review', ...approvedStatuses];
+
+  const fire = (id: string) => {
+    const actionItem = resolveProcessingAction(id);
+    const auth = canRunAction(actionItem, role, payload);
+    if (!auth.allowed) return;
+    onAction(actionItem);
+  };
+
+  const workflowSteps = useMemo(() => {
+    const isReleased = releasedStatuses.includes(status);
+    const steps = [
+      { id: 'validate-payroll', label: 'Validate', detail: 'Check master data and setup exceptions', done: Boolean(currentRun?.validatedAt) || ['Validated', ...computedStatuses].includes(status), phase: 'prepare' as const },
+      { id: 'create-run', label: 'Run Payroll', detail: 'Compute gross, deductions and net pay', done: computedStatuses.includes(status), phase: 'prepare' as const },
+      { id: 'submit-run', label: 'Submit', detail: 'Send payroll for approval', done: Boolean(currentRun?.submittedAt) || submittedStatuses.includes(status), phase: 'approve' as const },
+      { id: 'approve-run', label: 'Approve', detail: 'HR / Finance / CFO sign-off', done: Boolean(currentRun?.approvedAt) || approvedStatuses.includes(status), phase: 'approve' as const },
+      { id: 'release-run', label: 'Release', detail: 'Unlock payslips, bank and statutory outputs', done: Boolean(currentRun?.releasedAt) || isReleased, phase: 'approve' as const },
+      { id: 'generate-payslips', label: 'Payslips', detail: 'Publish employee payslips to ESS', done: Boolean(currentRun?.payslipsGeneratedAt), phase: 'output' as const },
+      { id: 'generate-bank-schedule', label: 'Bank Schedule', detail: 'Generate bank payment file', done: Boolean(currentRun?.bankScheduleGeneratedAt), phase: 'output' as const },
+      { id: 'generate-statutory-schedules', label: 'Statutory Schedules', detail: 'PAYE, pension, NHF, NSITF, ITF', done: Boolean(currentRun?.statutorySchedulesGeneratedAt), phase: 'output' as const },
+      { id: 'post-run', label: 'Post Journal', detail: 'Post payroll journal to finance', done: Boolean(currentRun?.postedAt) || ['Posted', 'Closed'].includes(status), phase: 'output' as const },
+      { id: 'close-period', label: 'Close Period', detail: `Lock ${payload?.periodLabel || 'this period'} and complete payroll`, done: status === 'Closed', phase: 'close' as const },
+    ];
+    return steps.map((step) => {
+      const actionItem = resolveProcessingAction(step.id);
+      const auth = canRunAction(actionItem, role, payload);
+      return { ...step, enabled: !step.done && auth.allowed, blockedReason: step.done ? '' : auth.reason || '', current: !step.done && auth.allowed };
+    });
+  }, [currentRun, payload, role, status]);
+
+  const nextStep = workflowSteps.find((step) => step.enabled) || null;
+  const completedCount = workflowSteps.filter((step) => step.done).length;
+
   const readinessData = [
     { name: 'Ready', value: payload?.summary.readyEmployees || 0, fill: '#16a34a' },
-    { name: 'Review', value: payload?.summary.reviewEmployees || 0, fill: '#f59e0b' },
-    { name: 'Blocked', value: payload?.summary.blockedEmployees || 0, fill: '#dc2626' },
+    { name: 'Review', value: reviewCount, fill: '#f59e0b' },
+    { name: 'Blocked', value: blockedCount, fill: '#dc2626' },
   ].filter((item) => item.value > 0);
   const valueData = [
     { name: 'Gross', value: payload?.summary.grossPay || 0, fill: '#2563eb' },
@@ -1568,12 +1603,6 @@ function ProcessPayrollWorkspace({
     netPay: row.netPay,
     fill: ['#2563eb', '#7c3aed', '#f59e0b', '#0891b2', '#16a34a', '#0f172a'][index % 6],
   }));
-  const outputRows = [
-    { label: 'Payslip Publication', date: currentRun?.payslipsGeneratedAt, owner: currentRun?.payslipsGeneratedBy || 'Payroll Officer', done: Boolean(currentRun?.payslipsGeneratedAt) },
-    { label: 'Bank Schedule', date: currentRun?.bankScheduleGeneratedAt, owner: currentRun?.bankScheduleGeneratedBy || 'Finance', done: Boolean(currentRun?.bankScheduleGeneratedAt) },
-    { label: 'Statutory Schedules', date: currentRun?.statutorySchedulesGeneratedAt, owner: currentRun?.statutorySchedulesGeneratedBy || 'Payroll Officer', done: Boolean(currentRun?.statutorySchedulesGeneratedAt) },
-    { label: 'Payroll Posting', date: currentRun?.postedAt, owner: currentRun?.postedBy || 'Finance', done: Boolean(currentRun?.postedAt) },
-  ];
   const visibleRows = processView === 'issues' ? issueRows : processView === 'outputs' ? records.filter((record) => record.payrollStatus === 'Ready').slice(0, 20) : readyRows;
   const chartTooltip = (value: unknown, name: unknown) => {
     const label = String(name || '');
@@ -1581,73 +1610,95 @@ function ProcessPayrollWorkspace({
     if (label.toLowerCase().includes('pay') || ['Gross', 'Deductions', 'Net'].includes(label) || numeric > 100000) return [money(numeric, canViewMoney), label];
     return [number(numeric), label];
   };
-  const runStep = (step: typeof steps[number]) => {
-    if (step.done || busyAction === step.action) return;
-    if (step.action !== 'validate-payroll' && !canProcess && ['create-run', 'submit-run', 'approve-run', 'release-run', 'generate-payslips'].includes(step.action)) {
-      setProcessView('issues');
-      return;
-    }
-    runAction(step.action);
-  };
+
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-xs font-black uppercase text-amber-800">Process Payroll</p>
-            <h3 className="mt-1 text-2xl font-black text-slate-950">Run payroll with controlled gates</h3>
-            <p className="mt-1 max-w-5xl text-sm font-semibold text-slate-600">Validate readiness, compute payroll, submit approvals, release outputs, post finance records, and publish payslips from one simple processing desk.</p>
+            <p className="text-xs font-black uppercase text-slate-500">Payroll Processing Desk</p>
+            <h3 className="mt-1 text-2xl font-black text-slate-950">{payload?.periodLabel || 'Current Period'}</h3>
+            <p className="mt-1 text-sm font-semibold text-slate-600">
+              Run: <span className="font-black text-slate-900">{currentRun?.id || 'Not started'}</span>
+              {' · '}
+              {number(payload?.summary.payrollEligible)} employees
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>{status}</span>
-            <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${canProcess ? toneStyles.green.chip : toneStyles.red.chip}`}>{canProcess ? 'Ready to process' : 'Issues must be resolved'}</span>
+            <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>{status}</span>
+            {blockedCount > 0 ? (
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles.red.chip}`}>{blockedCount} blocked</span>
+            ) : reviewCount > 0 ? (
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles.amber.chip}`}>{reviewCount} in review (non-blocking)</span>
+            ) : (
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles.green.chip}`}>Ready to proceed</span>
+            )}
           </div>
         </div>
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-          <InfoTile label="Readiness" value={`${number(readiness)}%`} detail={`${number(payload?.summary.readyEmployees)} of ${number(payload?.summary.payrollEligible)} employees ready`} tone={readiness >= 95 ? 'green' : 'amber'} />
+          <InfoTile label="Progress" value={`${completedCount}/${workflowSteps.length}`} detail="Workflow steps completed" tone={completedCount === workflowSteps.length ? 'green' : 'blue'} />
           <InfoTile label="Gross Payroll" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net`} tone="blue" />
-          <InfoTile label="Deductions" value={money(payload?.summary.deductions, canViewMoney)} detail="PAYE, pension, statutory and other deductions" tone="violet" />
-          <InfoTile label="Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked`} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
+          <InfoTile label="Readiness" value={`${number(readiness)}%`} detail={`${number(payload?.summary.readyEmployees)} ready employees`} tone={readiness >= 95 ? 'green' : 'amber'} />
+          <InfoTile label="Next Step" value={nextStep?.label || (status === 'Closed' ? 'Complete' : '—')} detail={nextStep?.detail || (status === 'Closed' ? 'Period closed' : 'All steps done or waiting')} tone={nextStep ? 'violet' : 'green'} />
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-sm font-black text-slate-950">Payroll Run Sequence</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">Each action updates the payroll run, audit trail, and workflow status.</p>
+      <section className="rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-black uppercase text-violet-800">Payroll workflow</p>
+            <div className="mt-3 overflow-x-auto pb-1">
+              <div className="flex min-w-max items-center gap-1">
+                {workflowSteps.map((step, index) => (
+                  <div key={step.id} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={!step.enabled && !step.done}
+                      onClick={() => step.enabled && fire(step.id)}
+                      title={step.blockedReason || step.detail}
+                      className={`flex min-w-[108px] flex-col items-center rounded-lg border px-2 py-2 text-center transition ${
+                        step.done
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                          : step.enabled
+                            ? 'border-violet-400 bg-white text-violet-950 shadow-sm hover:bg-violet-100'
+                            : 'border-slate-200 bg-slate-50 text-slate-400'
+                      }`}
+                    >
+                      <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black ${step.done ? 'bg-emerald-600 text-white' : step.enabled ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                        {step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                      </span>
+                      <span className="mt-1 text-[10px] font-black leading-tight">{step.label}</span>
+                    </button>
+                    {index < workflowSteps.length - 1 ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /> : null}
+                  </div>
+                ))}
+              </div>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Run: {currentRun?.id || 'Not started'}</span>
           </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {steps.map((step, index) => (
-              <button key={step.label} type="button" onClick={() => runStep(step)} disabled={busyAction === step.action || step.done} className={`rounded-lg border p-4 text-left transition ${step.done ? 'border-emerald-200 bg-emerald-50' : `${toneStyles[step.tone].card} hover:shadow-md`} ${!step.done && !canProcess && step.action !== 'validate-payroll' ? 'opacity-75' : ''}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <span className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-black ${step.done ? toneStyles.green.icon : toneStyles[step.tone].icon}`}>{step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{step.done ? 'Done' : 'Open'}</span>
-                </div>
-                <p className="mt-3 text-sm font-black text-slate-950">{step.label}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-600">{step.detail}</p>
-                {!step.done && !canProcess && step.action !== 'validate-payroll' ? <p className="mt-2 text-[11px] font-black text-red-700">Resolve exceptions first</p> : null}
+          <div className="shrink-0 space-y-2 lg:w-64">
+            {nextStep ? (
+              <button
+                type="button"
+                onClick={() => fire(nextStep.id)}
+                disabled={busyAction === nextStep.id}
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-violet-700 px-4 text-sm font-black text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-70"
+              >
+                <PlayCircle className={`h-4 w-4 ${busyAction === nextStep.id ? 'animate-spin' : ''}`} />
+                {busyAction === nextStep.id ? 'Working...' : `Next: ${nextStep.label}`}
               </button>
-            ))}
+            ) : status === 'Closed' ? (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-center text-sm font-black text-emerald-800">{payload?.periodLabel || 'Payroll period'} is closed.</div>
+            ) : (
+              <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-center text-sm font-black text-emerald-800">All workflow steps complete.</div>
+            )}
+            {nextStep?.blockedReason ? <p className="text-[11px] font-bold text-red-700">{nextStep.blockedReason}</p> : null}
+            {status !== 'Closed' && !['Submitted', 'Under Review', ...approvedStatuses].includes(status) ? (
+              <button type="button" onClick={() => fire('approve-entire-workflow')} disabled={Boolean(busyAction)} className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-black text-slate-700 hover:bg-slate-50">
+                Super Admin: End-to-end approval
+              </button>
+            ) : null}
           </div>
         </div>
-
-        <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-black text-slate-950">Run Summary</h3>
-          <div className="mt-3 space-y-2">
-            <InfoTile label="Net Payroll" value={money(payload?.summary.netPay, canViewMoney)} detail={`${number(payload?.summary.payrollEligible)} employees`} tone="green" />
-            <InfoTile label="Exceptions" value={number(payload?.summary.exceptionCount)} detail={`${number(payload?.summary.blockedEmployees)} blocked`} tone={(payload?.summary.exceptionCount || 0) ? 'red' : 'green'} />
-            <InfoTile label="Next Owner" value={payload?.workflow?.nextOwner || 'Payroll Officer'} detail={payload?.workflow?.approvalStage || activeTab.label} tone="blue" />
-          </div>
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-black uppercase text-slate-500">Current Focus</p>
-            <p className="mt-1 text-sm font-black text-slate-950">{activeTab.label}</p>
-            <p className="mt-1 text-xs font-semibold text-slate-600">{activeTab.description}</p>
-          </div>
-        </aside>
       </section>
 
       <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
@@ -1698,40 +1749,17 @@ function ProcessPayrollWorkspace({
         </ChartShell>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="text-sm font-black text-slate-950">Required Outputs</h3>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Release artifacts required before payroll can be closed or posted.</p>
-          </div>
-          <button type="button" onClick={() => setProcessView('outputs')} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800">View output details</button>
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-          {outputs.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div key={item.label} className={`rounded-lg border p-4 ${item.done ? toneStyles.green.card : toneStyles.slate.card}`}>
-                <Icon className={`h-5 w-5 ${item.done ? toneStyles.green.text : toneStyles.slate.text}`} />
-                <p className="mt-3 text-sm font-black text-slate-950">{item.label}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-600">{item.done ? 'Completed' : 'Waiting'}</p>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
       <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h3 className="text-sm font-black text-slate-950">Payroll Processing Register</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">{processView === 'issues' ? 'Records requiring correction before processing.' : 'Payroll-ready employee records for the current run.'}</p>
+              <h3 className="text-sm font-black text-slate-950">Payroll Register</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{processView === 'issues' ? 'Records requiring correction.' : 'Payroll-ready employees for this period.'}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               {[
-                { id: 'ready' as const, label: 'Ready' },
-                { id: 'issues' as const, label: 'Issues' },
-                { id: 'outputs' as const, label: 'Outputs' },
+                { id: 'ready' as const, label: `Ready (${readyRows.length})` },
+                { id: 'issues' as const, label: `Issues (${issueRows.length})` },
                 { id: 'audit' as const, label: 'Audit' },
               ].map((item) => (
                 <button key={item.id} type="button" onClick={() => setProcessView(item.id)} className={`rounded-lg px-3 py-2 text-xs font-black ${processView === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>
@@ -1744,7 +1772,7 @@ function ProcessPayrollWorkspace({
                 <tr>{['Employee', 'Category', 'Gross', 'Deductions', 'Net', 'Status', 'Detail'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleRows.slice(0, 18).map((record) => (
+                {(processView === 'audit' ? [] : visibleRows).slice(0, 18).map((record) => (
                   <tr key={record.employeeId} className="hover:bg-slate-50">
                     <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</p></td>
                     <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.employmentType || 'Unassigned'}<br /><span className="text-slate-400">{record.payrollGroup || record.salaryGrade || 'No group'}</span></td>
@@ -1755,72 +1783,65 @@ function ProcessPayrollWorkspace({
                     <td className="px-4 py-3 text-xs font-semibold text-slate-600">{record.exceptions.length ? record.exceptions.slice(0, 2).join('; ') : 'Ready for payroll'}</td>
                   </tr>
                 ))}
-                {!visibleRows.length ? <tr><td colSpan={7} className="px-4 py-6 text-sm font-black text-slate-700">No records match this processing view.</td></tr> : null}
+                {processView === 'audit' ? (
+                  <tr><td colSpan={7} className="px-4 py-4">
+                    <div className="max-h-80 space-y-2 overflow-y-auto">
+                      {(payload?.auditTrail || []).slice(0, 12).map((item) => (
+                        <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-xs font-black text-slate-950">{item.action}</p>
+                          <p className="mt-1 text-[11px] font-semibold text-slate-600">{item.user} · {new Date(item.at).toLocaleString('en-GB')}</p>
+                        </div>
+                      ))}
+                      {!payload?.auditTrail?.length ? <p className="text-xs font-bold text-slate-600">No actions logged yet.</p> : null}
+                    </div>
+                  </td></tr>
+                ) : null}
+                {!visibleRows.length && processView !== 'audit' ? <tr><td colSpan={7} className="px-4 py-6 text-sm font-black text-slate-700">No records in this view.</td></tr> : null}
               </tbody>
             </table>
           </div>
         </div>
 
         <aside className="space-y-4">
-          {processView === 'outputs' ? (
-            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-black text-slate-950">Output Status</h3>
-              <div className="mt-3 space-y-2">
-                {outputRows.map((row) => (
-                  <div key={row.label} className={`rounded-lg border p-3 ${row.done ? toneStyles.green.card : toneStyles.slate.card}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-black text-slate-950">{row.label}</p>
-                        <p className="mt-1 text-xs font-semibold text-slate-600">{row.date ? new Date(row.date).toLocaleString('en-GB') : 'Pending'}</p>
-                      </div>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${row.done ? toneStyles.green.chip : toneStyles.slate.chip}`}>{row.done ? 'Done' : 'Waiting'}</span>
-                    </div>
-                    <p className="mt-2 text-[11px] font-bold text-slate-500">Owner: {row.owner}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : processView === 'audit' ? (
-            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-black text-slate-950">Audit Trail</h3>
-              <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto">
-                {(payload?.auditTrail || []).slice(0, 10).map((item) => (
-                  <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs font-black text-slate-950">{item.action}</p>
-                    <p className="mt-1 text-[11px] font-semibold text-slate-600">{item.user} / {item.role}</p>
-                    <p className="mt-1 text-[11px] font-bold text-slate-500">{new Date(item.at).toLocaleString('en-GB')}</p>
-                  </div>
-                ))}
-                {!payload?.auditTrail?.length ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-black text-slate-700">No payroll action has been logged yet.</div> : null}
-              </div>
-            </section>
-          ) : (
-            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-black text-slate-950">Exception Focus</h3>
-              <div className="mt-3 space-y-2">
-                {(payload?.exceptions || []).slice(0, 8).map((item) => (
-                  <div key={item.id} className={`rounded-lg border p-3 ${item.severity === 'High' ? toneStyles.red.card : item.severity === 'Medium' ? toneStyles.amber.card : toneStyles.slate.card}`}>
-                    <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
-                    <p className="mt-1 text-xs font-semibold text-slate-700">{item.issue}</p>
-                    <p className="mt-1 text-[11px] font-black uppercase text-slate-500">{item.owner} / {item.severity}</p>
-                  </div>
-                ))}
-                {!payload?.exceptions?.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-black text-emerald-800">No processing exceptions detected.</div> : null}
-              </div>
-            </section>
-          )}
-
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-black text-slate-950">Processing Controls</h3>
-            <div className="mt-3 grid grid-cols-1 gap-2">
-              {activeTab.items.map((item) => (
-                <div key={item} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-700">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-amber-600" />
-                  <span>{item}</span>
-                </div>
+            <h3 className="text-sm font-black text-slate-950">Output checklist</h3>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Tap a pending item to run that step.</p>
+            <div className="mt-3 space-y-2">
+              {workflowSteps.filter((step) => step.phase === 'output' || step.id === 'close-period').map((step) => (
+                <button
+                  key={step.id}
+                  type="button"
+                  disabled={step.done || (!step.enabled && !step.done)}
+                  onClick={() => step.enabled && fire(step.id)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition ${step.done ? 'border-emerald-200 bg-emerald-50' : step.enabled ? 'border-violet-200 bg-violet-50 hover:bg-violet-100' : 'border-slate-200 bg-slate-50 opacity-80'}`}
+                >
+                  <div>
+                    <p className="text-xs font-black text-slate-950">{step.label}</p>
+                    <p className="mt-0.5 text-[11px] font-semibold text-slate-600">{step.done ? 'Completed' : step.blockedReason || step.detail}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.green.chip : step.enabled ? toneStyles.violet.chip : toneStyles.slate.chip}`}>
+                    {step.done ? 'Done' : step.enabled ? 'Run' : 'Wait'}
+                  </span>
+                </button>
               ))}
             </div>
           </section>
+
+          {issueRows.length > 0 ? (
+            <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+              <h3 className="text-sm font-black text-slate-950">Open issues ({issueRows.length})</h3>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Review items do not block posting or close. Blocked items must be fixed before calculate/submit.</p>
+              <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+                {(payload?.exceptions || []).slice(0, 6).map((item) => (
+                  <div key={item.id} className={`rounded-lg border p-2 ${item.severity === 'High' ? toneStyles.red.card : toneStyles.amber.card}`}>
+                    <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
+                    <p className="text-[11px] font-semibold text-slate-700">{item.issue}</p>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setProcessView('issues')} className="mt-3 text-xs font-black text-violet-700 hover:underline">View all in register →</button>
+            </section>
+          ) : null}
         </aside>
       </section>
     </div>
@@ -4079,7 +4100,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             </div>
           </section>
 
-          {section.id !== 'salary-management' && section.id !== 'payroll-computation-workflow' ? (
+          {section.id !== 'salary-management' && section.id !== 'payroll-computation-workflow' && section.id !== 'payroll-processing' ? (
             <PayrollCommandBar
               section={section}
               activeTab={activeTab}
@@ -4090,7 +4111,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             />
           ) : null}
 
-          {section.id !== 'payroll-computation-workflow' ? (
+          {section.id !== 'payroll-computation-workflow' && section.id !== 'payroll-processing' ? (
             <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white p-2">
               <div className="flex min-w-max gap-1">
                 {section.tabs.map((tab) => (
@@ -4114,7 +4135,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             ) : section.id === 'deductions-management' ? (
               <DeductionsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
             ) : section.id === 'payroll-processing' ? (
-              <ProcessPayrollWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
+              <ProcessPayrollWorkspace payload={payload} canViewMoney={canViewMoney} onAction={triggerAction} busyAction={busyAction} role={role} />
             ) : section.id === 'compliance-statutory-management' ? (
               <StatutoryWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} runAction={runAction} busyAction={busyAction} />
             ) : section.id === 'finance-integration' ? (
