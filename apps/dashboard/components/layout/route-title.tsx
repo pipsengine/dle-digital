@@ -30,6 +30,8 @@ const titleOverrides: Record<string, string> = {
   '/hris/payroll-management/reports': 'Payroll Reports',
   '/hris/payroll-management/reports-analytics': 'Payroll Reports',
   '/hris/payroll-management/payroll-computation-workflow': 'Payroll Computation & Approval Workflow',
+  '/hris/employees/employee-directory': 'Employee Directory',
+  '/hris/employees': 'Employee Directory',
   '/hris/payroll/salary-structure': 'Salary Structure',
 };
 

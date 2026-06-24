@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import EmployeeDirectoryHub from './employee-directory/EmployeeDirectoryHub';
 import {
   ArrowRightLeft,
   BadgeCheck,
@@ -12,7 +13,6 @@ import {
   Contact,
   FileArchive,
   FileText,
-  Filter,
   GitBranch,
   History,
   IdCard,
@@ -20,7 +20,6 @@ import {
   LogOut,
   Network,
   RefreshCcw,
-  Search,
   ShieldCheck,
   UserRound,
   Users,
@@ -202,9 +201,6 @@ export default function EmployeeModuleClient({ initialSection = 'employee-direct
   const [payload, setPayload] = useState<EmployeesPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('All');
-  const [category, setCategory] = useState('All');
 
   const section = sectionById(sectionId);
   const activeTabId = activeTabs[section.id] || section.tabs[0].id;
@@ -231,17 +227,6 @@ export default function EmployeeModuleClient({ initialSection = 'employee-direct
   }, []);
 
   const employees = useMemo(() => payload?.employees || [], [payload?.employees]);
-  const statuses = useMemo(() => ['All', ...Array.from(new Set(employees.map((e) => e.status || 'Unknown'))).sort()], [employees]);
-  const categories = useMemo(() => ['All', ...Array.from(new Set(employees.map((e) => e.employmentType || 'Unassigned'))).sort()], [employees]);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return employees.filter((employee) => {
-      if (status !== 'All' && employee.status !== status) return false;
-      if (category !== 'All' && employee.employmentType !== category) return false;
-      if (!q) return true;
-      return [employee.employeeId, employee.employeeCode, employee.fullName, employee.department, employee.jobTitle, employee.location, employee.managerName].some((value) => compact(value).toLowerCase().includes(q));
-    });
-  }, [category, employees, query, status]);
 
   const summary = useMemo(() => {
     const active = employees.filter((e) => compact(e.status).toLowerCase().match(/active|confirmed|probation|contract/)).length;
@@ -250,6 +235,10 @@ export default function EmployeeModuleClient({ initialSection = 'employee-direct
     const documents = employees.reduce((sum, e) => sum + Number(e.documentCount || 0), 0);
     return { total: employees.length, active, missingManagers, missingEmergency, documents };
   }, [employees]);
+
+  if (section.id === 'employee-directory') {
+    return <EmployeeDirectoryHub initialNow={new Date().toISOString()} />;
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -324,11 +313,7 @@ export default function EmployeeModuleClient({ initialSection = 'employee-direct
           </div>
 
           <div className="mt-4">
-            {section.id === 'employee-directory' ? (
-              <DirectoryPanel employees={filtered} query={query} setQuery={setQuery} status={status} setStatus={setStatus} statuses={statuses} category={category} setCategory={setCategory} categories={categories} />
-            ) : (
-              <FeaturePanel section={section} tab={activeTab} employees={employees} />
-            )}
+            <FeaturePanel section={section} tab={activeTab} employees={employees} />
           </div>
 
           <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -364,38 +349,6 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
       </div>
       <div className={`absolute bottom-0 left-0 h-1 w-full ${toneStyles[tone].bar}`} />
     </div>
-  );
-}
-
-function DirectoryPanel({ employees, query, setQuery, status, setStatus, statuses, category, setCategory, categories }: { employees: Employee[]; query: string; setQuery: (v: string) => void; status: string; setStatus: (v: string) => void; statuses: string[]; category: string; setCategory: (v: string) => void; categories: string[] }) {
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 p-4">
-        <div className="grid grid-cols-1 gap-2 lg:grid-cols-[1fr_180px_180px]">
-          <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search employee, department, location, manager" className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 text-sm font-semibold outline-none focus:border-dle-blue" /></div>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none">{statuses.map((item) => <option key={item}>{item}</option>)}</select>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none">{categories.map((item) => <option key={item}>{item}</option>)}</select>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-[980px] w-full text-left">
-          <thead className="bg-slate-50 text-xs font-black uppercase tracking-normal text-slate-500"><tr>{['Employee', 'Category', 'Department', 'Job', 'Manager', 'Status', 'Actions'].map((h) => <th key={h} className="px-4 py-3">{h}</th>)}</tr></thead>
-          <tbody className="divide-y divide-slate-100">
-            {employees.slice(0, 100).map((employee) => (
-              <tr key={employee.employeeId} className="hover:bg-slate-50">
-                <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{employee.fullName}</p><p className="text-xs font-semibold text-slate-500">{employee.employeeCode || employee.employeeId} - {employee.location}</p></td>
-                <td className="px-4 py-3 text-xs font-bold text-slate-700">{employee.employmentType || 'Unassigned'}</td>
-                <td className="px-4 py-3 text-xs font-bold text-slate-700">{employee.department || 'Unassigned'}</td>
-                <td className="px-4 py-3 text-xs font-bold text-slate-700">{employee.jobTitle || 'Unassigned'}<br /><span className="text-slate-400">{employee.salaryGrade || employee.jobGrade || 'No grade'}</span></td>
-                <td className="px-4 py-3 text-xs font-bold text-slate-700">{employee.managerName || 'Not assigned'}</td>
-                <td className="px-4 py-3"><span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-800">{employee.status || 'Unknown'}</span></td>
-                <td className="px-4 py-3"><Link href={`/hris/employees/employee-profile/${encodeURIComponent(employee.employeeCode || employee.employeeId)}`} className="text-xs font-black text-blue-700 hover:underline">Open Profile</Link></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
   );
 }
 
