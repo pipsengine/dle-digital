@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
+import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import {
   Bell,
   CalendarDays,
@@ -28,6 +28,7 @@ type ProfileUser = {
   employeeCode: string;
   department: string;
   photoUrl: string;
+  hasPhoto?: boolean;
   profileHref: string;
   email?: string;
   grade?: string;
@@ -54,7 +55,8 @@ const defaults: Record<EnterpriseUserProfileContext, ProfileUser> = {
     role: 'Resolving signed-in user',
     employeeCode: 'SIGNED-IN',
     department: 'Enterprise workspace',
-    photoUrl: '/brand/dorman-long-logo.jpg',
+    photoUrl: '',
+    hasPhoto: false,
     profileHref: '/dashboard',
     grade: 'Unassigned',
     location: 'Unassigned',
@@ -72,7 +74,8 @@ const defaults: Record<EnterpriseUserProfileContext, ProfileUser> = {
     role: 'Resolving signed-in user',
     employeeCode: 'SIGNED-IN',
     department: 'Human Capital',
-    photoUrl: '/brand/dorman-long-logo.jpg',
+    photoUrl: '',
+    hasPhoto: false,
     profileHref: '/hris/employees/employee-profile',
     grade: 'Unassigned',
     location: 'Unassigned',
@@ -90,7 +93,8 @@ const defaults: Record<EnterpriseUserProfileContext, ProfileUser> = {
     role: 'Employee Self-Service',
     employeeCode: 'ESS',
     department: 'My Workspace',
-    photoUrl: '/brand/dorman-long-logo.jpg',
+    photoUrl: '',
+    hasPhoto: false,
     profileHref: '/workforce-portal?tab=profile',
     grade: 'Unassigned',
     location: 'Unassigned',
@@ -112,6 +116,20 @@ const contextTone = (context: EnterpriseUserProfileContext) => {
 };
 
 const compact = (value: unknown) => String(value || '').trim();
+
+const employeePhotoUrl = (employeeCode: string) => `/api/hris/employees/${encodeURIComponent(employeeCode)}/photo`;
+
+const isPlaceholderEmployeeCode = (value?: string) => {
+  const code = compact(value).toUpperCase();
+  return !code || ['SIGNED-IN', 'ESS', 'UNLINKED', 'ADMIN'].includes(code);
+};
+
+const resolveProfilePhotoUrl = (user: Pick<ProfileUser, 'employeeCode' | 'photoUrl' | 'hasPhoto'>) => {
+  if (user.photoUrl && !user.photoUrl.includes('/brand/dorman-long-logo')) return user.photoUrl;
+  const code = compact(user.employeeCode);
+  if (!isPlaceholderEmployeeCode(code) && (user.hasPhoto || code)) return employeePhotoUrl(code);
+  return '';
+};
 
 const pruneEmpty = (user: Partial<ProfileUser>) => (
   Object.fromEntries(Object.entries(user).filter(([, value]) => value === 0 || Boolean(compact(value)))) as Partial<ProfileUser>
@@ -167,6 +185,7 @@ export function EnterpriseUserProfile({
   department,
   photoUrl,
   profileHref,
+  hasPhoto,
 }: EnterpriseUserProfileProps) {
   const [currentUser, setCurrentUser] = useState<Partial<ProfileUser>>({});
 
@@ -212,11 +231,13 @@ export function EnterpriseUserProfile({
   }, [context]);
 
   const explicitUser = useMemo(
-    () => pruneEmpty({ name, role, employeeCode, department, photoUrl, profileHref }),
-    [department, employeeCode, name, photoUrl, profileHref, role]
+    () => pruneEmpty({ name, role, employeeCode, department, photoUrl, profileHref, hasPhoto }),
+    [department, employeeCode, hasPhoto, name, photoUrl, profileHref, role]
   );
   const user = { ...defaults[context], ...currentUser, ...explicitUser } as ProfileUser;
   user.role = displayRole(user.role) || user.role;
+  const resolvedPhotoUrl = resolveProfilePhotoUrl(user);
+  const useEmployeePhoto = Boolean(resolvedPhotoUrl) || !isPlaceholderEmployeeCode(user.employeeCode);
   const tone = contextTone(context);
   const links = linksFor(context, user);
   const notificationCount = Number(user.notificationCount || 0);
@@ -233,8 +254,16 @@ export function EnterpriseUserProfile({
         aria-label="Open employee profile menu"
         className={`flex h-11 min-w-11 cursor-pointer list-none items-center justify-center gap-2 rounded-lg border px-1.5 py-1.5 text-left shadow-sm transition-colors sm:justify-start sm:px-2 lg:gap-3 ${tone.shell}`}
       >
-        <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
-          <Image src={user.photoUrl} alt={`${user.name} profile photo`} fill referrerPolicy="no-referrer" className="object-cover" />
+        <span className="relative h-8 w-8 shrink-0">
+          <EmployeeAvatar
+            fullName={user.name}
+            employeeCode={user.employeeCode}
+            photoUrl={resolvedPhotoUrl || undefined}
+            hasPhoto={user.hasPhoto || useEmployeePhoto}
+            tryPhoto={useEmployeePhoto}
+            size="sm"
+            className="ring-0"
+          />
           <span aria-label={user.onlineStatus || 'Offline'} className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border border-white ${user.onlineStatus === 'Online' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
         </span>
         <span className="hidden min-w-0 flex-col leading-tight lg:flex">
@@ -250,8 +279,16 @@ export function EnterpriseUserProfile({
       <div className="fixed inset-x-2 bottom-2 top-2 z-50 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white shadow-xl sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-auto sm:mt-2 sm:max-h-[calc(100dvh-5rem)] sm:w-[min(92vw,440px)]">
         <div className={`border-b border-slate-100 p-4 ${tone.panel}`}>
           <div className="flex items-start gap-3">
-            <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full border border-slate-200 bg-white">
-              <Image src={user.photoUrl} alt="" fill referrerPolicy="no-referrer" className="object-cover" />
+            <span className="relative h-14 w-14 shrink-0">
+              <EmployeeAvatar
+                fullName={user.name}
+                employeeCode={user.employeeCode}
+                photoUrl={resolvedPhotoUrl || undefined}
+                hasPhoto={user.hasPhoto || useEmployeePhoto}
+                tryPhoto={useEmployeePhoto}
+                size="lg"
+                className="ring-0"
+              />
               <span className={`absolute bottom-1 right-1 h-3 w-3 rounded-full border-2 border-white ${user.onlineStatus === 'Online' ? 'bg-emerald-500' : 'bg-slate-400'}`} />
             </span>
             <div className="min-w-0 flex-1">

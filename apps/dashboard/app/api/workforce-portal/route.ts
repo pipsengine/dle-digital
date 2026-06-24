@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { AUTH_COOKIE, verifySessionToken, type SessionPayload } from '@/lib/auth/session';
 import { calculatePayrollEarnings, calculatePermanentUnionDues } from '@/lib/payroll-earnings-engine';
 import { activeLoansVersion, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
@@ -41,6 +42,11 @@ type EssRequest = {
 const ok = <T,>(data: T) => NextResponse.json({ status: 'success', data });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
 const compact = (value: unknown) => String(value || '').trim();
+const linkedEmployeePhotoUrl = (employee: DleEmployeeDirectoryRow) => {
+  const code = compact(employee.employeeCode || employee.employeeId);
+  if (!code) return '';
+  return `/api/hris/employees/${encodeURIComponent(code)}/photo`;
+};
 const round = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 10) / 10;
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const monthEndDate = (period: string) => {
@@ -502,9 +508,8 @@ export async function GET(request: Request) {
         manager: employee.hasManagerAssigned ? 'Assigned manager' : 'Manager assignment pending',
         email: employee.officialEmail || employee.email || employee.personalEmail || `${employee.employeeId.toLowerCase()}@dormanlongeng.com`,
         phone: employee.primaryPhone || employee.phone,
-        photoUrl: employee.hasPhoto
-          ? `/api/hris/employees/${encodeURIComponent(employee.employeeCode || employee.employeeId)}/photo`
-          : '/brand/dorman-long-logo.jpg',
+        photoUrl: linkedEmployeePhotoUrl(employee) || '',
+        hasPhoto: employee?.hasPhoto === true,
         status: currentLeaveNow ? 'On Leave' : employee.status || 'Active',
         yearsOfService: round(Number(employee.yearsOfService || 0)),
         payrollGroup: employee.payrollGroup || 'Monthly Payroll',

@@ -122,6 +122,12 @@ const rbacRole = (employee: DleEmployeeDirectoryRow | null, teamSize: number) =>
   return 'Employee';
 };
 
+const linkedEmployeePhotoUrl = (employee: DleEmployeeDirectoryRow | null) => {
+  const code = compact(employee?.employeeCode || employee?.employeeId);
+  if (!employee || !code) return '';
+  return `/api/hris/employees/${encodeURIComponent(code)}/photo`;
+};
+
 const displayJobTitle = (employee: DleEmployeeDirectoryRow | null) => {
   const title = compact(employee?.jobTitle || employee?.designation);
   return title.replace(/^[A-Z]{2,}\d{1,4}\s*-\s*/i, '').trim() || 'Identity setup required';
@@ -186,9 +192,8 @@ export async function GET(request: Request) {
       role: employee ? displayJobTitle(employee) : sessionRole,
       employeeCode: employee?.employeeCode || employee?.employeeId || sessionCode || 'SIGNED-IN',
       department: employee?.department || employee?.businessUnit || sessionDepartment,
-      photoUrl: employee?.hasPhoto
-        ? `/api/hris/employees/${encodeURIComponent(employee.employeeCode || employee.employeeId)}/photo`
-        : envFirst(`${context.toUpperCase()}_USER_PHOTO_URL`, 'CURRENT_USER_PHOTO_URL') || '/brand/dorman-long-logo.jpg',
+      photoUrl: linkedEmployeePhotoUrl(employee) || envFirst(`${context.toUpperCase()}_USER_PHOTO_URL`, 'CURRENT_USER_PHOTO_URL') || '',
+      hasPhoto: employee?.hasPhoto === true,
       profileHref: employee ? profileHref(context, employee) : '/hris/administration/user-management/user-accounts',
       email: employee?.officialEmail || employee?.email || employee?.personalEmail || '',
       grade: employee?.salaryGrade || employee?.jobGrade || 'Unassigned',

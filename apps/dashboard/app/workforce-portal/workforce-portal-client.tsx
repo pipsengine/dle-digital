@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { NotificationCenter } from '@/components/layout/notification-center';
+import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
 import {
   Activity,
@@ -86,7 +87,7 @@ type Payload = {
   generatedAt: string;
   locale: string;
   security: Record<string, string>;
-  employee: { employeeId: string; employeeCode: string; fullName: string; jobTitle: string; department: string; businessUnit: string; location: string; manager: string; email: string; phone: string; photoUrl: string; status?: string; yearsOfService: number; payrollGroup: string; salaryGrade: string };
+  employee: { employeeId: string; employeeCode: string; fullName: string; jobTitle: string; department: string; businessUnit: string; location: string; manager: string; email: string; phone: string; photoUrl: string; hasPhoto?: boolean; status?: string; yearsOfService: number; payrollGroup: string; salaryGrade: string };
   widgets: {
     leave: { entitlement: number; used: number; balance: number; pending: number };
     attendance: { monthRate: number; lateArrivals: number; overtimeHours: number; remoteDays: number };
@@ -1072,6 +1073,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
               employeeCode={employeeCode}
               department={employee?.department}
               photoUrl={employee?.photoUrl}
+              hasPhoto={employee?.hasPhoto}
               profileHref="/workforce-portal?tab=profile"
             />
             <button type="button" onClick={() => void load()} disabled={loading} aria-label="Refresh ESS data" className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-2 text-xs font-extrabold text-white disabled:cursor-wait disabled:opacity-60 sm:px-3">
@@ -1124,9 +1126,15 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
               </div>
               <div className="border-t border-blue-200 bg-white/80 p-4 sm:p-5 lg:border-l lg:border-t-0">
                 <div className="flex items-center gap-3">
-                  <div className="relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
-                    <Image src="/brand/dorman-long-logo.jpg" alt="" fill sizes="128px" className="object-contain p-2" />
-                  </div>
+                  <EmployeeAvatar
+                    fullName={employee?.fullName || 'Employee'}
+                    employeeCode={employeeCode}
+                    photoUrl={employee?.photoUrl}
+                    hasPhoto={employee?.hasPhoto}
+                    tryPhoto={Boolean(employeeCode)}
+                    size="lg"
+                    className="rounded-lg ring-0"
+                  />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-black text-slate-950">{employee?.fullName || 'Employee'}</p>
                     <p className="truncate text-xs font-semibold text-slate-500">{employee?.jobTitle}</p>
@@ -1217,6 +1225,23 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
 
           {tab === 'profile' && (
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+              <Section title="My Profile">
+                <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                  <EmployeeAvatar
+                    fullName={employee?.fullName || 'Employee'}
+                    employeeCode={employeeCode}
+                    photoUrl={employee?.photoUrl}
+                    hasPhoto={employee?.hasPhoto}
+                    tryPhoto={Boolean(employeeCode)}
+                    size="xl"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-lg font-black text-slate-950">{employee?.fullName || 'Employee'}</p>
+                    <p className="truncate text-sm font-semibold text-slate-600">{employee?.jobTitle}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{employeeCode} · {employee?.department}</p>
+                  </div>
+                </div>
+              </Section>
               <Section title="Profile Management">
                 <div className="space-y-3">
                   {(payload?.profileSections || []).map((section) => (
