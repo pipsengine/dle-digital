@@ -2451,6 +2451,7 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
     ...rec.profile,
     id: row.employeeCode,
     employeeId: row.employeeCode,
+    photoUrl: row.hasPhoto ? `/api/hris/employees/${encodeURIComponent(row.employeeCode)}/photo` : undefined,
     fullName: row.fullName,
     jobTitle: row.jobTitle || 'Unassigned Job Title',
     department: row.department || 'Unassigned Department',

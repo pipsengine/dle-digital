@@ -75,6 +75,7 @@ export type DleEmployeeDirectoryRow = {
   emergencyContactCount: number;
   documentCount: number;
   hasManagerAssigned: boolean;
+  hasPhoto: boolean;
   payrollSource: string;
   payrollGroup: string;
   salaryGrade: string;
@@ -881,7 +882,8 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       payroll.hours_per_period,
       payroll.setup_assigned_to_payroll,
       ec.emergency_contact_count,
-      doc.document_count
+      doc.document_count,
+      CASE WHEN pinfo.photo_data IS NOT NULL AND DATALENGTH(pinfo.photo_data) > 0 THEN 1 ELSE 0 END AS has_photo
     FROM [hris].[EmployeeMasterView] v
     LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = v.employee_id
     LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = v.employee_id
@@ -981,6 +983,7 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       emergencyContactCount,
       documentCount,
       hasManagerAssigned: Boolean(str(row.reporting_manager)),
+      hasPhoto: Number(row.has_photo || 0) === 1,
       payrollSource: 'DLE_Enterprise HRIS',
       payrollGroup: str(row.payroll_group),
       salaryGrade: str(row.salary_grade),
@@ -2134,6 +2137,41 @@ export const createEmployeeFromDraftInDb = async (draftId: string, employeeCode:
     return true;
   } catch (error) {
     await tx.rollback().catch(() => undefined);
+    throw error;
+  }
+};
+
+export const readEmployeePhotoFromDb = async (employeeCode: string): Promise<{ data: Buffer; mimeType: string; fileName: string } | null> => {
+  const code = str(employeeCode);
+  if (!code) return null;
+  const p = await pool();
+  if (!p) return null;
+  try {
+    const rs = await p
+      .request()
+      .input('employee_code', sql.NVarChar(50), code)
+      .query(`
+        SELECT TOP 1
+          pinfo.photo_data,
+          pinfo.photo_mime_type,
+          pinfo.photo_file_name
+        FROM [hris].[Employees] e
+        INNER JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = e.employee_id
+        WHERE e.employee_code = @employee_code
+          AND pinfo.photo_data IS NOT NULL
+          AND DATALENGTH(pinfo.photo_data) > 0
+      `);
+    const row = rs.recordset?.[0];
+    if (!row?.photo_data) return null;
+    const data = Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data);
+    if (!data.length) return null;
+    return {
+      data,
+      mimeType: str(row.photo_mime_type) || 'image/jpeg',
+      fileName: str(row.photo_file_name) || `${code}.jpg`,
+    };
+  } catch (error) {
+    if (error instanceof Error && /Invalid column name 'photo_data'/.test(error.message)) return null;
     throw error;
   }
 };

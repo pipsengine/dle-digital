@@ -345,6 +345,7 @@ const emptyEmployee = (employeeId: string, fullName: string): DleEmployeeDirecto
   emergencyContactCount: 0,
   documentCount: 0,
   hasManagerAssigned: false,
+  hasPhoto: false,
   payrollSource: 'Local HRIS payroll cache',
   payrollGroup: 'Monthly Payroll',
   salaryGrade: 'Unassigned',

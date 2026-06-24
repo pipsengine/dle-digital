@@ -74,6 +74,50 @@ const sageConfig = () => ({
     `);
     console.log('=== PHOTO/DOCUMENT TABLES ===');
     console.log(JSON.stringify(tables.recordset, null, 2));
+
+    const genEntityPhotoCols = await pool.request().query(`
+      SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = 'Entity' AND TABLE_NAME = 'GenEntityPhoto'
+      ORDER BY ORDINAL_POSITION
+    `);
+    console.log('=== Entity.GenEntityPhoto columns ===');
+    console.log(JSON.stringify(genEntityPhotoCols.recordset, null, 2));
+
+    const photoStats = await pool.request().query(`
+      SELECT
+        COUNT(*) AS activeEmployees,
+        SUM(CASE WHEN gp.Photo IS NOT NULL AND DATALENGTH(gp.Photo) > 0 THEN 1 ELSE 0 END) AS employeesWithPhoto,
+        SUM(CASE WHEN gp.Photo IS NULL OR DATALENGTH(gp.Photo) = 0 THEN 1 ELSE 0 END) AS employeesWithoutPhoto,
+        AVG(CASE WHEN gp.Photo IS NOT NULL AND DATALENGTH(gp.Photo) > 0 THEN CAST(DATALENGTH(gp.Photo) AS float) END) AS avgPhotoBytes
+      FROM Employee.Employee e
+      JOIN Entity.GenEntity ge ON ge.GenEntityID = e.GenEntityID
+      JOIN Company.Company c ON c.CompanyID = e.CompanyID
+      LEFT JOIN Employee.EmployeeStatus es ON es.EmployeeStatusID = e.EmployeeStatusID
+      LEFT JOIN Entity.GenEntityPhoto gp ON gp.GenEntityID = ge.GenEntityID
+      WHERE e.TerminationDate IS NULL
+        AND ISNULL(es.Code, 'A') = 'A'
+        AND ge.Status = 'A'
+        AND c.Status = 'A'
+    `);
+    console.log('=== ACTIVE EMPLOYEE PHOTO STATS ===');
+    console.log(JSON.stringify(photoStats.recordset, null, 2));
+
+    const sample = await pool.request().query(`
+      SELECT TOP 5
+        e.EmployeeID,
+        e.EmployeeCode,
+        ge.GenEntityID,
+        DATALENGTH(gp.Photo) AS photoBytes,
+        LEFT(CONVERT(varchar(32), CONVERT(varbinary(8), SUBSTRING(CAST(gp.Photo AS varbinary(max)), 1, 4)), 2), 16) AS photoHexPrefix
+      FROM Employee.Employee e
+      JOIN Entity.GenEntity ge ON ge.GenEntityID = e.GenEntityID
+      LEFT JOIN Entity.GenEntityPhoto gp ON gp.GenEntityID = ge.GenEntityID
+      WHERE gp.Photo IS NOT NULL AND DATALENGTH(gp.Photo) > 0
+      ORDER BY e.EmployeeCode
+    `);
+    console.log('=== SAMPLE PHOTOS ===');
+    console.log(JSON.stringify(sample.recordset, null, 2));
   } finally {
     await pool.close();
   }
