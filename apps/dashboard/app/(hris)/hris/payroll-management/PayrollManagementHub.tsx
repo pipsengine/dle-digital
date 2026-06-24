@@ -227,7 +227,7 @@ export default function PayrollManagementHub({
     },
     {
       id: 'deductions-management',
-      tab: 'statutory-deductions',
+      tab: 'overview',
       title: 'Deductions',
       description: 'Manage taxes, pension, NHF and deductions.',
       icon: FileSpreadsheet,

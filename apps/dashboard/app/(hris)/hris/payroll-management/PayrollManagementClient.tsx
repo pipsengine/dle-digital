@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import PayrollCommandCenter, { type CommandCenterNavTab } from './PayrollCommandCenter';
 import PayrollManagementHub, { type HubQuickLinkId, type HubWorkspaceId } from './PayrollManagementHub';
+import PaySetupHub, { type PaySetupTabId } from './PaySetupHub';
+import EarningsManagementHub, { type EarningsTabId } from './EarningsManagementHub';
+import DeductionsManagementHub, { type DeductionsTabId } from './DeductionsManagementHub';
 import {
   Bar,
   BarChart,
@@ -77,7 +80,9 @@ type PayrollRecord = {
   payrollGroup: string;
   salaryGrade: string;
   salaryStructure?: string;
+  earningProfile?: string;
   isDailyRate?: boolean;
+  readinessStatus?: 'Ready' | 'Awaiting Timesheet' | 'Review' | 'Blocked';
   ratePerDay?: number | null;
   ratePerHour?: number | null;
   hoursPerDay?: number | null;
@@ -354,6 +359,7 @@ const sections: SectionConfig[] = [
     icon: Coins,
     tone: 'green',
     tabs: [
+      { id: 'overview', label: 'Overview', description: 'Pay setup readiness, workspace shortcuts, setup health, and top exceptions.', items: ['Setup coverage', 'Category readiness', 'Workspace shortcuts', 'Setup exceptions', 'Quick actions'] },
       { id: 'salary-structure', label: 'Salary Structure', description: 'Grade bands, compa-ratio, distribution, health monitoring, exceptions, and compensation governance.', legacyHref: '/hris/payroll/salary-structure', items: ['Salary grades and bands', 'Minimum, midpoint, and maximum salary ranges', 'Compa-ratio analysis', 'Payroll distribution analysis', 'Grade health monitoring', 'Salary exception management', 'Compensation governance'] },
       { id: 'salary-grades', label: 'Salary Grades', description: 'Grade hierarchy and eligibility controls with effective-dated maintenance.', items: ['Grade creation and maintenance', 'Grade hierarchy', 'Grade-to-position mapping', 'Grade eligibility rules', 'Effective date management'] },
       { id: 'employee-salary-setup', label: 'Employee Salary Setup', description: 'Employee compensation profiles, payroll eligibility, and cost center assignment.', legacyHref: '/hris/payroll/employee-salary-setup', items: ['Basic salary assignment', 'Salary structure assignment', 'Employee compensation profile', 'Payroll eligibility configuration', 'Cost center assignment'] },
@@ -369,24 +375,28 @@ const sections: SectionConfig[] = [
     icon: TrendingUp,
     tone: 'cyan',
     tabs: [
+      { id: 'overview', label: 'Overview', description: 'Earnings readiness, workspace shortcuts, earnings health, and top exceptions.', items: ['Earnings coverage', 'Workspace shortcuts', 'Earnings exceptions', 'Quick actions'] },
       { id: 'allowances', label: 'Allowances', description: 'Allowance catalogue and rule-driven eligibility.', legacyHref: '/hris/payroll/allowances', items: ['Housing allowance', 'Transport allowance', 'Utility allowance', 'Medical allowance', 'Special allowances', 'Allowance configuration rules'] },
-      { id: 'bonuses', label: 'Bonuses', description: 'Bonus schemes, workflow controls, and approval-ready submissions.', items: ['Performance bonus', 'Annual bonus', 'Project bonus', 'Special bonus', 'Bonus approval workflows'] },
       { id: 'overtime-pay', label: 'Overtime Pay', description: 'Overtime rules, calculations, approvals, and analytics.', legacyHref: '/hris/payroll/overtime-pay', items: ['Overtime rules', 'Overtime calculations', 'Overtime approvals', 'Overtime analytics'] },
       { id: 'daily-rate-pay', label: 'Daily Rate Pay', description: 'Daily rate employee management, attendance integration, calculations, and approvals.', legacyHref: '/hris/payroll/daily-rate-pay', items: ['Daily rate employee management', 'Daily attendance integration', 'Daily payroll calculations', 'Daily payroll approvals'] },
+      { id: 'bonus-inputs', label: 'Bonus Inputs', description: 'Bonus schemes, workflow controls, and approval-ready submissions.', items: ['Performance bonus', 'Annual bonus', 'Project bonus', 'Special bonus', 'Bonus approval workflows'] },
+      { id: 'exceptions', label: 'Exceptions', description: 'Earnings exception register and resolution workflow.', items: ['Exception register', 'Resolution workflow', 'Earnings validation', 'Audit trail'] },
     ],
   },
   {
     id: 'deductions-management',
     label: 'Deductions',
     title: 'Deductions Management',
-    description: 'Statutory deductions, loans, other deductions, and the rules engine.',
+    description: 'Manage PAYE, pension, NHF, loans, union deductions, and payroll deduction compliance from one centralized workspace.',
     icon: FileSpreadsheet,
     tone: 'violet',
     tabs: [
-      { id: 'statutory-deductions', label: 'Statutory Deductions', description: 'PAYE, pension, NHF, NSITF, and ITF deductions.', legacyHref: '/hris/payroll/deductions', items: ['PAYE tax', 'Pension deductions', 'NHF deductions', 'NSITF deductions', 'ITF deductions'] },
-      { id: 'loans-salary-advances', label: 'Loans & Salary Advances', description: 'Loan setup, approval controls, schedules, salary advance processing, and balances.', legacyHref: '/hris/payroll/loans-and-salary-advances', items: ['Loan setup', 'Loan approvals', 'Repayment schedules', 'Salary advance processing', 'Outstanding balances'] },
-      { id: 'other-deductions', label: 'Other Deductions', description: 'Cooperative, union, insurance, and configurable custom deductions.', items: ['Cooperative deductions', 'Union deductions', 'Insurance deductions', 'Custom deductions'] },
-      { id: 'deduction-rules-engine', label: 'Deduction Rules Engine', description: 'Formula, threshold, exemption, and effective-date governance.', items: ['Deduction formulas', 'Thresholds', 'Exemptions', 'Effective dates'] },
+      { id: 'overview', label: 'Overview', description: 'Deduction readiness, workspace shortcuts, deduction health, and top exceptions.', items: ['Deduction coverage', 'Workspace shortcuts', 'Deduction exceptions', 'Quick actions'] },
+      { id: 'paye', label: 'PAYE', description: 'PAYE tax rules, tax bands, employee tax setup, and tax compliance.', legacyHref: '/hris/payroll/tax-paye', items: ['PAYE tax', 'Tax bands', 'Employee tax setup', 'PAYE validation'] },
+      { id: 'pension', label: 'Pension', description: 'Pension setup, contribution rates, RSA compliance, and pension validation.', legacyHref: '/hris/payroll/pension', items: ['Pension rules', 'RSA setup', 'Contribution review', 'Pension compliance'] },
+      { id: 'nhf-loans', label: 'NHF / Loans', description: 'NHF deductions, staff loans, cooperative deductions, and union deductions.', legacyHref: '/hris/payroll/loans-and-salary-advances', items: ['NHF setup', 'Loan setup', 'Cooperative deductions', 'Union deductions'] },
+      { id: 'rules-engine', label: 'Rules Engine', description: 'Deduction rules, eligibility, validation, and payroll deduction governance.', items: ['Deduction eligibility', 'Rule builder', 'Validation rules', 'Deduction mapping'] },
+      { id: 'exceptions', label: 'Exceptions', description: 'Deduction exception register and resolution workflow.', items: ['Exception register', 'Resolution workflow', 'Audit trail'] },
     ],
   },
   {
@@ -672,6 +682,8 @@ const sectionAliases: Record<string, SectionId> = {
   'payroll-workflow-status': 'payroll-computation-workflow',
   'payroll-computation-and-approval-workflow': 'payroll-computation-workflow',
   'pay-setup': 'salary-management',
+  earnings: 'earnings-management',
+  'earnings-management': 'earnings-management',
   deductions: 'deductions-management',
   'deductions-management': 'deductions-management',
   statutory: 'compliance-statutory-management',
@@ -696,6 +708,9 @@ const emptyTab = (id = 'overview'): TabConfig => ({ id, label: 'Overview', descr
 
 const defaultTabIdForSection = (section: SectionConfig) => {
   if (section.id === 'payroll-processing') return 'payroll-run';
+  if (section.id === 'salary-management') return 'overview';
+  if (section.id === 'earnings-management') return 'overview';
+  if (section.id === 'deductions-management') return 'overview';
   return section.tabs[0]?.id || 'overview';
 };
 
@@ -709,6 +724,9 @@ const sectionById = (id?: string) => {
 const sectionHref = (id: SectionId) => {
   if (id === 'dashboard') return '/hris/payroll-management/dashboard';
   if (id === 'process-payroll') return '/hris/payroll-management/process-payroll';
+  if (id === 'salary-management') return '/hris/payroll-management/pay-setup';
+  if (id === 'earnings-management') return '/hris/payroll-management/earnings';
+  if (id === 'deductions-management') return '/hris/payroll-management/deductions';
   return `/hris/payroll-management/${id}`;
 };
 
@@ -3887,9 +3905,20 @@ const groupPayrollExceptions = (exceptions: PayrollException[]) => {
   }, new Map<string, PayrollException & { issues: string[] }>()).values());
 };
 
-export default function PayrollManagementClient({ initialNow, initialSection = 'dashboard' }: { initialNow: string; initialSection?: string }) {
-  const [sectionId, setSectionId] = useState<SectionId>(sectionById(initialSection).id);
-  const [activeTabs, setActiveTabs] = useState<Record<string, string>>({});
+export default function PayrollManagementClient({
+  initialNow,
+  initialSection = 'dashboard',
+  initialTab,
+}: {
+  initialNow: string;
+  initialSection?: string;
+  initialTab?: string;
+}) {
+  const resolvedSection = sectionById(initialSection);
+  const [sectionId, setSectionId] = useState<SectionId>(resolvedSection.id);
+  const [activeTabs, setActiveTabs] = useState<Record<string, string>>(() =>
+    initialTab ? { [resolvedSection.id]: initialTab } : {},
+  );
   const [role, setRole] = useState<Role>('Payroll Officer');
   const [payload, setPayload] = useState<PayrollPayload | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -4129,6 +4158,170 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
     if (link === 'audit-trail') setAuditOpen(true);
   };
 
+  const paySetupTabIds: PaySetupTabId[] = [
+    'overview',
+    'salary-structure',
+    'salary-grades',
+    'employee-salary-setup',
+    'sage-migration-review',
+    'compensation-planning',
+  ];
+  const paySetupActiveTab: PaySetupTabId = paySetupTabIds.includes(activeTabId as PaySetupTabId)
+    ? (activeTabId as PaySetupTabId)
+    : 'overview';
+
+  const earningsTabIds: EarningsTabId[] = [
+    'overview',
+    'allowances',
+    'overtime-pay',
+    'daily-rate-pay',
+    'bonus-inputs',
+    'exceptions',
+  ];
+  const earningsActiveTab: EarningsTabId = earningsTabIds.includes(activeTabId as EarningsTabId)
+    ? (activeTabId as EarningsTabId)
+    : 'overview';
+
+  const deductionsTabIds: DeductionsTabId[] = [
+    'overview',
+    'paye',
+    'pension',
+    'nhf-loans',
+    'rules-engine',
+    'exceptions',
+  ];
+  const deductionsActiveTab: DeductionsTabId = deductionsTabIds.includes(activeTabId as DeductionsTabId)
+    ? (activeTabId as DeductionsTabId)
+    : 'overview';
+
+  if (section.id === 'deductions-management') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <DeductionsManagementHub
+          key={`${payload?.period || viewPeriod || 'deductions'}-${deductionsActiveTab}`}
+          payload={payload}
+          activeTab={deductionsActiveTab}
+          loading={loading}
+          lastLoaded={lastLoaded}
+          viewPeriod={viewPeriod}
+          onRefresh={() => void load()}
+          onExportCsv={exportCsv}
+          onExportExcel={exportExcel}
+          onSelectTab={(tab) => {
+            setActiveTabs((prev) => ({ ...prev, 'deductions-management': tab }));
+            window.history.pushState(null, '', sectionHref('deductions-management'));
+          }}
+          onFixException={(id) => {
+            const issue = payload?.exceptions.find((item) => item.id === id);
+            if (issue) setFixIssue(issue);
+          }}
+          onViewAllExceptions={() => openSection('payroll-processing', 'payroll-validation')}
+          onViewAudit={() => setAuditOpen(true)}
+          onSelectPeriod={(period) => {
+            setViewPeriod(period);
+            void load(period);
+          }}
+        />
+        {fixIssue ? (
+          <IssueFixDrawer
+            issue={fixIssue}
+            record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+            busy={busyAction === `fix-${fixIssue.id}`}
+            onClose={() => setFixIssue(null)}
+            onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+          />
+        ) : null}
+        {auditOpen ? <AuditPanel payload={payload} onClose={() => setAuditOpen(false)} /> : null}
+      </div>
+    );
+  }
+
+  if (section.id === 'earnings-management') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <EarningsManagementHub
+          key={`${payload?.period || viewPeriod || 'earnings'}-${earningsActiveTab}`}
+          payload={payload}
+          activeTab={earningsActiveTab}
+          loading={loading}
+          lastLoaded={lastLoaded}
+          viewPeriod={viewPeriod}
+          onRefresh={() => void load()}
+          onExportCsv={exportCsv}
+          onExportExcel={exportExcel}
+          onSelectTab={(tab) => {
+            setActiveTabs((prev) => ({ ...prev, 'earnings-management': tab }));
+            window.history.pushState(null, '', sectionHref('earnings-management'));
+          }}
+          onFixException={(id) => {
+            const issue = payload?.exceptions.find((item) => item.id === id);
+            if (issue) setFixIssue(issue);
+          }}
+          onViewAllExceptions={() => openSection('payroll-processing', 'payroll-validation')}
+          onSelectPeriod={(period) => {
+            setViewPeriod(period);
+            void load(period);
+          }}
+        />
+        {fixIssue ? (
+          <IssueFixDrawer
+            issue={fixIssue}
+            record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+            busy={busyAction === `fix-${fixIssue.id}`}
+            onClose={() => setFixIssue(null)}
+            onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (section.id === 'salary-management') {
+    return (
+      <div>
+        {error ? <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+        {toast ? <div className="mx-4 mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+        <PaySetupHub
+          key={`${payload?.period || viewPeriod || 'pay-setup'}-${paySetupActiveTab}`}
+          payload={payload}
+          activeTab={paySetupActiveTab}
+          loading={loading}
+          lastLoaded={lastLoaded}
+          viewPeriod={viewPeriod}
+          onRefresh={() => void load()}
+          onExportCsv={exportCsv}
+          onExportExcel={exportExcel}
+          onSelectTab={(tab) => {
+            setActiveTabs((prev) => ({ ...prev, 'salary-management': tab }));
+            window.history.pushState(null, '', sectionHref('salary-management'));
+          }}
+          onViewException={(id) => {
+            const issue = payload?.exceptions.find((item) => item.id === id);
+            if (issue) setFixIssue(issue);
+          }}
+          onViewAllExceptions={() => openSection('payroll-processing', 'payroll-validation')}
+          onSelectPeriod={(period) => {
+            setViewPeriod(period);
+            void load(period);
+          }}
+        />
+        {fixIssue ? (
+          <IssueFixDrawer
+            issue={fixIssue}
+            record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+            busy={busyAction === `fix-${fixIssue.id}`}
+            onClose={() => setFixIssue(null)}
+            onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   if (section.id === 'process-payroll') {
     return (
       <div>
@@ -4316,7 +4509,7 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
             </div>
           </section>
 
-          {section.id !== 'salary-management' && section.id !== 'payroll-computation-workflow' && section.id !== 'payroll-processing' ? (
+          {section.id !== 'payroll-computation-workflow' && section.id !== 'payroll-processing' ? (
             <PayrollCommandBar
               section={section}
               activeTab={activeTab}
@@ -4342,12 +4535,6 @@ export default function PayrollManagementClient({ initialNow, initialSection = '
           <div className="mt-4">
             {section.id === 'payroll-computation-workflow' ? (
               <PayrollComputationWorkflowPage payload={payload} canViewMoney={canViewMoney} role={role} runAction={runAction} busyAction={busyAction} onAudit={() => setAuditOpen(true)} exportCsv={exportCsv} exportExcel={exportExcel} />
-            ) : section.id === 'salary-management' ? (
-              <PaySetupWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
-            ) : section.id === 'earnings-management' ? (
-              <EarningsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
-            ) : section.id === 'deductions-management' ? (
-              <DeductionsWorkspace activeTab={activeTab} payload={payload} canViewMoney={canViewMoney} />
             ) : section.id === 'payroll-processing' ? (
               activeTab.id === 'payroll-period-management' ? (
                 <PayrollPeriodManagementPanel
@@ -4496,7 +4683,7 @@ function DashboardWorkspace({
     { no: 2, title: 'Confirm Payroll Period', detail: `${payload?.periodLabel || 'Current period'} is the active payroll period. Open Period Management to review dates, scope, closing, and reopening controls.`, section: 'payroll-processing' as SectionId, tab: 'payroll-period-management', action: 'open-period', owner: 'Payroll Officer', done: ['Open', 'Validation', 'Validated', 'Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
     { no: 3, title: 'Review Pay Setup', detail: 'Salary grades, daily rates, payroll group, payment setup, NHF, and blocked employee setup.', section: 'salary-management' as SectionId, tab: 'employee-salary-setup', action: undefined, owner: 'Payroll Officer', done: (payload?.summary.blockedEmployees || 0) === 0 },
     { no: 4, title: 'Review Earnings', detail: 'Allowances, overtime, daily-rate pay, annual benefit events, and earning profiles.', section: 'earnings-management' as SectionId, tab: 'allowances', action: undefined, owner: 'Payroll Officer', done: true },
-    { no: 5, title: 'Review Deductions', detail: 'PAYE, pension, NHF, loans, union dues, and other deductions.', section: 'deductions-management' as SectionId, tab: 'statutory-deductions', action: undefined, owner: 'Payroll Officer', done: true },
+    { no: 5, title: 'Review Deductions', detail: 'PAYE, pension, NHF, loans, union dues, and other deductions.', section: 'deductions-management' as SectionId, tab: 'paye', action: undefined, owner: 'Payroll Officer', done: true },
     { no: 6, title: 'Validate Payroll', detail: 'Run validation and clear every payroll exception before approval routing.', section: 'dashboard' as SectionId, tab: undefined, action: 'validate-payroll', owner: 'Payroll Officer', done: Boolean(currentRun?.validatedAt) && !issues.length },
     { no: 7, title: 'Process Payroll', detail: 'Create the computed payroll run after master data and setup are valid.', section: 'payroll-processing' as SectionId, tab: 'payroll-run', action: 'create-run', owner: 'Payroll Officer', done: ['Computed', 'Ready for Approval', 'Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },
     { no: 8, title: 'Submit for Approval', detail: 'Send the clean run to HR, Finance, and executive approval.', section: 'payroll-processing' as SectionId, tab: 'payroll-approval', action: 'submit-run', owner: 'Payroll Officer', done: Boolean(currentRun?.submittedAt) || ['Submitted', 'Under Review', 'Approved', 'Released', 'Locked', 'Posted', 'Published', 'Closed'].includes(runStatus) },

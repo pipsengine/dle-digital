@@ -18,7 +18,11 @@ const titleOverrides: Record<string, string> = {
   '/hris/time-and-logs/timesheet-review': 'Timesheet Review',
   '/hris/time-and-logs/timesheet-period': 'Timesheet Period',
   '/hris/workforce-management/attendance': 'Attendance',
-  '/hris/payroll-management/salary-management': 'Salary Management',
+  '/hris/payroll-management/deductions': 'Deductions Management',
+  '/hris/payroll-management/deductions-management': 'Deductions Management',
+  '/hris/payroll-management/earnings-management': 'Earnings Management',
+  '/hris/payroll-management/salary-management': 'Pay Setup',
+  '/hris/payroll-management/pay-setup': 'Pay Setup',
   '/hris/payroll-management/payroll-computation-workflow': 'Payroll Computation & Approval Workflow',
   '/hris/payroll/salary-structure': 'Salary Structure',
 };
