@@ -189,7 +189,7 @@ function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string;
 
 function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
   const [payload, setPayload] = useState<Payload | null>(null);
-  const [role, setRole] = useState<Role>('Payroll Officer');
+  const [sessionRole, setSessionRole] = useState<Role>('Payroll Officer');
   const [period, setPeriod] = useState('');
   const [periodQuery, setPeriodQuery] = useState('');
   const [query, setQuery] = useState('');
@@ -206,10 +206,11 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
     setError('');
     try {
       const suffix = targetPeriod ? `?period=${encodeURIComponent(targetPeriod)}` : '';
-      const res = await fetch(`/api/hris/payroll/payroll-processing${suffix}`, { headers: { 'x-hris-role': role }, cache: 'no-store' });
+      const res = await fetch(`/api/hris/payroll/payroll-processing${suffix}`, { cache: 'no-store' });
       const json = (await res.json()) as ApiResponse<Payload>;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Payroll processing request failed (${res.status})`);
       setPayload(json.data);
+      setSessionRole(json.data.role);
       setPeriod(json.data.period);
     } catch (event) {
       setError(event instanceof Error ? event.message : 'Unable to load payroll processing');
@@ -219,8 +220,24 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
   };
 
   useEffect(() => {
+    void fetch('/api/auth/me', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json?.data?.roles?.length) {
+          const rolesText = json.data.roles.join(' ');
+          if (/super administrator|global super|super admin/i.test(rolesText)) setSessionRole('Super Admin');
+          else if (/finance controller/i.test(rolesText)) setSessionRole('Finance Controller');
+          else if (/hr director/i.test(rolesText)) setSessionRole('HR Director');
+          else if (/hr manager/i.test(rolesText)) setSessionRole('HR Manager');
+          else if (/auditor/i.test(rolesText)) setSessionRole('Auditor');
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     void load(period);
-  }, [role]);
+  }, []);
 
   const canViewMoney = Boolean(payload?.permissions.canViewMoney);
   const lastLoaded = payload?.generatedAt || initialNow;
@@ -249,7 +266,7 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
     try {
       const res = await fetch('/api/hris/payroll/payroll-processing', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-hris-role': role },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action, period, note: `Payroll ${action} from processing console` }),
       });
       const json = (await res.json()) as ApiResponse<{ run: PayrollRun }>;
@@ -325,9 +342,7 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
             </select>
             <input type="month" value={period} onChange={(event) => setPeriod(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none" />
           </div>
-          <select value={role} onChange={(event) => setRole(event.target.value as Role)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none">
-            {['Payroll Officer', 'Finance Controller', 'HR Director', 'HR Manager', 'Executive Management', 'Auditor', 'Employee', 'Super Admin'].map((item) => <option key={item}>{item}</option>)}
-          </select>
+          <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-extrabold text-violet-800">Role: {payload?.role || sessionRole}</span>
           <button type="button" onClick={() => void load(period)} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-extrabold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
             <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh

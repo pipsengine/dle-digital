@@ -1,0 +1,245 @@
+import { calculatePayrollForPeriod, maskPayrollCalculationRecords } from '@/lib/payroll-calculation-service';
+import { getActivePayrollPeriod, listPayrollPeriods, payrollPeriodLabel } from '@/lib/payroll-period-store';
+import { getPayrollRunForPeriod, listPayrollAudit, listPayrollRuns } from '@/lib/payroll-run-store';
+import { managementPermissions, payrollSessionContext, processingPermissions } from '@/lib/payroll-session';
+
+const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+
+const mapRunForProcessing = (run: Awaited<ReturnType<typeof getPayrollRunForPeriod>>) =>
+  run
+    ? {
+        id: run.id,
+        period: run.period,
+        periodLabel: run.periodLabel,
+        status: run.status,
+        employeeCount: run.employeeCount,
+        grossPay: run.grossPay,
+        netPay: run.netPay,
+        totalDeductions: run.deductions,
+        employerCost: run.employerCost,
+        exceptionCount: run.exceptionCount,
+        createdAt: run.createdAt,
+        createdBy: run.createdBy,
+        updatedAt: run.updatedAt,
+        updatedBy: run.updatedBy,
+        audit: (run.audit || []).map((entry) => ({
+          at: entry.at,
+          actor: entry.user,
+          action: entry.action,
+          from: entry.oldValue || undefined,
+          to: entry.newValue || undefined,
+          note: entry.comment || entry.reason || undefined,
+        })),
+      }
+    : null;
+
+const knownPayrollPeriods = async (runs: Awaited<ReturnType<typeof listPayrollRuns>>, currentPeriod: string) => {
+  const periodState = await listPayrollPeriods();
+  const seeded = [periodState.activePeriod, ...periodState.periods.map((item) => item.period), currentPeriod];
+  return Array.from(new Set([...seeded, ...runs.map((run) => run.period)]))
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a))
+    .map((period) => {
+      const run = runs.find((item) => item.period === period);
+      const periodRecord = periodState.periods.find((item) => item.period === period);
+      return {
+        period,
+        periodLabel: payrollPeriodLabel(period),
+        status: run?.status || periodRecord?.status || 'Draft',
+        employeeCount: run?.employeeCount || 0,
+        netPay: run?.netPay || 0,
+      };
+    });
+};
+
+export const buildProcessingPayload = async (request: Request, requestedPeriod?: string) => {
+  const { role } = await payrollSessionContext(request);
+  const perms = processingPermissions(role);
+  const period = requestedPeriod || (await getActivePayrollPeriod());
+  const [calculation, runs, run] = await Promise.all([
+    calculatePayrollForPeriod(period),
+    listPayrollRuns(),
+    getPayrollRunForPeriod(period),
+  ]);
+
+  const summary = perms.canViewMoney
+    ? calculation.summary
+    : {
+        ...calculation.summary,
+        basePay: null,
+        allowances: null,
+        grossPay: null,
+        totalDeductions: null,
+        deductions: null,
+        netPay: null,
+        employerCost: null,
+        sageGrossPay: null,
+        sageNetPay: null,
+        grossVariance: null,
+        netVariance: null,
+        averageDeductionRatio: null,
+      };
+
+  const records = perms.canViewMoney ? calculation.records : maskPayrollCalculationRecords(calculation.records);
+  const byGroup = calculation.breakdowns.byPayrollGroup.map((item) =>
+    perms.canViewMoney ? item : { ...item, grossPay: null, netPay: null },
+  );
+
+  return {
+    generatedAt: calculation.generatedAt,
+    source: 'DLE unified payroll processing engine',
+    dataSource: calculation.dataSource,
+    period,
+    periodLabel: calculation.periodLabel,
+    role,
+    permissions: perms,
+    run: mapRunForProcessing(run),
+    runs: runs.slice(0, 12).map((item) => mapRunForProcessing(item)).filter(Boolean),
+    availablePeriods: await knownPayrollPeriods(runs, period),
+    configurations: calculation.configurations,
+    summary,
+    records,
+    breakdowns: {
+      byPayrollGroup: byGroup,
+      byComponent: perms.canViewMoney ? calculation.breakdowns.byComponent : [],
+    },
+    controls: [
+      ...calculation.controls,
+      {
+        id: 'approval',
+        label: 'Approval Workflow',
+        status: run?.status || 'Draft',
+        detail: 'Submit, finance approve, HR approve, lock, and post payroll with full audit trace.',
+        tone: run?.status === 'Posted' || run?.status === 'Locked' ? 'green' : 'violet',
+      },
+    ],
+  };
+};
+
+export const buildManagementPayload = async (request: Request, requestedPeriod?: string) => {
+  const { role } = await payrollSessionContext(request);
+  const perms = managementPermissions(role);
+  const period = requestedPeriod || (await getActivePayrollPeriod());
+  const [calculation, runs, run, auditTrail] = await Promise.all([
+    calculatePayrollForPeriod(period),
+    listPayrollRuns(),
+    getPayrollRunForPeriod(period),
+    listPayrollAudit(50),
+  ]);
+
+  const currentRun = run || runs[0] || null;
+  const records = perms.canViewMoney ? calculation.records : maskPayrollCalculationRecords(calculation.records);
+  const exceptions = calculation.records
+    .filter((record) => record.exceptionCount > 0)
+    .flatMap((record) =>
+      record.exceptions.map((issue, index) => ({
+        id: `${record.employeeId}-${index}`,
+        employeeId: record.employeeId,
+        employeeName: record.fullName,
+        issue,
+        severity: record.riskSeverity,
+        owner: issue.includes('Pay amount') || issue.includes('Payroll group') ? 'Payroll Officer' : issue.includes('status') ? 'HR Manager' : 'HR Officer',
+      })),
+    );
+
+  const blocked = calculation.summary.blockedEmployees;
+  const workflowRun = currentRun;
+
+  return {
+    generatedAt: calculation.generatedAt,
+    source: `${calculation.dataSource.source} and unified payroll engine`,
+    dataSource: calculation.dataSource,
+    role,
+    permissions: perms,
+    period,
+    periodLabel: calculation.periodLabel,
+    summary: {
+      totalEmployees: calculation.summary.employees,
+      payrollEligible: calculation.summary.payrollEligible,
+      readyEmployees: calculation.summary.readyEmployees,
+      reviewEmployees: calculation.summary.reviewEmployees,
+      blockedEmployees: calculation.summary.blockedEmployees,
+      payrollCoveragePct: calculation.summary.employees
+        ? Math.round((calculation.records.filter((record) => record.setupAssignedToPayroll).length / calculation.summary.employees) * 1000) / 10
+        : 0,
+      grossPay: roundMoney(calculation.summary.grossPay),
+      deductions: roundMoney(calculation.summary.deductions),
+      netPay: roundMoney(calculation.summary.netPay),
+      basePay: roundMoney(calculation.summary.basePay),
+      allowances: roundMoney(calculation.summary.allowances),
+      exceptionCount: calculation.summary.exceptionCount,
+    },
+    runs: runs.map((item) => ({
+      id: item.id,
+      period: item.period,
+      status: item.status,
+      employeeCount: item.employeeCount,
+      grossPay: item.grossPay,
+      deductions: item.deductions,
+      netPay: item.netPay,
+      createdAt: item.createdAt,
+      createdBy: item.createdBy,
+      validatedAt: item.validatedAt || null,
+      validatedBy: item.validatedBy || null,
+      submittedAt: item.submittedAt || null,
+      submittedBy: item.submittedBy || null,
+      approvedAt: item.approvedAt || null,
+      approvedBy: item.approvedBy || null,
+      releasedAt: item.releasedAt || null,
+      releasedBy: item.releasedBy || null,
+      lockedAt: item.lockedAt || null,
+      payslipsGeneratedAt: item.payslipsGeneratedAt || null,
+      payslipsGeneratedBy: item.payslipsGeneratedBy || null,
+      bankScheduleGeneratedAt: item.bankScheduleGeneratedAt || null,
+      bankScheduleGeneratedBy: item.bankScheduleGeneratedBy || null,
+      statutorySchedulesGeneratedAt: item.statutorySchedulesGeneratedAt || null,
+      statutorySchedulesGeneratedBy: item.statutorySchedulesGeneratedBy || null,
+      postedAt: item.postedAt || null,
+      postedBy: item.postedBy || null,
+      closedAt: item.closedAt || null,
+      reopenedAt: item.reopenedAt || null,
+      reopenedBy: item.reopenedBy || null,
+      reopenReason: item.reopenReason || null,
+      artifacts: item.artifacts || [],
+    })),
+    records,
+    exceptions,
+    breakdowns: {
+      byPayrollGroup: calculation.breakdowns.byPayrollGroup,
+      byDepartment: calculation.breakdowns.byDepartment.slice(0, 12),
+      byEmploymentType: calculation.breakdowns.byEmploymentType,
+    },
+    controls: [
+      { id: 'master-data', label: 'Master Data Validation', status: blocked ? 'Attention Required' : 'Passed', tone: blocked ? 'red' : 'green' },
+      { id: 'statutory', label: 'PAYE, Pension, Statutory Funds', status: 'Calculated', tone: 'blue' },
+      { id: 'approval', label: 'Segregated Approval', status: workflowRun?.status || 'Draft', tone: 'violet' },
+      { id: 'audit', label: 'Payroll Audit Trail', status: 'Enabled', tone: 'cyan' },
+    ],
+    workflow: {
+      currentStatus: workflowRun?.status || 'Draft',
+      nextOwner: blocked
+        ? 'Payroll Officer'
+        : !workflowRun?.validatedAt
+          ? 'Payroll Supervisor'
+          : !workflowRun?.submittedAt
+            ? 'Payroll Officer'
+            : !workflowRun?.approvedAt
+              ? 'HR / Finance / CFO'
+              : !workflowRun?.releasedAt
+                ? 'Payroll Supervisor'
+                : !workflowRun?.postedAt
+                  ? 'Finance Manager'
+                  : 'Payroll Officer',
+      blockedActions: [
+        ...(blocked ? ['Approval is blocked until validation exceptions are resolved.'] : []),
+        ...(!workflowRun?.approvedAt ? ['Payslip publishing, bank schedule generation, and journal posting require payroll approval.'] : []),
+        ...(workflowRun?.approvedAt && !workflowRun.bankScheduleGeneratedAt ? ['Bank schedule must be generated before posting and closing.'] : []),
+        ...(workflowRun?.approvedAt && !workflowRun.statutorySchedulesGeneratedAt ? ['Statutory schedules must be generated before posting and closing.'] : []),
+        ...(workflowRun?.postedAt && !workflowRun.payslipsGeneratedAt ? ['Payslips must be published before period close.'] : []),
+      ],
+      approvalStage: blocked ? 'Validation' : workflowRun?.approvedAt ? 'Approved' : workflowRun?.submittedAt ? 'Awaiting Approval' : 'Preparation',
+    },
+    auditTrail,
+    artifacts: workflowRun?.artifacts || [],
+  };
+};
