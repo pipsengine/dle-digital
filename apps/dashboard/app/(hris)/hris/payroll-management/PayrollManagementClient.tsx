@@ -4032,7 +4032,7 @@ export default function PayrollManagementClient({
     });
   }, [payload?.records, query, status]);
 
-  const runAction = async (action: string, reason = '', periodOverride?: string) => {
+  const runAction = async (action: string, reason = '', periodOverride?: string, reportOptions?: { report?: string; reportName?: string }) => {
     setBusyAction(action);
     setToast('');
     try {
@@ -4040,7 +4040,14 @@ export default function PayrollManagementClient({
       const res = await fetch('/api/hris/payroll-management', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, period, runId: payrollRunFor(payload)?.id, reason }),
+        body: JSON.stringify({
+          action,
+          period,
+          runId: payrollRunFor(payload)?.id,
+          reason,
+          report: reportOptions?.report,
+          reportName: reportOptions?.reportName,
+        }),
       });
       const json = await readApiResponse<{ run: PayrollRun }>(res);
       if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Payroll action failed');
@@ -4099,11 +4106,19 @@ export default function PayrollManagementClient({
       return;
     }
     if (actionItem.id === 'export-csv') {
-      exportCsv();
+      exportReportCsv();
       return;
     }
     if (actionItem.id === 'export-excel') {
-      exportExcel();
+      exportReportExcel();
+      return;
+    }
+    if (actionItem.id === 'export-pdf') {
+      exportReportPdf();
+      return;
+    }
+    if (actionItem.id === 'generate-report') {
+      void generateReport();
       return;
     }
     if (actionItem.sensitive) {
@@ -4122,17 +4137,65 @@ export default function PayrollManagementClient({
     void runAction(actionToRun.id, actionReason.trim());
   };
 
-  const exportCsv = () => {
-    window.location.href = '/api/hris/payroll-management?format=csv';
+  const reportExportUrl = (format: 'csv' | 'xls' | 'pdf' | 'html', report = 'payroll-register', status = 'All') => {
+    const params = new URLSearchParams({ format, report, status });
+    const period = viewPeriod || payload?.period;
+    if (period) params.set('period', period);
+    return `/api/hris/payroll-management?${params.toString()}`;
   };
 
-  const exportExcel = () => {
-    window.location.href = '/api/hris/payroll-management?format=xls';
+  const ensureCanExport = () => {
+    if (payload?.permissions.canExport) return true;
+    setToast('Permission denied');
+    return false;
   };
 
-  const exportPdf = () => {
-    triggerAction(action('export-pdf', 'Export PDF', 'secondary'));
+  const exportReportCsv = (report = 'payroll-register') => {
+    if (!ensureCanExport()) return;
+    window.location.href = reportExportUrl('csv', report);
   };
+
+  const exportReportExcel = (report = 'payroll-register') => {
+    if (!ensureCanExport()) return;
+    window.location.href = reportExportUrl('xls', report);
+  };
+
+  const exportReportPdf = (report = 'payroll-register') => {
+    if (!ensureCanExport()) return;
+    window.open(reportExportUrl('pdf', report), '_blank', 'noopener,noreferrer');
+  };
+
+  const spoolReport = (report = 'payroll-register') => {
+    if (!ensureCanExport()) return;
+    window.open(reportExportUrl('html', report), '_blank', 'noopener,noreferrer');
+  };
+
+  const generateReport = async (report = 'payroll-register', reportName?: string) => {
+    if (!ensureCanExport()) return;
+    setBusyAction('generate-report');
+    setToast('');
+    try {
+      const period = viewPeriod || payload?.period || undefined;
+      const res = await fetch('/api/hris/payroll-management', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'generate-report', period, report, reportName }),
+      });
+      const json = await readApiResponse<{ message?: string }>(res);
+      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Report generation failed');
+      setToast(json.data?.message || 'Report generated.');
+      spoolReport(report);
+      await load(period || null);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Report generation failed');
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const exportCsv = () => exportReportCsv('payroll-register');
+  const exportExcel = () => exportReportExcel('payroll-register');
+  const exportPdf = () => exportReportPdf('payroll-register');
 
   const navigateFromCommandCenter = (tab: CommandCenterNavTab) => {
     const targets: Record<CommandCenterNavTab, { section: SectionId; tab?: string } | null> = {
@@ -4250,16 +4313,38 @@ export default function PayrollManagementClient({
           lastLoaded={lastLoaded}
           viewPeriod={viewPeriod}
           onRefresh={() => void load()}
-          onExportCsv={exportCsv}
-          onExportExcel={exportExcel}
-          onExportPdf={exportPdf}
+          onExportCsv={exportReportCsv}
+          onExportExcel={exportReportExcel}
+          onExportPdf={exportReportPdf}
+          onSpool={spoolReport}
+          onGenerate={generateReport}
           onSelectTab={(tab) => {
             setActiveTabs((prev) => ({ ...prev, 'reports-analytics': tab }));
             window.history.pushState(null, '', sectionHref('reports-analytics'));
           }}
-          onReportAction={(actionId) => {
+          onReportAction={(actionId, reportId, reportName) => {
             const reportActions = actionsBySection['reports-analytics'] || [];
             const actionItem = reportActions.find((item) => item.id === actionId) || action(actionId, actionId, 'secondary');
+            if (actionId === 'generate-report') {
+              void generateReport(reportId, reportName);
+              return;
+            }
+            if (actionId === 'export-csv') {
+              exportReportCsv(reportId);
+              return;
+            }
+            if (actionId === 'export-excel') {
+              exportReportExcel(reportId);
+              return;
+            }
+            if (actionId === 'export-pdf') {
+              exportReportPdf(reportId);
+              return;
+            }
+            if (['schedule-report', 'save-report-view', 'email-report'].includes(actionId)) {
+              void runAction(actionId, '', viewPeriod || payload?.period || undefined, { report: reportId || 'payroll-register', reportName });
+              return;
+            }
             triggerAction(actionItem);
           }}
           onSelectPeriod={(period) => {

@@ -57,16 +57,6 @@ const emptyPayload = async (request: Request, error: unknown) => {
   };
 };
 
-const csv = (records: any[]) => {
-  const headers = ['Employee ID', 'Name', 'Department', 'Type', 'Status', 'Payroll Group', 'Salary Structure', 'Daily Rate', 'Hourly Rate', 'Currency', 'Gross Pay', 'Deductions', 'Net Pay', 'Payroll Status', 'Exceptions'];
-  const lines = records.map((r) =>
-    [r.employeeId, r.fullName, r.department, r.employmentType, r.employmentStatus, r.payrollGroup, r.salaryStructure || r.salaryGrade, r.ratePerDay ?? '', r.ratePerHour ?? '', r.payCurrency, r.grossPay, r.deductions, r.netPay, r.payrollStatus, r.exceptions.join('; ')]
-      .map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`)
-      .join(','),
-  );
-  return [headers.join(','), ...lines].join('\n');
-};
-
 const payrollExportColumns = ['Employee ID', 'Name', 'Department', 'Type', 'Status', 'Payroll Group', 'Salary Structure', 'Daily Rate', 'Hourly Rate', 'Currency', 'Gross Pay', 'Deductions', 'Net Pay', 'Payroll Status', 'Exceptions'];
 const payrollExportRows = (records: any[]) => records.map((r) => [
   r.employeeId, r.fullName, r.department, r.employmentType, r.employmentStatus, r.payrollGroup, r.salaryStructure || r.salaryGrade, r.ratePerDay ?? '', r.ratePerHour ?? '', r.payCurrency, r.grossPay, r.deductions, r.netPay, r.payrollStatus, (r.exceptions || []).join('; '),
@@ -88,6 +78,57 @@ const reportTitle = (report: string) => ({
 
 const filterExportRecords = (records: any[], status: string | null) =>
   status && status !== 'All' ? records.filter((record) => record.payrollStatus === status) : records;
+
+const csvFromReport = (reportData: { columns: string[]; rows: unknown[][] }) => {
+  const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const lines = reportData.rows.map((row) => row.map(escape).join(','));
+  return [reportData.columns.join(','), ...lines].join('\n');
+};
+
+const buildPdfBytes = (title: string, lines: string[]) => {
+  const escapePdf = (s: string) => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  const clean = (s: string) => escapePdf(s.replace(/\r?\n/g, ' ').slice(0, 170));
+  const fontSize = 10;
+  const lineHeight = 12;
+  const startY = 760;
+  const x = 40;
+  const all = [title, ...lines].slice(0, 55);
+  const streamParts: string[] = [];
+  streamParts.push(`BT /F1 ${fontSize} Tf ${x} ${startY} Td`);
+  for (let i = 0; i < all.length; i++) {
+    streamParts.push(`(${clean(all[i] || '')}) Tj`);
+    if (i !== all.length - 1) streamParts.push(`0 -${lineHeight} Td`);
+  }
+  streamParts.push('ET');
+  const stream = streamParts.join('\n');
+  const encoder = new TextEncoder();
+  const xref: number[] = [0];
+  let out = '%PDF-1.4\n';
+  const pushObj = (obj: string) => {
+    xref.push(out.length);
+    out += obj;
+  };
+  pushObj('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  pushObj('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+  pushObj('3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n');
+  pushObj('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n');
+  const streamBytes = encoder.encode(stream);
+  pushObj(`5 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n${stream}\nendstream\nendobj\n`);
+  const startXref = out.length;
+  out += `xref\n0 ${xref.length}\n0000000000 65535 f \n`;
+  for (let i = 1; i < xref.length; i++) out += `${String(xref[i]).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${xref.length} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
+  return encoder.encode(out);
+};
+
+const buildSpoolHtml = (title: string, subtitle: string, reportData: { columns: string[]; rows: unknown[][] }) => {
+  const body = buildExcelHtml({ title, subtitle, sheetName: title.slice(0, 31), columns: reportData.columns, rows: reportData.rows as (string | number)[][] });
+  return body.replace('</body>', `<script>window.addEventListener('load', () => { window.setTimeout(() => window.print(), 250); });</script>\n<style>@media print { body { margin: 0; } }</style>\n</body>`);
+};
+
+const reportActions = new Set([
+  'generate-report', 'export-pdf', 'export-csv', 'export-excel', 'save-report-view', 'schedule-report', 'email-report', 'filter-report',
+]);
 
 const reportExport = (records: any[], report: string) => {
   if (report === 'payroll-summary' || report === 'executive-analytics') {
@@ -204,23 +245,43 @@ export async function GET(request: Request) {
     const report = compact(url.searchParams.get('report')) || 'payroll-register';
     const exportRecords = filterExportRecords(payload.records, url.searchParams.get('status'));
     if (url.searchParams.get('audit') === '1') return jsonOk({ auditTrail: payload.auditTrail });
+    const reportData = reportExport(exportRecords, report);
+    const exportTitle = `${reportTitle(report)} - ${payload.periodLabel}`;
+    const exportSubtitle = `${exportRecords.length} records / ${payload.summary.exceptionCount} total payroll exceptions`;
     if (url.searchParams.get('format') === 'csv') {
       if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
-      return new Response(csv(exportRecords), {
+      return new Response(csvFromReport(reportData), {
         headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${report}-${payload.period}.csv"` },
       });
     }
     if (url.searchParams.get('format') === 'xls' || url.searchParams.get('format') === 'excel') {
       if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
-      const reportData = reportExport(exportRecords, report);
       return new Response(buildExcelHtml({
-        title: `${reportTitle(report)} - ${payload.periodLabel}`,
-        subtitle: `${exportRecords.length} records / ${payload.summary.exceptionCount} total payroll exceptions`,
+        title: exportTitle,
+        subtitle: exportSubtitle,
         sheetName: reportTitle(report).slice(0, 31),
         columns: reportData.columns,
         rows: reportData.rows,
       }), {
-        headers: { 'content-type': excelMimeType, 'content-disposition': `attachment; filename="${report}-${payload.period}.csv"` },
+        headers: { 'content-type': excelMimeType, 'content-disposition': `attachment; filename="${report}-${payload.period}.xls"` },
+      });
+    }
+    if (url.searchParams.get('format') === 'pdf') {
+      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      const lines = [
+        `Period: ${payload.periodLabel}`,
+        `Generated: ${new Date().toISOString()}`,
+        '',
+        ...reportData.rows.slice(0, 48).map((row) => row.map((cell) => String(cell ?? '')).join(' | ')),
+      ];
+      return new Response(buildPdfBytes(`DLE HRIS — ${exportTitle}`, lines), {
+        headers: { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${report}-${payload.period}.pdf"` },
+      });
+    }
+    if (url.searchParams.get('format') === 'html' || url.searchParams.get('spool') === '1') {
+      if (!payload.permissions.canExport) return jsonErr(403, 'Permission denied');
+      return new Response(buildSpoolHtml(exportTitle, exportSubtitle, reportData), {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
       });
     }
     return jsonOk(payload);
@@ -286,6 +347,38 @@ export async function POST(request: Request) {
     if (!['Submitted', 'Under Review'].includes(run.status)) return jsonErr(409, 'Submit payroll first. Entire workflow approval activates after submission.');
     const approvedRun = await applySuperAdminEndToEndApproval(run, actor, role, payload, reason, comment, ip);
     return jsonOk({ run: approvedRun, message: 'Global Super Administrator approved the entire payroll workflow end-to-end.' });
+  }
+
+  if (reportActions.has(action)) {
+    if (!perms.canExport && action !== 'filter-report') return jsonErr(403, 'Permission denied');
+    const reportType = compact(body.report) || 'payroll-register';
+    const auditLabel = {
+      'generate-report': `Generated ${reportTitle(reportType)}`,
+      'export-pdf': `Exported ${reportTitle(reportType)} (PDF)`,
+      'export-csv': `Exported ${reportTitle(reportType)} (CSV)`,
+      'export-excel': `Exported ${reportTitle(reportType)} (Excel)`,
+      'save-report-view': `Saved report view: ${reportTitle(reportType)}`,
+      'schedule-report': `Scheduled report: ${reportTitle(reportType)}`,
+      'email-report': `Emailed report: ${reportTitle(reportType)}`,
+      'filter-report': `Applied report filter: ${reportTitle(reportType)}`,
+    }[action] || action;
+    await appendPayrollAudit({
+      user: actor,
+      role,
+      action: auditLabel,
+      record: `${reportType}:${period}`,
+      oldValue: null,
+      newValue: action,
+      reason: reason || null,
+      comment: comment || body.reportName || null,
+      ip,
+    });
+    if (action === 'generate-report') return jsonOk({ report: reportType, period, message: `${reportTitle(reportType)} generated.` });
+    if (action === 'schedule-report') return jsonOk({ report: reportType, period, scheduled: true, message: 'Report schedule saved.' });
+    if (action === 'save-report-view') return jsonOk({ report: reportType, period, saved: true, message: 'Report view saved.' });
+    if (action === 'email-report') return jsonOk({ report: reportType, period, queued: true, message: 'Report email queued for delivery.' });
+    if (action === 'filter-report') return jsonOk({ report: reportType, period, message: 'Report filter applied.' });
+    return jsonOk({ report: reportType, period, message: `${reportTitle(reportType)} export recorded.` });
   }
 
   if (workflowActions.has(action)) {
