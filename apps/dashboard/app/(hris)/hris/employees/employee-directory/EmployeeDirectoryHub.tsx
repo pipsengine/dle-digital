@@ -30,6 +30,7 @@ import {
   DirectoryEmployee,
   EmployeeDirectoryPayload,
   employeeCodeGuide,
+  formatDateOnly,
   formatDateTime,
   formatNumber,
   formatPct,
@@ -757,7 +758,7 @@ export default function EmployeeDirectoryHub({ initialNow }: { initialNow: strin
                   <DrawerField label="Employment Type" value={drawerEmployee.employmentType} />
                   <DrawerField label="Category" value={categoryStyles[drawerCategory].label} />
                   <DrawerField label="Manager" value={drawerEmployee.managerName || 'Unassigned'} />
-                  <DrawerField label="Date Joined" value={formatDateTime(drawerEmployee.dateJoined)} />
+                  <DrawerField label="Date Joined" value={formatDateOnly(drawerEmployee.dateJoined)} />
                   <DrawerField label="Years of Service" value={`${drawerEmployee.yearsOfService} years`} />
                 </div>
               )}

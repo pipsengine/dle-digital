@@ -2423,6 +2423,21 @@ const valueOrNull = (value?: string | number | boolean | null) => {
   return s ? s : null;
 };
 
+const maskAccountNumber = (value?: string | null) => {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits ? `••••••${digits.slice(-4)}` : null;
+};
+
+const payrollBasicAmount = (row: DleEmployeeDirectoryRow) =>
+  row.periodSalary ?? row.basicSalary ?? (row.ratePerDay ? row.ratePerDay * 22 : null);
+
+const payrollAllowancesAmount = (row: DleEmployeeDirectoryRow) => {
+  if (row.latestAllowances && row.latestAllowances > 0) return row.latestAllowances;
+  const basic = payrollBasicAmount(row);
+  if (row.periodSalary && basic && row.periodSalary > basic) return row.periodSalary - basic;
+  return null;
+};
+
 const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
   const rec = makeRecord(row.employeeCode);
   const profileCompletionFields = [
@@ -2431,6 +2446,7 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
     row.lastName,
     row.gender,
     row.dateOfBirth,
+    row.maritalStatus,
     row.nationality,
     row.officialEmail,
     row.primaryPhone,
@@ -2440,6 +2456,9 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
     row.workLocation,
     row.managerName,
     row.payrollGroup,
+    row.bankName,
+    row.accountNo,
+    row.taxIdentificationNumber,
     row.sourceEmployeeId,
   ];
   const profileCompletionPct = Math.round((profileCompletionFields.filter((x) => valueOrNull(x)).length / profileCompletionFields.length) * 100);
@@ -2561,14 +2580,14 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
 
   rec.payrollSummary = {
     payrollStatus,
-    salaryGrade: row.salaryGrade || row.jobGrade || 'Not assigned',
-    basicSalary: row.periodSalary,
-    allowances: null,
-    deductions: null,
-    bankName: null,
-    accountNumberMasked: null,
-    pensionProvider: null,
-    taxId: null,
+    salaryGrade: row.salaryGrade || row.employmentType || row.jobGrade || 'Not assigned',
+    basicSalary: payrollBasicAmount(row),
+    allowances: payrollAllowancesAmount(row),
+    deductions: row.latestDeductions && row.latestDeductions > 0 ? row.latestDeductions : null,
+    bankName: valueOrNull(row.bankName),
+    accountNumberMasked: maskAccountNumber(row.accountNo),
+    pensionProvider: valueOrNull(row.pensionProvider),
+    taxId: valueOrNull(row.taxIdentificationNumber),
     payrollGroup: [row.payrollGroup, row.payCurrency, row.paymentRun].filter(Boolean).join(' / ') || null,
     lastPayrollProcessed: row.modifiedAt || row.createdAt || null,
   };

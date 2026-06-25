@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { countDirectReportsFromDb, readEmployeeFromDbByCode } from '@/lib/dle-enterprise-db';
-import { payrollDataSourceInfo, readDirectoryEmployees } from '@/lib/payroll-employee-source';
+import { payrollDataSourceInfo, readDirectoryEmployees, type PayrollEmployeeSource } from '@/lib/payroll-employee-source';
 import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { listEnterpriseNotifications } from '@/lib/enterprise-notifications-store';
 
@@ -130,8 +130,8 @@ export async function GET(request: Request) {
   const lookupCode = compact(session?.employeeCode || session?.employeeId);
 
   let employee: DleEmployeeDirectoryRow | null = lookupCode ? await readEmployeeFromDbByCode(lookupCode) : null;
-  let employeeSource = employee
-    ? { employees: [employee], source: 'DLE_Enterprise HRIS' as const, databaseAvailable: true, warning: null }
+  let employeeSource: PayrollEmployeeSource | null = employee
+    ? { employees: [employee], source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null }
     : null;
 
   if (!employee) {

@@ -371,7 +371,7 @@ ON target.employee_id = source.employee_id
 WHEN MATCHED THEN UPDATE SET
   staff_category = @employee_type_name,
   employee_category = @employee_type_name,
-  date_joined = @date_joined,
+  date_joined = COALESCE(@date_joined_group, COALESCE(@date_engaged, target.date_joined)),
   probation_end_date = @probation_end_date,
   contract_start_date = @contract_start_date,
   contract_end_date = @contract_end_date,
@@ -381,7 +381,7 @@ WHEN MATCHED THEN UPDATE SET
 WHEN NOT MATCHED THEN INSERT (
   employee_id, staff_category, employee_category, date_joined, probation_end_date, contract_start_date, contract_end_date, work_location, expatriate_status
 ) VALUES (
-  @employee_id, @employee_type_name, @employee_type_name, @date_joined, @probation_end_date, @contract_start_date, @contract_end_date, @work_location, @expatriate_status
+  @employee_id, @employee_type_name, @employee_type_name, COALESCE(@date_joined_group, @date_engaged), @probation_end_date, @contract_start_date, @contract_end_date, @work_location, @expatriate_status
 );
 
 MERGE hris.EmployeeJobInfo AS target
@@ -457,7 +457,8 @@ SELECT @employee_id AS employee_id, @was_insert AS was_insert;
         '@primary_phone' = Normalize-String (Get-Field $row 'cellNo')
         '@alternate_phone' = Normalize-String (Get-Field $row 'workTelNo')
         '@employee_type_name' = Normalize-String (Get-Field $row 'hierarchyEmployeeTypeName')
-        '@date_joined' = Normalize-Date (Get-Field $row 'dateEngaged')
+        '@date_joined_group' = Normalize-Date (Get-Field $row 'dateJoinedGroup')
+        '@date_engaged' = Normalize-Date (Get-Field $row 'dateEngaged')
         '@probation_end_date' = Normalize-Date (Get-Field $row 'probationPeriodEndDate')
         '@contract_start_date' = Normalize-Date (Get-Field $row 'contractStartDate')
         '@contract_end_date' = Normalize-Date (Get-Field $row 'contractExpiryDate')
@@ -481,7 +482,7 @@ SELECT @employee_id AS employee_id, @was_insert AS was_insert;
       foreach ($entry in $params.GetEnumerator()) {
         $p = $cmd.Parameters.Add($entry.Key, [System.Data.SqlDbType]::NVarChar)
         $p.Value = DbNullIfBlank $entry.Value
-        if ($entry.Key -in @('@date_joined', '@probation_end_date', '@contract_start_date', '@contract_end_date')) {
+        if ($entry.Key -in @('@date_joined_group', '@date_engaged', '@probation_end_date', '@contract_start_date', '@contract_end_date')) {
           $p.SqlDbType = [System.Data.SqlDbType]::Date
         }
         if ($entry.Key -eq '@raw_payload_json') {

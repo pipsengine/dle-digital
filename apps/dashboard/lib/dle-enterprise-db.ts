@@ -95,6 +95,9 @@ export type DleEmployeeDirectoryRow = {
   nhfApplicable?: boolean;
   annualRentRelief?: number | null;
   periodSalary: number | null;
+  basicSalary: number | null;
+  latestAllowances: number | null;
+  latestDeductions: number | null;
   annualSalary: number | null;
   ratePerHour: number | null;
   ratePerDay: number | null;
@@ -890,6 +893,9 @@ const DIRECTORY_EMPLOYEE_SELECT_SQL = `
       payroll.pension_pin,
       payroll.tax_identification_number,
       payroll.period_salary,
+      payroll.basic_salary,
+      payroll.latest_allowances,
+      payroll.latest_deductions,
       payroll.annual_salary,
       payroll.rate_per_hour,
       payroll.rate_per_day,
@@ -1003,6 +1009,9 @@ const mapDirectoryEmployeeRow = (row: any): DleEmployeeDirectoryRow => {
     pensionPin: str(row.pension_pin),
     taxIdentificationNumber: str(row.tax_identification_number),
     periodSalary: Number(row.period_salary || 0) || null,
+    basicSalary: Number(row.basic_salary || 0) || null,
+    latestAllowances: Number(row.latest_allowances || 0) || null,
+    latestDeductions: Number(row.latest_deductions || 0) || null,
     annualSalary: Number(row.annual_salary || 0) || null,
     ratePerHour: Number(row.rate_per_hour || 0) || null,
     ratePerDay: Number(row.rate_per_day || 0) || null,
@@ -1343,7 +1352,8 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         .input('country', sql.NVarChar(120), str(employee.physicalCountryCode) || null)
         .input('postal_code', sql.NVarChar(30), str(employee.physicalPostalCode || employee.postalPostalCode) || null)
         .input('employee_type_name', sql.NVarChar(100), str(employee.hierarchyEmployeeTypeName) || employeeType)
-        .input('date_joined', sql.Date, sourceDate(employee.dateEngaged || employee.dateJoinedGroup))
+        .input('date_joined_group', sql.Date, sourceDate(employee.dateJoinedGroup))
+        .input('date_engaged', sql.Date, sourceDate(employee.dateEngaged))
         .input('probation_end_date', sql.Date, sourceDate(employee.probationPeriodEndDate))
         .input('contract_start_date', sql.Date, sourceDate(employee.contractStartDate))
         .input('contract_end_date', sql.Date, sourceDate(employee.contractExpiryDate))
@@ -1395,6 +1405,35 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
           SELECT @employee_id = employee_id
           FROM [hris].[Employees] WITH (UPDLOCK, HOLDLOCK)
           WHERE employee_code = @employee_code;
+
+          IF @employee_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1
+              FROM [hris].[EmployeeSourceRecords] src
+              WHERE src.employee_id = @employee_id
+                AND src.source_system = N'Sage 300 People Payroll'
+                AND src.source_employee_id <> @source_employee_id
+            )
+          BEGIN
+            SELECT NULL AS employee_id, 0 AS was_insert, N'duplicate-sage-record' AS skip_reason;
+            RETURN;
+          END;
+        END;
+
+        IF @employee_id IS NOT NULL
+        BEGIN
+          DECLARE @primary_source_employee_id nvarchar(80);
+          SELECT TOP 1 @primary_source_employee_id = src.source_employee_id
+          FROM [hris].[EmployeeSourceRecords] src
+          WHERE src.employee_id = @employee_id
+            AND src.source_system = N'Sage 300 People Payroll'
+          ORDER BY TRY_CONVERT(int, src.source_employee_id), src.source_employee_id;
+
+          IF @primary_source_employee_id IS NOT NULL AND @primary_source_employee_id <> @source_employee_id
+          BEGIN
+            SELECT NULL AS employee_id, 0 AS was_insert, N'non-primary-sage-record' AS skip_reason;
+            RETURN;
+          END;
         END;
 
         IF @employee_id IS NULL
@@ -1419,15 +1458,15 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         USING (SELECT @employee_id AS employee_id) AS source
         ON target.employee_id = source.employee_id
         WHEN MATCHED THEN UPDATE SET
-          title = @title,
-          first_name = @first_name,
-          middle_name = @middle_name,
-          last_name = @last_name,
-          preferred_name = @preferred_name,
-          gender = @gender,
-          date_of_birth = @date_of_birth,
-          marital_status = @marital_status,
-          nationality = @nationality,
+          title = COALESCE(NULLIF(@title, N''), target.title),
+          first_name = COALESCE(NULLIF(@first_name, N''), target.first_name),
+          middle_name = COALESCE(NULLIF(@middle_name, N''), target.middle_name),
+          last_name = COALESCE(NULLIF(@last_name, N''), target.last_name),
+          preferred_name = COALESCE(NULLIF(@preferred_name, N''), target.preferred_name),
+          gender = COALESCE(NULLIF(@gender, N''), target.gender),
+          date_of_birth = COALESCE(@date_of_birth, target.date_of_birth),
+          marital_status = COALESCE(NULLIF(@marital_status, N''), target.marital_status),
+          nationality = COALESCE(NULLIF(@nationality, N''), target.nationality),
           modified_at = SYSUTCDATETIME()
         WHEN NOT MATCHED THEN INSERT (
           employee_id, title, first_name, middle_name, last_name, preferred_name, gender, date_of_birth, marital_status, nationality
@@ -1440,16 +1479,20 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         USING (SELECT @employee_id AS employee_id) AS source
         ON target.employee_id = source.employee_id
         WHEN MATCHED THEN UPDATE SET
-          official_email = CASE WHEN @official_email IS NOT NULL AND EXISTS (SELECT 1 FROM [hris].[EmployeeContactInfo] c WHERE c.official_email = @official_email AND c.employee_id <> @employee_id) THEN target.official_email ELSE @official_email END,
-          primary_phone = @primary_phone,
-          alternate_phone = @alternate_phone,
-          office_extension = @office_extension,
-          residential_address = @residential_address,
-          permanent_address = @permanent_address,
-          city = @city,
-          state = @state,
-          country = @country,
-          postal_code = @postal_code,
+          official_email = CASE
+            WHEN @official_email IS NOT NULL AND EXISTS (SELECT 1 FROM [hris].[EmployeeContactInfo] c WHERE c.official_email = @official_email AND c.employee_id <> @employee_id)
+              THEN target.official_email
+            ELSE COALESCE(NULLIF(@official_email, N''), target.official_email)
+          END,
+          primary_phone = COALESCE(NULLIF(@primary_phone, N''), target.primary_phone),
+          alternate_phone = COALESCE(NULLIF(@alternate_phone, N''), target.alternate_phone),
+          office_extension = COALESCE(NULLIF(@office_extension, N''), target.office_extension),
+          residential_address = COALESCE(NULLIF(@residential_address, N''), target.residential_address),
+          permanent_address = COALESCE(NULLIF(@permanent_address, N''), target.permanent_address),
+          city = COALESCE(NULLIF(@city, N''), target.city),
+          state = COALESCE(NULLIF(@state, N''), target.state),
+          country = COALESCE(NULLIF(@country, N''), target.country),
+          postal_code = COALESCE(NULLIF(@postal_code, N''), target.postal_code),
           modified_at = SYSUTCDATETIME()
         WHEN NOT MATCHED THEN INSERT (
           employee_id, official_email, primary_phone, alternate_phone, office_extension, residential_address, permanent_address, city, state, country, postal_code
@@ -1472,36 +1515,40 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         USING (SELECT @employee_id AS employee_id) AS source
         ON target.employee_id = source.employee_id
         WHEN MATCHED THEN UPDATE SET
-          staff_category = @employee_type_name,
-          employee_category = @employee_type_name,
-          date_joined = @date_joined,
-          probation_end_date = @probation_end_date,
-          contract_start_date = @contract_start_date,
-          contract_end_date = @contract_end_date,
-          work_location = @work_location,
-          expatriate_status = @expatriate_status,
+          staff_category = COALESCE(NULLIF(@employee_type_name, N''), target.staff_category),
+          employee_category = COALESCE(NULLIF(@employee_type_name, N''), target.employee_category),
+          date_joined = CASE
+            WHEN @date_joined_group IS NOT NULL OR @date_engaged IS NOT NULL
+              THEN COALESCE(@date_joined_group, @date_engaged)
+            ELSE target.date_joined
+          END,
+          probation_end_date = COALESCE(@probation_end_date, target.probation_end_date),
+          contract_start_date = COALESCE(@contract_start_date, target.contract_start_date),
+          contract_end_date = COALESCE(@contract_end_date, target.contract_end_date),
+          work_location = COALESCE(NULLIF(@work_location, N''), target.work_location),
+          expatriate_status = COALESCE(NULLIF(@expatriate_status, N''), target.expatriate_status),
           modified_at = SYSUTCDATETIME()
         WHEN NOT MATCHED THEN INSERT (
           employee_id, staff_category, employee_category, date_joined, probation_end_date, contract_start_date, contract_end_date, work_location, expatriate_status
         ) VALUES (
-          @employee_id, @employee_type_name, @employee_type_name, @date_joined, @probation_end_date, @contract_start_date, @contract_end_date, @work_location, @expatriate_status
+          @employee_id, @employee_type_name, @employee_type_name, COALESCE(@date_joined_group, @date_engaged), @probation_end_date, @contract_start_date, @contract_end_date, @work_location, @expatriate_status
         );
 
         MERGE [hris].[EmployeeJobInfo] AS target
         USING (SELECT @employee_id AS employee_id) AS source
         ON target.employee_id = source.employee_id
         WHEN MATCHED THEN UPDATE SET
-          job_title = @job_title,
-          designation = @designation,
-          job_grade = @job_grade,
-          department = @department,
-          division = @department_code,
-          business_unit = @company_code,
-          cost_center = @department_code,
-          project_site = @site_code,
-          office_location = @site_name,
-          reporting_manager = @manager_name,
-          role_profile = @employee_type_name,
+          job_title = COALESCE(NULLIF(@job_title, N''), target.job_title),
+          designation = COALESCE(NULLIF(@designation, N''), target.designation),
+          job_grade = COALESCE(NULLIF(@job_grade, N''), target.job_grade),
+          department = COALESCE(NULLIF(@department, N''), target.department),
+          division = COALESCE(NULLIF(@department_code, N''), target.division),
+          business_unit = COALESCE(NULLIF(@company_code, N''), target.business_unit),
+          cost_center = COALESCE(NULLIF(@department_code, N''), target.cost_center),
+          project_site = COALESCE(NULLIF(@site_code, N''), target.project_site),
+          office_location = COALESCE(NULLIF(@site_name, N''), target.office_location),
+          reporting_manager = COALESCE(NULLIF(@manager_name, N''), target.reporting_manager),
+          role_profile = COALESCE(NULLIF(@employee_type_name, N''), target.role_profile),
           modified_at = SYSUTCDATETIME()
         WHEN NOT MATCHED THEN INSERT (
           employee_id, job_title, designation, job_grade, department, division, business_unit, cost_center, project_site, office_location, reporting_manager, role_profile
@@ -1513,24 +1560,24 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         USING (SELECT @employee_id AS employee_id) AS source
         ON target.employee_id = source.employee_id
         WHEN MATCHED THEN UPDATE SET
-          payroll_group = @company_code,
-          salary_grade = @job_grade,
-          basic_salary = @basic_salary,
-          pay_frequency = @payment_run,
-          bank_name = @bank_name,
-          account_number = @account_number,
-          account_name = @account_name,
-          tax_identification_number = @tax_no,
-          pay_currency = @company_currency,
-          payment_type = @payment_type,
-          payment_run = @payment_run,
-          remuneration_structure = @remuneration_definition,
-          annual_salary = @annual_salary,
-          period_salary = @period_salary,
-          rate_per_hour = @rate_per_hour,
-          rate_per_day = @rate_per_day,
-          hours_per_day = @hours_per_day,
-          hours_per_period = @hours_per_period,
+          payroll_group = COALESCE(NULLIF(@company_code, N''), target.payroll_group),
+          salary_grade = COALESCE(NULLIF(@job_grade, N''), target.salary_grade),
+          basic_salary = COALESCE(NULLIF(@basic_salary, 0), target.basic_salary),
+          pay_frequency = COALESCE(NULLIF(@payment_run, N''), target.pay_frequency),
+          bank_name = COALESCE(NULLIF(@bank_name, N''), target.bank_name),
+          account_number = COALESCE(NULLIF(@account_number, N''), target.account_number),
+          account_name = COALESCE(NULLIF(@account_name, N''), target.account_name),
+          tax_identification_number = COALESCE(NULLIF(@tax_no, N''), target.tax_identification_number),
+          pay_currency = COALESCE(NULLIF(@company_currency, N''), target.pay_currency),
+          payment_type = COALESCE(NULLIF(@payment_type, N''), target.payment_type),
+          payment_run = COALESCE(NULLIF(@payment_run, N''), target.payment_run),
+          remuneration_structure = COALESCE(NULLIF(@remuneration_definition, N''), target.remuneration_structure),
+          annual_salary = COALESCE(NULLIF(@annual_salary, 0), target.annual_salary),
+          period_salary = COALESCE(NULLIF(@period_salary, 0), target.period_salary),
+          rate_per_hour = COALESCE(NULLIF(@rate_per_hour, 0), target.rate_per_hour),
+          rate_per_day = COALESCE(NULLIF(@rate_per_day, 0), target.rate_per_day),
+          hours_per_day = COALESCE(NULLIF(@hours_per_day, 0), target.hours_per_day),
+          hours_per_period = COALESCE(NULLIF(@hours_per_period, 0), target.hours_per_period),
           setup_assigned_to_payroll = 1,
           modified_at = SYSUTCDATETIME()
         WHEN NOT MATCHED THEN INSERT (
@@ -1603,11 +1650,17 @@ export const importSagePayrollEmployeesToDb = async (employees: SagePayrollEmplo
         INSERT [hris].[EmployeeAuditLog](employee_id, audit_action, performed_by, reason)
         VALUES (@employee_id, N'Sage payroll employee import', SUSER_SNAME(), N'Imported/upserted from Sage 300 People Payroll');
 
-        SELECT @employee_id AS employee_id, @was_insert AS was_insert;
+        SELECT @employee_id AS employee_id, @was_insert AS was_insert, NULL AS skip_reason;
       `);
 
+      const importRow = result.recordset[0];
+      if (!importRow?.employee_id) {
+        await tx.rollback();
+        continue;
+      }
+
       await tx.commit();
-      if (result.recordset[0]?.was_insert) inserted++;
+      if (importRow.was_insert) inserted++;
       else updated++;
     } catch (error) {
       await tx.rollback().catch(() => undefined);

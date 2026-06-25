@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import TaxPayeClient from './TaxPayeClient';
 
 export const metadata: Metadata = {
-  title: 'PAYE Tax',
+  title: 'Tax PAYE',
 };
 
 export default function TaxPayePage() {
