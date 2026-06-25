@@ -183,6 +183,13 @@ type ApprovalPayload = {
   pendingTimesheets: TimesheetSummary[];
   historyTimesheets: TimesheetSummary[];
   allTimesheets?: TimesheetSummary[];
+  pagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    listMode: string;
+  };
   stats: Record<string, number>;
   filterOptions: {
     workCenters: string[];
@@ -338,27 +345,50 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [focusedRowKey, setFocusedRowKey] = useState('');
   const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
+  const [listPage, setListPage] = useState(1);
   const [showFilters, setShowFilters] = useState(true);
+  const [loadingHint, setLoadingHint] = useState('Connecting to DLE_Enterprise…');
 
-  const load = async () => {
+  const load = async (nextPage = listPage) => {
     setLoading(true);
     setError(null);
+    setLoadingHint('Connecting to DLE_Enterprise…');
+    const hintTimer = window.setInterval(() => {
+      setLoadingHint((current) =>
+        current.includes('first page')
+          ? 'Still loading the first page of timesheets. Large databases can take up to a minute on cold start.'
+          : 'Loading the first page of timesheets from DLE_Enterprise…',
+      );
+    }, 8000);
+    const controller = new AbortController();
+    const abortTimer = window.setTimeout(() => controller.abort(), 120000);
     try {
-      const res = await fetch('/api/hris/time-and-logs/timesheet-approval', { cache: 'no-store' });
+      const listMode = mode === 'history' ? 'history' : 'all';
+      const res = await fetch(`/api/hris/time-and-logs/timesheet-approval?page=${nextPage}&pageSize=${PAGE_SIZE}&mode=${listMode}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
       const json = await parseApiResponse(res);
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Failed to load approvals');
       setPayload(json.data);
+      setListPage(json.data.pagination?.page || nextPage);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load approvals');
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('The approval workspace timed out while loading data from DLE_Enterprise. Please refresh and try again.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load approvals');
+      }
     } finally {
+      window.clearInterval(hintTimer);
+      window.clearTimeout(abortTimer);
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    setListPage(1);
+    void load(1);
+  }, [mode]);
 
   useEffect(() => {
     if (!toast) return;
@@ -389,9 +419,9 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
       });
       const json = await parseApiResponse(res);
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Unable to update approval workflow');
-      setPayload(json.data);
       setSelectedRowKeys([]);
       setToast('Approval workflow updated successfully.');
+      await load(listPage);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update approval workflow');
     } finally {
@@ -399,10 +429,8 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     }
   };
 
-  const workspaceTimesheets = useMemo(() => {
-    if (mode === 'history') return payload?.historyTimesheets || [];
-    return payload?.allTimesheets || payload?.pendingTimesheets || [];
-  }, [mode, payload?.allTimesheets, payload?.historyTimesheets, payload?.pendingTimesheets]);
+  const workspaceTimesheets = useMemo(() => payload?.allTimesheets || [], [payload?.allTimesheets]);
+  const serverPagination = payload?.pagination;
   const filteredTimesheets = useMemo(() => {
     const term = query.trim().toLowerCase();
     return workspaceTimesheets.filter((item) => {
@@ -437,10 +465,11 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     return allGridRows;
   }, [allGridRows, workspaceTab]);
 
-  useEffect(() => setPage(1), [query, statusFilter, stageFilter, projectFilter, pmFilter, costFilter, periodFilter, workspaceTab]);
+  useEffect(() => setListPage(1), [query, statusFilter, stageFilter, projectFilter, pmFilter, costFilter, periodFilter, workspaceTab, mode]);
 
-  const pageCount = Math.max(1, Math.ceil(tabRows.length / PAGE_SIZE));
-  const pageRows = tabRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageCount = serverPagination?.totalPages || 1;
+  const totalEntries = serverPagination?.total ?? tabRows.length;
+  const pageRows = tabRows;
   const focusedRow = tabRows.find((row) => row.rowKey === focusedRowKey) || pageRows[0] || null;
 
   const selectedRows = allGridRows.filter((row) => selectedRowKeys.includes(row.rowKey));
@@ -615,7 +644,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
                   <h1 className="text-[32px] font-bold leading-tight text-[#0F172A]">
                     {mode === 'history' ? 'Timesheet Approval History' : 'Timesheet Approval Workspace'}
                   </h1>
-                  <p className="mt-2 text-sm text-[#64748B]">Loading approval queue from DLE_Enterprise…</p>
+                  <p className="mt-2 text-sm text-[#64748B]">{loadingHint}</p>
                 </div>
               </div>
             </div>
@@ -632,7 +661,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-10">
+    <div className={`min-h-screen bg-[#F8FAFC] pb-10 ${loading && payload ? 'opacity-80' : ''}`}>
       <div className="mx-auto max-w-[1680px] space-y-6 px-6 pt-2">
         <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -657,7 +686,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
             <Link href="/hris/workforce-management/timesheet-approval-history" className={`inline-flex h-11 items-center rounded-xl px-4 text-sm font-semibold ${mode === 'history' ? 'bg-[#0F172A] text-white' : 'border border-[#E5E7EB] bg-white text-[#475569]'}`}>
               History
             </Link>
-            <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#2563EB] px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+            <button type="button" onClick={() => void load(listPage)} disabled={loading} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#2563EB] px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
               <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
@@ -915,22 +944,22 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] px-4 py-3">
                     <p className="text-xs text-[#64748B]">
-                      Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, tabRows.length)} of {tabRows.length} entries
+                      Showing {totalEntries ? (listPage - 1) * PAGE_SIZE + 1 : 0} to {Math.min(listPage * PAGE_SIZE, totalEntries)} of {totalEntries} entries
                     </p>
                     <div className="flex items-center gap-1">
-                      <button type="button" disabled={page <= 1} onClick={() => setPage(1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                      <button type="button" disabled={listPage <= 1 || loading} onClick={() => void load(1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
                         <ChevronsLeft className="h-4 w-4" />
                       </button>
-                      <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                      <button type="button" disabled={listPage <= 1 || loading} onClick={() => void load(listPage - 1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
                         <ChevronLeft className="h-4 w-4" />
                       </button>
                       <span className="px-3 text-xs font-semibold text-[#0F172A]">
-                        Page {page} of {pageCount}
+                        Page {listPage} of {pageCount}
                       </span>
-                      <button type="button" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                      <button type="button" disabled={listPage >= pageCount || loading} onClick={() => void load(listPage + 1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
                         <ChevronRight className="h-4 w-4" />
                       </button>
-                      <button type="button" disabled={page >= pageCount} onClick={() => setPage(pageCount)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                      <button type="button" disabled={listPage >= pageCount || loading} onClick={() => void load(pageCount)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
                         <ChevronsRight className="h-4 w-4" />
                       </button>
                     </div>

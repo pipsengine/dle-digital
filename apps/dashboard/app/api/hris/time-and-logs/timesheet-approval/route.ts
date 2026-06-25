@@ -8,7 +8,9 @@ import {
   normalizePaidWorkHours,
   normalizeTimesheetStatus,
   readProjects,
-  readTimesheetApprovalData,
+  invalidateTimesheetApprovalWorkspaceCache,
+  readTimesheetApprovalPage,
+  readTimesheetApprovalWorkspaceStats,
   readTimesheetData,
   readTimesheetPayrollUpdates,
   readTimesheetPeriods,
@@ -19,8 +21,9 @@ import {
   type TimesheetPeriod,
   type TimesheetStatus,
   type TimesheetWorkflowStage,
+  type TimesheetApprovalListMode,
 } from '@/lib/timesheet-entry-store';
-import { describeDleEnterpriseDatabase, readTimesheetApprovalEmployeeMeta, type TimesheetApprovalEmployeeMeta } from '@/lib/dle-enterprise-db';
+import { describeDleEnterpriseDatabase, invalidateTimesheetApprovalEmployeeMetaCache, readTimesheetApprovalEmployeeMeta, type TimesheetApprovalEmployeeMeta } from '@/lib/dle-enterprise-db';
 
 const ok = <T,>(data: T, status = 200) => NextResponse.json({ status: 'success', data }, { status });
 const err = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
@@ -174,6 +177,167 @@ const canSeeHeader = (scope: string, header: TimesheetHeader, projectApprovals: 
   return false;
 };
 
+const parseListRequest = (request: Request) => {
+  const url = new URL(request.url);
+  const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+  const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get('pageSize') || 50)));
+  const modeParam = String(url.searchParams.get('mode') || 'all').toLowerCase();
+  const listMode: TimesheetApprovalListMode = modeParam === 'pending' || modeParam === 'history' ? modeParam : 'all';
+  return { page, pageSize, listMode };
+};
+
+const buildStatsFromWorkspace = (workspaceStats: Awaited<ReturnType<typeof readTimesheetApprovalWorkspaceStats>>) => {
+  const statusCounts = workspaceStats.statusCounts;
+  const count = (status: TimesheetStatus) => Number(statusCounts[status] || 0);
+  const pendingSupervisorApproval = count('Submitted');
+  const pendingCostControlReview = count('Supervisor_Reviewed');
+  const pendingProjectManagerApproval = count('Cost_Control_Reviewed');
+  const pendingHrApproval = count('Project_Manager_Reviewed');
+  const pendingPayrollProcessing = count('HR_Acknowledged');
+  const payrollPosted = count('Locked');
+  const returned = count('Returned');
+  const rejected = count('Rejected');
+  const pendingApprovals = pendingSupervisorApproval + pendingCostControlReview + pendingProjectManagerApproval + pendingHrApproval;
+  return {
+    pendingSubmission: 0,
+    pendingSupervisorApproval,
+    pendingCostControlReview,
+    pendingProjectManagerApproval,
+    pendingHrApproval,
+    pendingPayrollProcessing,
+    payrollReady: pendingPayrollProcessing,
+    payrollProcessed: 0,
+    payrollPosted,
+    returned,
+    rejected,
+    totalHoursWorked: 0,
+    overtimeHours: 0,
+    labourCost: 0,
+    projectCostAllocation: 0,
+    payrollReadyHours: 0,
+    pendingApprovals,
+    approvalAgingHours: 0,
+    workforceUtilization: 0,
+    visibleTimesheets: workspaceStats.headerCount,
+    awaitingApproval: workspaceStats.pendingCount,
+    totalHeaders: workspaceStats.headerCount,
+    totalLines: workspaceStats.lineCount,
+  };
+};
+
+const buildTimesheetSummary = (
+  header: TimesheetHeader,
+  headerLines: TimesheetLine[],
+  periods: TimesheetPeriod[],
+  payrollUpdates: Awaited<ReturnType<typeof readTimesheetPayrollUpdates>>,
+  projects: Awaited<ReturnType<typeof readProjects>>,
+  employeeLookup: Map<string, TimesheetApprovalEmployeeMeta>,
+  scope: string,
+  actor: string,
+) => {
+  const status = normalizeTimesheetStatus(header.status);
+  const period = resolvePeriod(periods, header.timesheetDate);
+  const payrollUpdate = payrollUpdates.find((update) => update.headerIds.includes(header.id));
+  const allProjectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
+  if (!canSeeHeader(scope, header, allProjectApprovals, actor)) return null;
+  const visibleProjectApprovals = scope === 'project-manager' ? buildProjectTimesheetApprovals(header, headerLines, projects, actor) : allProjectApprovals;
+  const employeeRows = headerLines.map((line) => {
+    const meta = employeeMeta(employeeLookup, line);
+    return {
+      lineId: line.id,
+      employeeId: line.employeeId,
+      employeeNo: line.employeeNo,
+      employeeName: line.employeeName,
+      department: meta.department,
+      businessUnit: meta.businessUnit,
+      employmentType: meta.employmentType,
+      location: meta.location,
+      clockIn: line.clockIn,
+      clockOut: line.clockOut,
+      attendanceHours: normalizePaidWorkHours(line.attendanceDuration),
+      productiveHours: normalizePaidWorkHours(line.usedHours),
+      idleHours: round(line.idleHours),
+      overtimeHours: Math.max(0, round(normalizePaidWorkHours(line.usedHours) - 8)),
+      totalHours: normalizePaidWorkHours(line.totalHours),
+      variance: round(line.variance),
+      validationStatus: line.validationStatus,
+      activities: line.projectAllocations.map((allocation) => ({
+        projectCode: allocation.projectCode,
+        projectName: allocation.projectName,
+        activityCode: allocation.activityId || allocation.taskId || 'General',
+        activityName: allocation.taskName || 'Timesheet Activity',
+        hours: round(Number(allocation.hours || 0)),
+        labourCost: round(Number(allocation.hours || 0) * meta.labourRate, 0),
+        remarks: allocation.remarks,
+      })),
+    };
+  });
+  const projectBreakdowns = visibleProjectApprovals.map((project) => {
+    const projectLines = headerLines.filter((line) => line.projectAllocations.some((allocation) => lower(allocation.projectCode) === lower(project.projectCode)));
+    const labourCost = projectLines.reduce((sum, line) => {
+      const meta = employeeMeta(employeeLookup, line);
+      const hours = line.projectAllocations.filter((allocation) => lower(allocation.projectCode) === lower(project.projectCode)).reduce((h, allocation) => h + Number(allocation.hours || 0), 0);
+      return sum + hours * meta.labourRate;
+    }, 0);
+    return {
+      ...project,
+      costCenter: project.projectCode,
+      overtimeHours: round(projectLines.reduce((sum, line) => sum + Math.max(0, normalizePaidWorkHours(line.usedHours) - 8), 0)),
+      labourCost: round(labourCost, 0),
+      approvalStatus: project.costControlStatus !== 'Approved' ? `Cost ${project.costControlStatus}` : `PM ${project.projectManagerStatus}`,
+    };
+  });
+  const totalHours = round(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.totalHours), 0));
+  const productiveHours = round(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.usedHours), 0));
+  const overtimeHours = round(headerLines.reduce((sum, line) => sum + Math.max(0, normalizePaidWorkHours(line.usedHours) - 8), 0));
+  const labourCost = round(projectBreakdowns.reduce((sum, project) => sum + project.labourCost, 0), 0);
+  const projectManagerApproved = allProjectApprovals.filter((item) => item.projectManagerStatus === 'Approved').length;
+  const costControlApproved = allProjectApprovals.filter((item) => item.costControlStatus === 'Approved').length;
+  const totalProjects = allProjectApprovals.length;
+  return {
+    id: header.id,
+    timesheetDate: header.timesheetDate,
+    supervisorName: header.supervisorName,
+    workCenterName: header.workCenterName,
+    status,
+    statusLabel: statusLabel(status),
+    currentStage: currentStageForStatus(status),
+    currentOwner: header.currentApprover || String(currentStageForStatus(status) || '-'),
+    nextActionLabel: nextActionLabel(status),
+    payrollReady: status === 'HR_Acknowledged',
+    payrollProcessed: Boolean(payrollUpdate),
+    payrollPosted: status === 'Locked',
+    payrollAcknowledgedAt: header.payrollAcknowledgedAt || payrollUpdate?.acknowledgedAt || null,
+    payrollAcknowledgedBy: header.payrollAcknowledgedBy || payrollUpdate?.acknowledgedBy || null,
+    totalEmployees: headerLines.length,
+    totalHours,
+    productiveHours,
+    idleHours: round(headerLines.reduce((sum, line) => sum + line.idleHours, 0)),
+    overtimeHours,
+    labourCost,
+    payrollReadyHours: status === 'HR_Acknowledged' || status === 'Locked' ? totalHours : 0,
+    workforceUtilization: totalHours ? round((productiveHours / totalHours) * 100) : 0,
+    submittedAt: header.submittedAt,
+    lastSyncAt: header.lastSyncAt,
+    periodName: period.name,
+    periodStatus: period.status,
+    workflowSteps: workflowSteps(header),
+    projectApprovals: projectBreakdowns,
+    employeeRows,
+    approvalHistory: header.workflowHistory || [],
+    projectApprovalSummary: {
+      totalProjects,
+      projectManagerApproved,
+      costControlApproved,
+      projectManagerPending: allProjectApprovals.filter((item) => item.projectManagerStatus === 'Pending').length,
+      costControlPending: allProjectApprovals.filter((item) => item.costControlStatus === 'Pending').length,
+      approvalText: `${projectManagerApproved}/${totalProjects} Projects Approved${totalProjects > 0 && projectManagerApproved === totalProjects ? ' (Ready for HR)' : ''}`,
+      costControlText: `${costControlApproved}/${totalProjects} Cost Validated`,
+      consolidatedForHr: status === 'Project_Manager_Reviewed' || status === 'HR_Acknowledged' || status === 'Locked',
+    },
+  };
+};
+
 const buildPayload = async (request: Request) => {
   const access = resolveAccessContext(request);
   const uiPermissions = getUiPermissions(access);
@@ -182,166 +346,58 @@ const buildPayload = async (request: Request) => {
     throw new Error('DLE_ENTERPRISE_DB_* environment variables are not fully configured on this server.');
   }
 
-  const [{ headers, lines }, projects, payrollUpdates, periods] = await Promise.all([
-    readTimesheetApprovalData(),
+  const { page, pageSize, listMode } = parseListRequest(request);
+  const scope = roleScope(access.role, access.actor);
+
+  const [workspaceStats, pageData, projects, payrollUpdates, periods, employeeLookup] = await Promise.all([
+    readTimesheetApprovalWorkspaceStats(),
+    readTimesheetApprovalPage({ mode: listMode, page, pageSize }),
     readProjects(),
     readTimesheetPayrollUpdates(),
     readTimesheetPeriods(),
+    readTimesheetApprovalEmployeeMeta(),
   ]);
 
-  const employeeKeys = lines.flatMap((line) => [line.employeeNo, line.employeeId, line.employeeName]);
-  const employeeLookup = await readTimesheetApprovalEmployeeMeta(employeeKeys);
-  const scope = roleScope(access.role, access.actor);
+  const { headers, lines, total } = pageData;
   const lineByHeader = new Map<string, TimesheetLine[]>();
   for (const line of lines) lineByHeader.set(line.headerId, [...(lineByHeader.get(line.headerId) || []), line]);
 
-  const summaries = headers
-    .filter((header) => normalizeTimesheetStatus(header.status) !== 'Draft')
-    .map((header) => {
-    const status = normalizeTimesheetStatus(header.status);
-    const headerLines = lineByHeader.get(header.id) || [];
-    const period = resolvePeriod(periods, header.timesheetDate);
-    const payrollUpdate = payrollUpdates.find((update) => update.headerIds.includes(header.id));
-    const allProjectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
-    if (!canSeeHeader(scope, header, allProjectApprovals, access.actor)) return null;
-    const visibleProjectApprovals = scope === 'project-manager' ? buildProjectTimesheetApprovals(header, headerLines, projects, access.actor) : allProjectApprovals;
-    const employeeRows = headerLines.map((line) => {
-      const meta = employeeMeta(employeeLookup, line);
-      return {
-        lineId: line.id,
-        employeeId: line.employeeId,
-        employeeNo: line.employeeNo,
-        employeeName: line.employeeName,
-        department: meta.department,
-        businessUnit: meta.businessUnit,
-        employmentType: meta.employmentType,
-        location: meta.location,
-        clockIn: line.clockIn,
-        clockOut: line.clockOut,
-        attendanceHours: normalizePaidWorkHours(line.attendanceDuration),
-        productiveHours: normalizePaidWorkHours(line.usedHours),
-        idleHours: round(line.idleHours),
-        overtimeHours: Math.max(0, round(normalizePaidWorkHours(line.usedHours) - 8)),
-        totalHours: normalizePaidWorkHours(line.totalHours),
-        variance: round(line.variance),
-        validationStatus: line.validationStatus,
-        activities: line.projectAllocations.map((allocation) => ({
-          projectCode: allocation.projectCode,
-          projectName: allocation.projectName,
-          activityCode: allocation.activityId || allocation.taskId || 'General',
-          activityName: allocation.taskName || 'Timesheet Activity',
-          hours: round(Number(allocation.hours || 0)),
-          labourCost: round(Number(allocation.hours || 0) * meta.labourRate, 0),
-          remarks: allocation.remarks,
-        })),
-      };
-    });
-    const projectBreakdowns = visibleProjectApprovals.map((project) => {
-      const projectLines = headerLines.filter((line) => line.projectAllocations.some((allocation) => lower(allocation.projectCode) === lower(project.projectCode)));
-      const labourCost = projectLines.reduce((sum, line) => {
-        const meta = employeeMeta(employeeLookup, line);
-        const hours = line.projectAllocations.filter((allocation) => lower(allocation.projectCode) === lower(project.projectCode)).reduce((h, allocation) => h + Number(allocation.hours || 0), 0);
-        return sum + hours * meta.labourRate;
-      }, 0);
-      return {
-        ...project,
-        costCenter: project.projectCode,
-        overtimeHours: round(projectLines.reduce((sum, line) => sum + Math.max(0, normalizePaidWorkHours(line.usedHours) - 8), 0)),
-        labourCost: round(labourCost, 0),
-        approvalStatus: project.costControlStatus !== 'Approved' ? `Cost ${project.costControlStatus}` : `PM ${project.projectManagerStatus}`,
-      };
-    });
-    const totalHours = round(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.totalHours), 0));
-    const productiveHours = round(headerLines.reduce((sum, line) => sum + normalizePaidWorkHours(line.usedHours), 0));
-    const overtimeHours = round(headerLines.reduce((sum, line) => sum + Math.max(0, normalizePaidWorkHours(line.usedHours) - 8), 0));
-    const labourCost = round(projectBreakdowns.reduce((sum, project) => sum + project.labourCost, 0), 0);
-    const projectManagerApproved = allProjectApprovals.filter((item) => item.projectManagerStatus === 'Approved').length;
-    const costControlApproved = allProjectApprovals.filter((item) => item.costControlStatus === 'Approved').length;
-    const totalProjects = allProjectApprovals.length;
-    return {
-      id: header.id,
-      timesheetDate: header.timesheetDate,
-      supervisorName: header.supervisorName,
-      workCenterName: header.workCenterName,
-      status,
-      statusLabel: statusLabel(status),
-      currentStage: currentStageForStatus(status),
-      currentOwner: header.currentApprover || String(currentStageForStatus(status) || '-'),
-      nextActionLabel: nextActionLabel(status),
-      payrollReady: status === 'HR_Acknowledged',
-      payrollProcessed: Boolean(payrollUpdate),
-      payrollPosted: status === 'Locked',
-      payrollAcknowledgedAt: header.payrollAcknowledgedAt || payrollUpdate?.acknowledgedAt || null,
-      payrollAcknowledgedBy: header.payrollAcknowledgedBy || payrollUpdate?.acknowledgedBy || null,
-      totalEmployees: headerLines.length,
-      totalHours,
-      productiveHours,
-      idleHours: round(headerLines.reduce((sum, line) => sum + line.idleHours, 0)),
-      overtimeHours,
-      labourCost,
-      payrollReadyHours: status === 'HR_Acknowledged' || status === 'Locked' ? totalHours : 0,
-      workforceUtilization: totalHours ? round((productiveHours / totalHours) * 100) : 0,
-      submittedAt: header.submittedAt,
-      lastSyncAt: header.lastSyncAt,
-      periodName: period.name,
-      periodStatus: period.status,
-      workflowSteps: workflowSteps(header),
-      projectApprovals: projectBreakdowns,
-      employeeRows,
-      approvalHistory: header.workflowHistory || [],
-      projectApprovalSummary: {
-        totalProjects,
-        projectManagerApproved,
-        costControlApproved,
-        projectManagerPending: allProjectApprovals.filter((item) => item.projectManagerStatus === 'Pending').length,
-        costControlPending: allProjectApprovals.filter((item) => item.costControlStatus === 'Pending').length,
-        approvalText: `${projectManagerApproved}/${totalProjects} Projects Approved${totalProjects > 0 && projectManagerApproved === totalProjects ? ' (Ready for HR)' : ''}`,
-        costControlText: `${costControlApproved}/${totalProjects} Cost Validated`,
-        consolidatedForHr: status === 'Project_Manager_Reviewed' || status === 'HR_Acknowledged' || status === 'Locked',
-      },
-    };
-  });
+  const pageTimesheets = headers
+    .map((header) => buildTimesheetSummary(header, lineByHeader.get(header.id) || [], periods, payrollUpdates, projects, employeeLookup, scope, access.actor))
+    .filter(Boolean)
+    .sort((a, b) => new Date(b!.timesheetDate).getTime() - new Date(a!.timesheetDate).getTime());
 
-  const allTimesheets = summaries.filter(Boolean).sort((a, b) => new Date(b!.timesheetDate).getTime() - new Date(a!.timesheetDate).getTime());
-  const pendingTimesheets = allTimesheets.filter((item) => activeApprovalStatuses.has(item!.status));
-  const historyTimesheets = allTimesheets.filter((item) => !activeApprovalStatuses.has(item!.status));
-  const activeOrHistoryTimesheets = [...pendingTimesheets, ...historyTimesheets];
+  const pendingTimesheets = pageTimesheets.filter((item) => activeApprovalStatuses.has(item!.status));
+  const historyTimesheets = pageTimesheets.filter((item) => !activeApprovalStatuses.has(item!.status));
   const stats = {
-    pendingSubmission: headers.filter((header) => normalizeTimesheetStatus(header.status) === 'Draft').length,
-    pendingSupervisorApproval: pendingTimesheets.filter((item) => item!.status === 'Submitted').length,
-    pendingCostControlReview: pendingTimesheets.filter((item) => item!.status === 'Supervisor_Reviewed').length,
-    pendingProjectManagerApproval: pendingTimesheets.filter((item) => item!.status === 'Cost_Control_Reviewed').length,
-    pendingHrApproval: pendingTimesheets.filter((item) => item!.status === 'Project_Manager_Reviewed').length,
-    pendingPayrollProcessing: pendingTimesheets.filter((item) => item!.status === 'HR_Acknowledged' && !item!.payrollProcessed).length,
-    payrollReady: pendingTimesheets.filter((item) => item!.payrollReady).length,
-    payrollProcessed: activeOrHistoryTimesheets.filter((item) => item!.payrollProcessed).length,
-    payrollPosted: historyTimesheets.filter((item) => item!.payrollPosted).length,
-    returned: historyTimesheets.filter((item) => item!.status === 'Returned').length,
-    rejected: historyTimesheets.filter((item) => item!.status === 'Rejected').length,
-    totalHoursWorked: round(allTimesheets.reduce((sum, item) => sum + item!.totalHours, 0)),
-    overtimeHours: round(allTimesheets.reduce((sum, item) => sum + item!.overtimeHours, 0)),
-    labourCost: round(allTimesheets.reduce((sum, item) => sum + item!.labourCost, 0), 0),
-    projectCostAllocation: round(allTimesheets.reduce((sum, item) => sum + item!.projectApprovals.reduce((pSum, project) => pSum + project.labourCost, 0), 0), 0),
-    payrollReadyHours: round(allTimesheets.reduce((sum, item) => sum + item!.payrollReadyHours, 0)),
-    pendingApprovals: pendingTimesheets.filter((item) => ['Submitted', 'Supervisor_Reviewed', 'Cost_Control_Reviewed', 'Project_Manager_Reviewed'].includes(item!.status)).length,
-    approvalAgingHours: round(pendingTimesheets.reduce((sum, item) => sum + (item!.workflowSteps.find((step) => step.stage === item!.currentStage)?.agingHours || 0), 0) / Math.max(1, pendingTimesheets.length)),
-    workforceUtilization: round(allTimesheets.reduce((sum, item) => sum + item!.workforceUtilization, 0) / Math.max(1, allTimesheets.length)),
-    visibleTimesheets: allTimesheets.length,
-    awaitingApproval: pendingTimesheets.length,
+    ...buildStatsFromWorkspace(workspaceStats),
+    totalHoursWorked: round(pageTimesheets.reduce((sum, item) => sum + item!.totalHours, 0)),
+    overtimeHours: round(pageTimesheets.reduce((sum, item) => sum + item!.overtimeHours, 0)),
+    labourCost: round(pageTimesheets.reduce((sum, item) => sum + item!.labourCost, 0), 0),
+    projectCostAllocation: round(pageTimesheets.reduce((sum, item) => sum + item!.projectApprovals.reduce((pSum, project) => pSum + project.labourCost, 0), 0), 0),
+    payrollReadyHours: round(pageTimesheets.reduce((sum, item) => sum + item!.payrollReadyHours, 0)),
+    workforceUtilization: round(pageTimesheets.reduce((sum, item) => sum + item!.workforceUtilization, 0) / Math.max(1, pageTimesheets.length)),
   };
 
   return {
     generatedAt: new Date().toISOString(),
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      listMode,
+    },
     dataSource: {
       system: 'DLE_Enterprise',
       database: dbMeta.database,
       host: dbMeta.host,
       connected: true,
-      headerCount: headers.length,
-      lineCount: lines.length,
-      visibleTimesheetCount: allTimesheets.length,
-      awaitingApprovalCount: pendingTimesheets.length,
-      historyTimesheetCount: historyTimesheets.length,
+      headerCount: workspaceStats.headerCount,
+      lineCount: workspaceStats.lineCount,
+      visibleTimesheetCount: total,
+      awaitingApprovalCount: workspaceStats.pendingCount,
+      historyTimesheetCount: workspaceStats.historyCount,
       writeTarget: 'hris.TimesheetHeaders / hris.TimesheetLines / hris.TimesheetWorkflowEvents',
     },
     permissions: {
@@ -356,16 +412,16 @@ const buildPayload = async (request: Request) => {
     },
     pendingTimesheets,
     historyTimesheets,
-    allTimesheets,
+    allTimesheets: pageTimesheets,
     stats,
     filterOptions: {
-      workCenters: Array.from(new Set(allTimesheets.map((item) => item!.workCenterName))).sort(),
-      periods: Array.from(new Set(allTimesheets.map((item) => item!.periodName))).sort(),
-      supervisors: Array.from(new Set(allTimesheets.map((item) => item!.supervisorName))).sort(),
-      projects: Array.from(new Set(allTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectCode)))).sort(),
-      projectManagers: Array.from(new Set(allTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectManager)))).sort(),
-      costCenters: Array.from(new Set(allTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.costCenter)))).sort(),
-      statuses: Array.from(new Set(allTimesheets.map((item) => item!.status))).sort(),
+      workCenters: workspaceStats.filterOptions.workCenters,
+      periods: workspaceStats.filterOptions.periods,
+      supervisors: workspaceStats.filterOptions.supervisors,
+      projects: Array.from(new Set(pageTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectCode)))).sort(),
+      projectManagers: Array.from(new Set(pageTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectManager)))).sort(),
+      costCenters: Array.from(new Set(pageTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.costCenter)))).sort(),
+      statuses: Array.from(new Set(Object.keys(workspaceStats.statusCounts))).sort(),
       workflowStages: ['Supervisor', 'Cost Control', 'Project Manager', 'HR', 'Payroll Processing', 'Payroll Posted'],
     },
     audit: {
@@ -479,6 +535,11 @@ export async function GET(request: Request) {
   }
 }
 
+const invalidateApprovalCaches = () => {
+  invalidateTimesheetApprovalWorkspaceCache();
+  invalidateTimesheetApprovalEmployeeMetaCache();
+};
+
 export async function PATCH(request: Request) {
   const access = resolveAccessContext(request);
   const permissions = getUiPermissions(access);
@@ -559,6 +620,7 @@ export async function PATCH(request: Request) {
       }
     }
 
+    invalidateApprovalCaches();
     return ok(await buildPayload(request));
   } catch (error) {
     console.error('Approval API Error:', error);

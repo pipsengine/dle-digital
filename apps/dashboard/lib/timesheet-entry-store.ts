@@ -786,6 +786,11 @@ const db = async () => {
     throw new Error('DLE Enterprise database is not configured. Timesheet entry data must be stored in the database before this page can be used.');
   }
   if (!dbReady.value) {
+    const existing = await pool.request().query(`SELECT OBJECT_ID(N'[hris].[TimesheetHeaders]', N'U') AS tableId`);
+    if (existing.recordset?.[0]?.tableId) {
+      dbReady.value = true;
+      return pool;
+    }
     await pool.request().query(`
 IF SCHEMA_ID(N'hris') IS NULL EXEC(N'CREATE SCHEMA [hris]');
 IF OBJECT_ID(N'[hris].[TimesheetProjects]', N'U') IS NULL
@@ -1417,6 +1422,324 @@ export async function readTimesheetData(options?: { softFail?: boolean }) {
   return { headers, lines };
 }
 
+export type TimesheetApprovalListMode = 'all' | 'pending' | 'history';
+
+const ACTIVE_APPROVAL_STATUSES_SQL = `N'Submitted', N'Supervisor_Reviewed', N'Cost_Control_Reviewed', N'Project_Manager_Reviewed', N'HR_Acknowledged', N'Approved', N'HR_Reviewed', N'Project_Control_Reviewed'`;
+
+const listModeWhereClause = (mode: TimesheetApprovalListMode) => {
+  if (mode === 'pending') {
+    return `[Status] <> N'Draft' AND [Status] IN (${ACTIVE_APPROVAL_STATUSES_SQL})`;
+  }
+  if (mode === 'history') {
+    return `[Status] <> N'Draft' AND [Status] NOT IN (${ACTIVE_APPROVAL_STATUSES_SQL})`;
+  }
+  return `[Status] <> N'Draft'`;
+};
+
+const mapTimesheetHeaderRow = (row: any, eventsByHeader: Map<string, TimesheetWorkflowEvent[]>): TimesheetHeader => ({
+  id: String(row.Id),
+  periodId: row.PeriodId,
+  timesheetDate: toDateOnly(row.TimesheetDate),
+  supervisorId: row.SupervisorId,
+  supervisorName: row.SupervisorName,
+  workCenterId: row.WorkCenterId,
+  workCenterName: row.WorkCenterName,
+  status: row.Status,
+  submittedAt: toIso(row.SubmittedAt),
+  submittedBy: row.SubmittedBy,
+  approvedAt: toIso(row.ApprovedAt),
+  approvedBy: row.ApprovedBy,
+  lastSyncAt: toIso(row.LastSyncAt),
+  payrollAcknowledgedAt: toIso(row.PayrollAcknowledgedAt),
+  payrollAcknowledgedBy: row.PayrollAcknowledgedBy,
+  projectManager: row.ProjectManager,
+  projectManagerProjectCode: row.ProjectManagerProjectCode,
+  currentApprovalStage: row.CurrentApprovalStage,
+  currentApprover: row.CurrentApprover,
+  workflowHistory: eventsByHeader.get(String(row.Id)) || [],
+});
+
+const mapTimesheetLineRows = (
+  linesResult: sql.IResult<any>,
+  projectAllocationsResult: sql.IResult<any>,
+  idleAllocationsResult: sql.IResult<any>,
+): TimesheetLine[] => {
+  const projectByLine = new Map<string, TimesheetLine['projectAllocations']>();
+  for (const row of projectAllocationsResult.recordset) {
+    const lineKey = String(row.LineId);
+    const allocations = projectByLine.get(lineKey) || [];
+    allocations.push({
+      projectId: row.ProjectId,
+      projectCode: row.ProjectCode,
+      projectName: row.ProjectName,
+      taskId: row.TaskId ?? undefined,
+      taskName: row.TaskName ?? undefined,
+      activityId: row.ActivityId ?? undefined,
+      hours: Number(row.Hours || 0),
+      remarks: row.Remarks,
+    });
+    projectByLine.set(lineKey, allocations);
+  }
+  const idleByLine = new Map<string, TimesheetLine['idleAllocations']>();
+  for (const row of idleAllocationsResult.recordset) {
+    const lineKey = String(row.LineId);
+    const allocations = idleByLine.get(lineKey) || [];
+    allocations.push({ reasonId: row.ReasonId, reasonName: row.ReasonName, hours: Number(row.Hours || 0), remarks: row.Remarks });
+    idleByLine.set(lineKey, allocations);
+  }
+  return linesResult.recordset.map((row) => ({
+    id: String(row.Id),
+    headerId: String(row.HeaderId),
+    employeeId: row.EmployeeId,
+    employeeNo: row.EmployeeNo,
+    employeeName: row.EmployeeName,
+    biometricId: row.BiometricId,
+    attendanceId: row.AttendanceId,
+    clockIn: row.ClockIn,
+    clockOut: row.ClockOut,
+    attendanceDuration: Number(row.AttendanceDuration || 0),
+    projectAllocations: projectByLine.get(row.Id) || [],
+    idleAllocations: (idleByLine.get(row.Id) || []).map(withDefaultIdleReason),
+    usedHours: Number(row.UsedHours || 0),
+    idleHours: Number(row.IdleHours || 0),
+    totalHours: Number(row.TotalHours || 0),
+    variance: Number(row.Variance || 0),
+    remarks: row.Remarks,
+    validationStatus: row.ValidationStatus,
+    validationMessage: row.ValidationMessage,
+  }));
+};
+
+const bindHeaderIdParams = (request: sql.Request, headerIds: string[]) => {
+  const placeholders = headerIds.map((headerId, index) => {
+    const param = `headerId${index}`;
+    request.input(param, sql.NVarChar(4000), String(headerId));
+    return `@${param}`;
+  });
+  return placeholders.join(', ');
+};
+
+const bindLineIdParams = (request: sql.Request, lineIds: string[]) => {
+  const placeholders = lineIds.map((lineId, index) => {
+    const param = `lineId${index}`;
+    request.input(param, sql.NVarChar(4000), String(lineId));
+    return `@${param}`;
+  });
+  return placeholders.join(', ');
+};
+
+const headerIdInClause = (placeholders: string) => `CONVERT(NVARCHAR(4000), [HeaderId]) IN (${placeholders})`;
+const lineHeaderIdInClause = (placeholders: string) => `CONVERT(NVARCHAR(4000), l.[HeaderId]) IN (${placeholders})`;
+const lineIdInClause = (placeholders: string) => `CONVERT(NVARCHAR(4000), [LineId]) IN (${placeholders})`;
+const joinHeaderToLine = 'CONVERT(NVARCHAR(4000), h.[Id]) = CONVERT(NVARCHAR(4000), l.[HeaderId])';
+const joinHeaderToEvent = 'CONVERT(NVARCHAR(4000), h.[Id]) = CONVERT(NVARCHAR(4000), e.[HeaderId])';
+const joinLineToAllocation = 'CONVERT(NVARCHAR(4000), l.[Id]) = CONVERT(NVARCHAR(4000), a.[LineId])';
+
+const loadTimesheetChildData = async (pool: sql.ConnectionPool, headerIds: string[]) => {
+  if (!headerIds.length) {
+    return {
+      eventsByHeader: new Map<string, TimesheetWorkflowEvent[]>(),
+      lines: [] as TimesheetLine[],
+    };
+  }
+  const eventsRequest = pool.request();
+  const linesRequest = pool.request();
+  const headerInClause = bindHeaderIdParams(eventsRequest, headerIds);
+  bindHeaderIdParams(linesRequest, headerIds);
+  const [eventsResult, linesResult] = await Promise.all([
+    eventsRequest.query(`
+      SELECT *
+      FROM [hris].[TimesheetWorkflowEvents]
+      WHERE ${headerIdInClause(headerInClause)}
+      ORDER BY [Id]
+    `),
+    linesRequest.query(`
+      SELECT l.*
+      FROM [hris].[TimesheetLines] l
+      WHERE ${lineHeaderIdInClause(headerInClause)}
+      ORDER BY l.[EmployeeName]
+    `),
+  ]);
+
+  const eventsByHeader = new Map<string, TimesheetWorkflowEvent[]>();
+  for (const row of eventsResult.recordset) {
+    const headerKey = String(row.HeaderId);
+    const events = eventsByHeader.get(headerKey) || [];
+    events.push({ stage: row.Stage, decision: row.Decision, by: row.Actor, actedAt: toIso(row.ActedAt) || new Date().toISOString(), comment: row.Comment });
+    eventsByHeader.set(headerKey, events);
+  }
+
+  const lineIds = linesResult.recordset.map((row) => String(row.Id)).filter(Boolean);
+  let projectAllocationsResult = { recordset: [] as any[] } as sql.IResult<any>;
+  let idleAllocationsResult = { recordset: [] as any[] } as sql.IResult<any>;
+  if (lineIds.length) {
+    const projectRequest = pool.request();
+    const idleRequest = pool.request();
+    const lineInClause = bindLineIdParams(projectRequest, lineIds);
+    bindLineIdParams(idleRequest, lineIds);
+    [projectAllocationsResult, idleAllocationsResult] = await Promise.all([
+      projectRequest.query(`
+        SELECT *
+        FROM [hris].[TimesheetProjectAllocations]
+        WHERE ${lineIdInClause(lineInClause)}
+        ORDER BY [Id]
+      `),
+      idleRequest.query(`
+        SELECT *
+        FROM [hris].[TimesheetIdleAllocations]
+        WHERE ${lineIdInClause(lineInClause)}
+        ORDER BY [Id]
+      `),
+    ]);
+  }
+
+  return {
+    eventsByHeader,
+    lines: mapTimesheetLineRows(linesResult, projectAllocationsResult, idleAllocationsResult),
+  };
+};
+
+export type TimesheetApprovalWorkspaceStats = {
+  headerCount: number;
+  lineCount: number;
+  pendingCount: number;
+  historyCount: number;
+  statusCounts: Record<string, number>;
+  filterOptions: {
+    workCenters: string[];
+    supervisors: string[];
+    periods: string[];
+  };
+};
+
+let timesheetApprovalStatsCache: { expiresAt: number; value: TimesheetApprovalWorkspaceStats } | null = null;
+
+export async function readTimesheetApprovalWorkspaceStats(options?: { softFail?: boolean }) {
+  const now = Date.now();
+  if (timesheetApprovalStatsCache && timesheetApprovalStatsCache.expiresAt > now) {
+    return timesheetApprovalStatsCache.value;
+  }
+
+  let pool: sql.ConnectionPool;
+  try {
+    pool = await db();
+  } catch (error) {
+    if (options?.softFail) {
+      return {
+        headerCount: 0,
+        lineCount: 0,
+        pendingCount: 0,
+        historyCount: 0,
+        statusCounts: {},
+        filterOptions: { workCenters: [], supervisors: [], periods: [] },
+      };
+    }
+    throw error;
+  }
+
+  const [statusResult, lineCountResult, filterResult] = await Promise.all([
+    pool.request().query(`
+      SELECT [Status], COUNT_BIG(*) AS [Count]
+      FROM [hris].[TimesheetHeaders]
+      WHERE [Status] <> N'Draft'
+      GROUP BY [Status]
+    `),
+    pool.request().query(`
+      SELECT COUNT_BIG(*) AS [Count]
+      FROM [hris].[TimesheetLines] l
+      WHERE CONVERT(NVARCHAR(4000), l.[HeaderId]) IN (
+        SELECT CONVERT(NVARCHAR(4000), [Id])
+        FROM [hris].[TimesheetHeaders]
+        WHERE [Status] <> N'Draft'
+      )
+    `),
+    pool.request().query(`
+      SELECT DISTINCT [WorkCenterName], [SupervisorName], [PeriodId]
+      FROM [hris].[TimesheetHeaders]
+      WHERE [Status] <> N'Draft'
+    `),
+  ]);
+
+  const statusCounts: Record<string, number> = {};
+  let pendingCount = 0;
+  let historyCount = 0;
+  const activeStatuses = new Set(['Submitted', 'Supervisor_Reviewed', 'Cost_Control_Reviewed', 'Project_Manager_Reviewed', 'HR_Acknowledged', 'Approved', 'HR_Reviewed', 'Project_Control_Reviewed']);
+  for (const row of statusResult.recordset) {
+    const status = normalizeTimesheetStatus(row.Status);
+    const count = Number(row.Count || 0);
+    statusCounts[status] = (statusCounts[status] || 0) + count;
+    if (activeStatuses.has(String(row.Status)) || activeStatuses.has(status)) pendingCount += count;
+    else historyCount += count;
+  }
+
+  const value: TimesheetApprovalWorkspaceStats = {
+    headerCount: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+    lineCount: Number(lineCountResult.recordset?.[0]?.Count || 0),
+    pendingCount,
+    historyCount,
+    statusCounts,
+    filterOptions: {
+      workCenters: Array.from(new Set((filterResult.recordset || []).map((row) => String(row.WorkCenterName || '').trim()).filter(Boolean))).sort(),
+      supervisors: Array.from(new Set((filterResult.recordset || []).map((row) => String(row.SupervisorName || '').trim()).filter(Boolean))).sort(),
+      periods: Array.from(new Set((filterResult.recordset || []).map((row) => String(row.PeriodId || '').trim()).filter(Boolean))).sort(),
+    },
+  };
+  timesheetApprovalStatsCache = { expiresAt: now + Number(process.env.HRIS_TIMESHEET_APPROVAL_STATS_CACHE_MS || 60000), value };
+  return value;
+};
+
+export async function readTimesheetApprovalPage(options?: {
+  softFail?: boolean;
+  mode?: TimesheetApprovalListMode;
+  page?: number;
+  pageSize?: number;
+}) {
+  const mode = options?.mode || 'all';
+  const page = Math.max(1, Number(options?.page || 1));
+  const pageSize = Math.min(100, Math.max(10, Number(options?.pageSize || 50)));
+  const offset = (page - 1) * pageSize;
+  const whereClause = listModeWhereClause(mode);
+
+  let pool: sql.ConnectionPool;
+  try {
+    pool = await db();
+  } catch (error) {
+    if (options?.softFail) return { headers: [] as TimesheetHeader[], lines: [] as TimesheetLine[], total: 0, page, pageSize, mode };
+    const detail = error instanceof Error ? error.message : 'connection failed';
+    throw new Error(`Timesheet data requires DLE_Enterprise (${detail}). Verify DLE_ENTERPRISE_DB_HOST, DLE_ENTERPRISE_DB_NAME, and credentials on this server.`);
+  }
+
+  const countResult = await pool.request().query(`
+    SELECT COUNT_BIG(*) AS [Total]
+    FROM [hris].[TimesheetHeaders]
+    WHERE ${whereClause}
+  `);
+  const total = Number(countResult.recordset?.[0]?.Total || 0);
+  if (!total) {
+    return { headers: [] as TimesheetHeader[], lines: [] as TimesheetLine[], total: 0, page, pageSize, mode };
+  }
+
+  const headersResult = await pool.request()
+    .input('offset', sql.Int, offset)
+    .input('pageSize', sql.Int, pageSize)
+    .query(`
+      SELECT *
+      FROM [hris].[TimesheetHeaders]
+      WHERE ${whereClause}
+      ORDER BY [TimesheetDate] DESC, [SupervisorName], [WorkCenterName]
+      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+    `);
+
+  const headerIds = headersResult.recordset.map((row) => String(row.Id));
+  const { eventsByHeader, lines } = await loadTimesheetChildData(pool, headerIds);
+  const headers = headersResult.recordset.map((row) => mapTimesheetHeaderRow(row, eventsByHeader));
+  return { headers, lines, total, page, pageSize, mode };
+}
+
+export const invalidateTimesheetApprovalWorkspaceCache = () => {
+  timesheetApprovalStatsCache = null;
+};
+
 export async function readTimesheetApprovalData(options?: { softFail?: boolean }) {
   let pool: sql.ConnectionPool;
   try {
@@ -1433,30 +1756,30 @@ export async function readTimesheetApprovalData(options?: { softFail?: boolean }
     pool.request().query(`
       SELECT e.*
       FROM [hris].[TimesheetWorkflowEvents] e
-      INNER JOIN [hris].[TimesheetHeaders] h ON h.[Id] = e.[HeaderId]
+      INNER JOIN [hris].[TimesheetHeaders] h ON ${joinHeaderToEvent}
       WHERE h.${nonDraftFilter}
       ORDER BY e.[Id]
     `),
     pool.request().query(`
       SELECT l.*
       FROM [hris].[TimesheetLines] l
-      INNER JOIN [hris].[TimesheetHeaders] h ON h.[Id] = l.[HeaderId]
+      INNER JOIN [hris].[TimesheetHeaders] h ON ${joinHeaderToLine}
       WHERE h.${nonDraftFilter}
       ORDER BY l.[EmployeeName]
     `),
     pool.request().query(`
       SELECT a.*
       FROM [hris].[TimesheetProjectAllocations] a
-      INNER JOIN [hris].[TimesheetLines] l ON l.[Id] = a.[LineId]
-      INNER JOIN [hris].[TimesheetHeaders] h ON h.[Id] = l.[HeaderId]
+      INNER JOIN [hris].[TimesheetLines] l ON ${joinLineToAllocation}
+      INNER JOIN [hris].[TimesheetHeaders] h ON ${joinHeaderToLine}
       WHERE h.${nonDraftFilter}
       ORDER BY a.[Id]
     `),
     pool.request().query(`
       SELECT a.*
       FROM [hris].[TimesheetIdleAllocations] a
-      INNER JOIN [hris].[TimesheetLines] l ON l.[Id] = a.[LineId]
-      INNER JOIN [hris].[TimesheetHeaders] h ON h.[Id] = l.[HeaderId]
+      INNER JOIN [hris].[TimesheetLines] l ON ${joinLineToAllocation}
+      INNER JOIN [hris].[TimesheetHeaders] h ON ${joinHeaderToLine}
       WHERE h.${nonDraftFilter}
       ORDER BY a.[Id]
     `),
