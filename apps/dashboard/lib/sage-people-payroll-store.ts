@@ -895,6 +895,296 @@ export async function readSagePayrollPeriodTotals(period = payrollPeriod()) {
   }
 }
 
+export type SageEmployeePayslipLine = {
+  code: string;
+  name: string;
+  amount: number;
+  taxableAmount?: number | null;
+  ytdTotal?: number | null;
+};
+
+export type SageEmployeePayslipSnapshot = {
+  period: string;
+  employeeId: number;
+  payslipId: number;
+  lastCalcDate: string | null;
+  earningLines: SageEmployeePayslipLine[];
+  deductionLines: SageEmployeePayslipLine[];
+  contributionLines: SageEmployeePayslipLine[];
+  grossPay: number;
+  taxablePay: number;
+  totalDeductions: number;
+  netPay: number;
+  paye: number;
+  pensionEmployee: number;
+  nhf: number;
+  pensionEmployer: number;
+  employerContributions: number;
+  ytdGrossEarnings: number;
+  ytdTaxPaid: number;
+  ytdPensionContribution: number;
+  ytdDeductions: number;
+  ytdNetEarnings: number;
+};
+
+const sanitizePayrollPeriod = (period: string) => (/^\d{4}-\d{2}$/.test(String(period || '').trim()) ? String(period).trim() : '');
+const sanitizePayrollMatchKey = (value: string) => {
+  const key = normalizePayrollMatchKey(value);
+  return /^[A-Z0-9]{1,40}$/.test(key) ? key : '';
+};
+
+const periodRangeSql = (period: string) => {
+  const [year, month] = period.split('-').map(Number);
+  const start = `${year}-${String(month).padStart(2, '0')}-01`;
+  const end = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+  return `SELECT '${period}' AS period_code, CAST('${start}' AS date) AS period_start, CAST('${end}' AS date) AS period_end`;
+};
+
+const employeePeriodPayslipsQuery = (periods: string[], matchKeys: string[]) => {
+  const periodRanges = periods.map(periodRangeSql).join(' UNION ALL ');
+  const keys = matchKeys.map((key) => `('${key.replace(/'/g, "''")}')`).join(', ');
+  return `
+IF OBJECT_ID('tempdb..#PeriodRanges') IS NOT NULL DROP TABLE #PeriodRanges;
+SELECT period_code, period_start, period_end
+INTO #PeriodRanges
+FROM (${periodRanges}) period_ranges;
+
+IF OBJECT_ID('tempdb..#MatchKeys') IS NOT NULL DROP TABLE #MatchKeys;
+CREATE TABLE #MatchKeys (match_key nvarchar(40) NOT NULL PRIMARY KEY);
+INSERT INTO #MatchKeys(match_key) VALUES ${keys};
+
+IF OBJECT_ID('tempdb..#MatchedEmployees') IS NOT NULL DROP TABLE #MatchedEmployees;
+SELECT
+  e.EmployeeID,
+  e.EmployeeCode,
+  CASE
+    WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'C%' OR UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'L%'
+      THEN REPLACE(UPPER(LTRIM(RTRIM(e.EmployeeCode))), '_', '')
+    WHEN UPPER(LTRIM(RTRIM(e.EmployeeCode))) LIKE 'P%'
+      THEN REPLACE(UPPER(LTRIM(RTRIM(e.EmployeeCode))), '_', '')
+    ELSE CONCAT('P', REPLACE(UPPER(LTRIM(RTRIM(e.EmployeeCode))), '_', ''))
+  END AS directoryEmployeeCode
+INTO #MatchedEmployees
+FROM Employee.Employee e
+WHERE REPLACE(UPPER(LTRIM(RTRIM(e.EmployeeCode))), '_', '') IN (SELECT match_key FROM #MatchKeys)
+   OR CONCAT('P', REPLACE(UPPER(LTRIM(RTRIM(e.EmployeeCode))), '_', '')) IN (SELECT match_key FROM #MatchKeys)
+   OR CAST(e.EmployeeID AS nvarchar(40)) IN (SELECT match_key FROM #MatchKeys);
+
+IF OBJECT_ID('tempdb..#PeriodPayslips') IS NOT NULL DROP TABLE #PeriodPayslips;
+SELECT
+  pr.period_code,
+  me.EmployeeID,
+  epp.EmployeePayPeriodID,
+  p.PayslipID,
+  epp.LastCalcDate,
+  ROW_NUMBER() OVER (
+    PARTITION BY pr.period_code, me.EmployeeID
+    ORDER BY epp.EmployeePayPeriodID DESC, p.PayslipID DESC
+  ) AS rn
+INTO #PeriodPayslips
+FROM #PeriodRanges pr
+CROSS JOIN #MatchedEmployees me
+JOIN Employee.EmployeePayPeriod epp
+  ON epp.EmployeeID = me.EmployeeID
+JOIN Payroll.Payslip p
+  ON p.EmployeePayPeriodID = epp.EmployeePayPeriodID
+WHERE epp.LastCalcDate >= pr.period_start
+  AND epp.LastCalcDate < pr.period_end;
+
+DELETE FROM #PeriodPayslips WHERE rn > 1;
+
+SELECT
+  pp.period_code AS period,
+  pp.EmployeeID AS employeeId,
+  pp.PayslipID AS payslipId,
+  pp.LastCalcDate AS lastCalcDate
+FROM #PeriodPayslips pp;
+
+SELECT
+  pp.period_code AS period,
+  edef.DefCode AS code,
+  COALESCE(NULLIF(LTRIM(RTRIM(edef.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(edef.LongDescription)), ''), edef.DefCode) AS name,
+  pel.Total AS amount,
+  pel.TaxableAmount AS taxableAmount,
+  pel.YTDTotal AS ytdTotal
+FROM #PeriodPayslips pp
+JOIN Payroll.PayslipEarnLine pel
+  ON pel.PayslipID = pp.PayslipID
+JOIN Payroll.EarningDef edef
+  ON edef.EarningDefID = pel.DefID
+WHERE ISNULL(pel.Total, 0) <> 0
+ORDER BY pp.period_code, edef.DefCode;
+
+SELECT
+  pp.period_code AS period,
+  dd.DefCode AS code,
+  COALESCE(NULLIF(LTRIM(RTRIM(dd.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(dd.LongDescription)), ''), dd.DefCode) AS name,
+  pdl.Total AS amount,
+  pdl.YTDTotal AS ytdTotal
+FROM #PeriodPayslips pp
+JOIN Payroll.PayslipDeductionLine pdl
+  ON pdl.PayslipID = pp.PayslipID
+JOIN Payroll.DeductionDef dd
+  ON dd.DeductionDefID = pdl.DefID
+WHERE ISNULL(pdl.Total, 0) <> 0
+ORDER BY pp.period_code, dd.DefCode;
+
+SELECT
+  pp.period_code AS period,
+  ccd.DefCode AS code,
+  COALESCE(NULLIF(LTRIM(RTRIM(ccd.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(ccd.LongDescription)), ''), ccd.DefCode) AS name,
+  pccl.Total AS amount,
+  pccl.YTDTotal AS ytdTotal
+FROM #PeriodPayslips pp
+JOIN Payroll.PayslipCompanyContributionLine pccl
+  ON pccl.PayslipID = pp.PayslipID
+JOIN Payroll.CompanyContributionDef ccd
+  ON ccd.CompanyContributionDefID = pccl.DefID
+WHERE ISNULL(pccl.Total, 0) <> 0
+ORDER BY pp.period_code, ccd.DefCode;
+
+SELECT
+  pp.period_code AS period,
+  SUM(ISNULL(pnp.PaymentAmount, 0)) AS netPay
+FROM #PeriodPayslips pp
+JOIN Payroll.PayslipNetPay pnp
+  ON pnp.PayslipID = pp.PayslipID
+GROUP BY pp.period_code;
+
+DROP TABLE #PeriodPayslips;
+DROP TABLE #MatchedEmployees;
+DROP TABLE #MatchKeys;
+DROP TABLE #PeriodRanges;
+`;
+};
+
+const roundSageMoney = (value: unknown) => Math.round((Number(value) || 0) * 100) / 100;
+
+const isPensionDeductionCode = (code: string) => {
+  const upper = String(code || '').toUpperCase();
+  return (upper.includes('PENSION') || upper === 'PENARR' || upper === 'VOLPENS') && upper !== 'SUSPENSION';
+};
+
+const buildSageEmployeePayslipSnapshots = (
+  headers: Array<{ period: string; employeeId: number; payslipId: number; lastCalcDate: string | Date | null }>,
+  earnings: Array<{ period: string; code: string; name: string; amount: number; taxableAmount?: number | null; ytdTotal?: number | null }>,
+  deductions: Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+  contributions: Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+  netPayRows: Array<{ period: string; netPay: number }>,
+) => {
+  const earningsByPeriod = earnings.reduce((map, line) => {
+    const current = map.get(line.period) || [];
+    current.push({
+      code: String(line.code || '').trim(),
+      name: String(line.name || line.code || '').trim(),
+      amount: roundSageMoney(line.amount),
+      taxableAmount: line.taxableAmount === null || line.taxableAmount === undefined ? null : roundSageMoney(line.taxableAmount),
+      ytdTotal: line.ytdTotal === null || line.ytdTotal === undefined ? null : roundSageMoney(line.ytdTotal),
+    });
+    map.set(line.period, current);
+    return map;
+  }, new Map<string, SageEmployeePayslipLine[]>());
+
+  const deductionsByPeriod = deductions.reduce((map, line) => {
+    const current = map.get(line.period) || [];
+    current.push({
+      code: String(line.code || '').trim(),
+      name: String(line.name || line.code || '').trim(),
+      amount: roundSageMoney(line.amount),
+      ytdTotal: line.ytdTotal === null || line.ytdTotal === undefined ? null : roundSageMoney(line.ytdTotal),
+    });
+    map.set(line.period, current);
+    return map;
+  }, new Map<string, SageEmployeePayslipLine[]>());
+
+  const contributionsByPeriod = contributions.reduce((map, line) => {
+    const current = map.get(line.period) || [];
+    current.push({
+      code: String(line.code || '').trim(),
+      name: String(line.name || line.code || '').trim(),
+      amount: roundSageMoney(line.amount),
+      ytdTotal: line.ytdTotal === null || line.ytdTotal === undefined ? null : roundSageMoney(line.ytdTotal),
+    });
+    map.set(line.period, current);
+    return map;
+  }, new Map<string, SageEmployeePayslipLine[]>());
+
+  const netPayByPeriod = new Map(netPayRows.map((row) => [row.period, roundSageMoney(row.netPay)]));
+
+  return headers.map((header) => {
+    const earningLines = earningsByPeriod.get(header.period) || [];
+    const deductionLines = deductionsByPeriod.get(header.period) || [];
+    const contributionLines = contributionsByPeriod.get(header.period) || [];
+    const grossPay = roundSageMoney(earningLines.reduce((sum, line) => sum + line.amount, 0));
+    const taxablePay = roundSageMoney(earningLines.reduce((sum, line) => {
+      const amount = line.amount;
+      const taxableAmount = line.taxableAmount === null || line.taxableAmount === undefined ? amount : line.taxableAmount;
+      return sum + taxableAmount;
+    }, 0));
+    const totalDeductions = roundSageMoney(deductionLines.reduce((sum, line) => sum + line.amount, 0));
+    const paye = roundSageMoney(deductionLines.filter((line) => String(line.code || '').toUpperCase() === 'PAYE').reduce((sum, line) => sum + line.amount, 0));
+    const pensionEmployee = roundSageMoney(deductionLines.filter((line) => isPensionDeductionCode(line.code)).reduce((sum, line) => sum + line.amount, 0));
+    const nhf = roundSageMoney(deductionLines.filter((line) => String(line.code || '').toUpperCase() === 'NHF').reduce((sum, line) => sum + line.amount, 0));
+    const pensionEmployer = roundSageMoney(contributionLines.filter((line) => String(line.code || '').toUpperCase() === 'PENSION_ER').reduce((sum, line) => sum + line.amount, 0));
+    const employerContributions = roundSageMoney(contributionLines.reduce((sum, line) => sum + line.amount, 0));
+    const netPay = netPayByPeriod.get(header.period) ?? roundSageMoney(Math.max(0, grossPay - totalDeductions));
+    const ytdGrossEarnings = roundSageMoney(earningLines.reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
+    const ytdTaxPaid = roundSageMoney(deductionLines.filter((line) => String(line.code || '').toUpperCase() === 'PAYE').reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
+    const ytdPensionContribution = roundSageMoney(deductionLines.filter((line) => isPensionDeductionCode(line.code)).reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
+    const ytdDeductions = roundSageMoney(deductionLines.reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
+    const ytdNetEarnings = roundSageMoney(ytdGrossEarnings - ytdDeductions);
+
+    return {
+      period: header.period,
+      employeeId: Number(header.employeeId),
+      payslipId: Number(header.payslipId),
+      lastCalcDate: header.lastCalcDate ? String(header.lastCalcDate).slice(0, 10) : null,
+      earningLines,
+      deductionLines,
+      contributionLines,
+      grossPay,
+      taxablePay,
+      totalDeductions,
+      netPay,
+      paye,
+      pensionEmployee,
+      nhf,
+      pensionEmployer,
+      employerContributions,
+      ytdGrossEarnings,
+      ytdTaxPaid,
+      ytdPensionContribution,
+      ytdDeductions,
+      ytdNetEarnings,
+    } satisfies SageEmployeePayslipSnapshot;
+  });
+};
+
+export async function readSageEmployeePayslipSnapshotsForPeriods(
+  matchKeys: Array<string | number | null | undefined>,
+  periods: string[],
+): Promise<SageEmployeePayslipSnapshot[]> {
+  const safePeriods = Array.from(new Set(periods.map(sanitizePayrollPeriod).filter(Boolean)));
+  const safeKeys = Array.from(new Set(matchKeys.map((value) => sanitizePayrollMatchKey(String(value ?? ''))).filter(Boolean)));
+  if (!safePeriods.length || !safeKeys.length) return [];
+
+  const pool = new sql.ConnectionPool(config());
+  await pool.connect();
+  try {
+    const result = await pool.request().query(employeePeriodPayslipsQuery(safePeriods, safeKeys));
+    const recordsets = (Array.isArray(result.recordsets) ? result.recordsets : []) as unknown[];
+    return buildSageEmployeePayslipSnapshots(
+      (recordsets[0] || []) as Array<{ period: string; employeeId: number; payslipId: number; lastCalcDate: string | Date | null }>,
+      (recordsets[1] || []) as Array<{ period: string; code: string; name: string; amount: number; taxableAmount?: number | null; ytdTotal?: number | null }>,
+      (recordsets[2] || []) as Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+      (recordsets[3] || []) as Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+      (recordsets[4] || []) as Array<{ period: string; netPay: number }>,
+    );
+  } finally {
+    await pool.close();
+  }
+}
+
 export async function readSagePayrollEmployeeBankDetails() {
   const pool = new sql.ConnectionPool(config());
   await pool.connect();

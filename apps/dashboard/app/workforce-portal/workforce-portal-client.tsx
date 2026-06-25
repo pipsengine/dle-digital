@@ -70,9 +70,12 @@ type PayrollHistoryRow = {
   payrollNumber?: string;
   payeReference?: string;
   grossPay: number;
+  allowances?: number;
+  pensionEmployee?: number;
   deductions: number;
   netPay: number;
   status: string;
+  dataSource?: 'enterprise' | 'calculated';
   earnings?: PayrollLine[];
   deductionLines?: Array<{ code?: string; label: string; units?: number; amount: number }>;
   employerContributionLines?: Array<{ code?: string; label: string; units?: number; amount: number }>;
@@ -432,19 +435,19 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
   const ytd = selected.ytd || { grossEarnings: 0, taxPaid: 0, pensionContribution: 0, deductions: 0, netEarnings: 0 };
   const verification = selected.verification || { qrCode: `DLE|${employee?.employeeId || ''}|${selected.period}`, generatedAt: payload?.generatedAt || new Date().toISOString(), approvalStatus: 'Payroll Approved' };
   const earnings = standardLines(selected.earnings, [
-    ['Basic Salary', ['BASIC']],
+    ['Basic Salary', ['BASIC', 'WEEKDAY EARNING', 'JCWEEKDAY']],
     ['Housing Allowance', ['HOUSING', 'HOUSE']],
     ['Transport Allowance', ['TRANSPORT', 'TRANS']],
-    ['Other Allowance', ['OTHERALL', 'OTHER ALLOWANCE']],
+    ['Other Allowance', ['OTHERALL', 'OTHER ALLOWANCE', 'WEEKDAY ALLOWANCE']],
     ['Utility Allowance', ['UTILITY', 'UTILITIES']],
     ['Furniture Allowance', ['FURNITURE', 'FURN']],
     ['Leave Allowance', ['LEAVE ALLOWANCE', 'LEAVE_ALLOW']],
     ['Medical Allowance', ['MEDICAL']],
     ['Meal Allowance', ['MEAL']],
     ['Shift Allowance', ['SHIFT']],
-    ['Overtime', ['OVERTIME', 'OVT']],
+    ['Overtime', ['OVERTIME', 'OVT', 'WEEKDAY OVT']],
     ['Bonus', ['BONUS']],
-    ['Other Earnings', ['REFUND', 'OTHER PAY', 'OTHER EARNINGS']],
+    ['Other Earnings', ['REFUND', 'OTHER PAY', 'OTHER EARNINGS', 'HIGH TAX']],
   ]);
   const deductions = standardLines(selected.deductionLines, [
     ['PAYE Tax', ['PAYE']],
@@ -511,6 +514,12 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
 
   return (
     <section className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label="Gross Pay" value={money(selected.grossPay)} detail={selected.periodLabel || selected.period} icon={Banknote} tone="bg-violet-100 text-violet-700" />
+        <MetricCard label="Allowances" value={money(selected.allowances ?? Math.max(0, selected.grossPay - (earnings.find((line) => /BASIC|WEEKDAY EARNING/i.test(line.label || ''))?.amount || 0)))} detail={selected.dataSource === 'enterprise' ? 'From DLE Enterprise payroll' : 'Calculated payroll'} icon={WalletCards} tone="bg-emerald-100 text-emerald-700" />
+        <MetricCard label="Tax / Deductions" value={money(selected.deductions)} detail="PAYE and statutory deductions" icon={FileText} tone="bg-amber-100 text-amber-700" />
+        <MetricCard label="Pension" value={money(selected.pensionEmployee ?? (selected.deductionLines?.find((line) => /PENSION/i.test(line.code || line.label || ''))?.amount || 0))} detail="Employee contribution" icon={Landmark} tone="bg-cyan-100 text-cyan-700" />
+      </div>
       <style jsx global>{`
         #ess-payslip-print {
           width: min(100%, 210mm);
@@ -1315,14 +1324,8 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           {tab === 'payroll' && widgets && (
             <section className="space-y-4">
               <Section title="Payroll Self-Service">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <MetricCard label="Gross Pay" value={money(widgets.payroll.monthlyPay)} detail={payload?.payrollAccess?.currentPeriodReleased ? 'Latest released payslip' : 'Awaiting payroll release'} icon={Banknote} tone="bg-violet-100 text-violet-700" />
-                  <MetricCard label="Allowances" value={money(widgets.payroll.allowances)} detail="Payroll configured" icon={WalletCards} tone="bg-emerald-100 text-emerald-700" />
-                  <MetricCard label="Tax / Deductions" value={money(widgets.payroll.deductions)} detail="PAYE and statutory deductions" icon={FileText} tone="bg-amber-100 text-amber-700" />
-                  <MetricCard label="Pension" value={money(widgets.payroll.pension)} detail="Employee contribution" icon={Landmark} tone="bg-cyan-100 text-cyan-700" />
-                </div>
+                <PayslipWorkspace payload={payload} employee={employee} />
               </Section>
-              <PayslipWorkspace payload={payload} employee={employee} />
             </section>
           )}
 

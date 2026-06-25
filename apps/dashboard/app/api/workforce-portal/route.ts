@@ -12,6 +12,8 @@ import { hasLeaveAllowanceInYear } from '@/lib/payroll-leave-allowance-store';
 import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { listEmployeeAccessiblePayrollPeriods } from '@/lib/payroll-run-store';
+import { computeEnterpriseYtdTotals, readEnterpriseEmployeePayslipRecordsByPeriod } from '@/lib/payroll-ess-payslip-store';
+import type { PayrollCalculationRecord } from '@/lib/payroll-calculation-service';
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
@@ -93,6 +95,29 @@ const employeeAddress = (employee: Awaited<ReturnType<typeof readPayrollEmployee
   const parts = [street, employee.city, employee.state, employee.country].map(compact).filter(Boolean);
   return parts.join(', ') || 'Not configured';
 };
+const mapEnterpriseEarningLines = (record: PayrollCalculationRecord) =>
+  (record.earningLines || [])
+    .map((line) => ({
+      code: compact(line.code),
+      label: compact(line.name || line.label || line.code),
+      units: Number(line.amount || 0) > 0 ? 1 : 0,
+      amount: roundMoney(Number(line.amount || 0)),
+      taxable: Boolean(line.taxable),
+    }))
+    .filter((line) => line.code && Math.abs(line.amount) > 0.004);
+const mapEnterpriseDeductionLines = (record: PayrollCalculationRecord) =>
+  (record.deductionLines || [])
+    .map((line) => ({
+      code: compact(line.code),
+      label: compact(line.label || line.code),
+      units: Number(line.amount || 0) > 0 ? 1 : 0,
+      amount: roundMoney(Number(line.amount || 0)),
+    }))
+    .filter((line) => Math.abs(line.amount) > 0.004);
+const mapEnterpriseEmployerContributionLines = (record: PayrollCalculationRecord) => [
+  { code: 'PENSION_EMPLOYER', label: 'Pension Employer Contribution', units: record.pensionEmployer > 0 ? 1 : 0, amount: roundMoney(record.pensionEmployer) },
+  { code: 'STATUTORY_ER', label: 'Employer Statutory Contributions', units: record.statutoryEmployer > 0 ? 1 : 0, amount: roundMoney(record.statutoryEmployer) },
+].filter((line) => Math.abs(line.amount) > 0.004);
 
 const resolveDashboardRoot = () => {
   const cwd = process.cwd();
@@ -284,8 +309,76 @@ export async function GET(request: Request) {
     const pensionVersion = activePensionVersion(pensionConfig);
     const employeeAny = employee as any;
     let leaveContext = { annualEntitlement: 0, leaveUsed: 0, leaveBalance: 0, carryForward: 0 };
-    const payrollForPeriod = (period: string, includeAdjustments = false) => {
+    let enterpriseRecordsByPeriod = new Map<string, PayrollCalculationRecord>();
+    let releasedPayrollPeriods: string[] = [];
+    const payrollForPeriod = (period: string, includeAdjustments = false, enterpriseRecord?: PayrollCalculationRecord | null) => {
       const nonPermanentPayroll = essNonPermanentPayrollEmployee(employee);
+      const sharedEmployeeInfo = {
+        employeeCode: employee.employeeCode || employee.employeeId,
+        employeeName: employee.fullName,
+        employeeCategory: essEmployeeCategory(employee),
+        department: employee.department || 'Unassigned',
+        unit: employee.businessUnit || employee.division || 'DLE',
+        designation: employee.jobTitle || employee.designation || 'Employee',
+        gradeLevel: employee.salaryGrade || employee.jobGrade || 'Unassigned',
+        employmentType: employee.employmentType || 'Permanent',
+        dateOfEmployment: employee.dateJoined || employee.contractStartDate || '',
+        employeeStatus: employee.status || 'Active',
+        address: employeeAddress(employee),
+      };
+      const sharedStatutoryInfo = {
+        bankName: payslipIdentity?.bankName || employeeAny.bankName || 'Not configured',
+        accountNumber: maskAccount(payslipIdentity?.accountNo || employeeAny.accountNo || employeeAny.accountNumber),
+        pensionFundAdministrator: nonPermanentPayroll ? '' : configured(payslipIdentity?.pensionProvider || employeeAny.pensionProvider),
+        pensionNumber: nonPermanentPayroll ? '' : configured(payslipIdentity?.pensionPin || employeeAny.pensionPin),
+        nhfNumber: nonPermanentPayroll ? '' : employeeAny.nhfNumber || 'Not applicable',
+        taxNumber: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
+        nhiaNumber: nonPermanentPayroll ? '' : employeeAny.nhiaNumber || 'Not applicable',
+      };
+      const sharedLeaveInfo = {
+        annualLeaveEntitlement: leaveContext.annualEntitlement,
+        leaveTaken: leaveContext.leaveUsed,
+        leaveBalance: leaveContext.leaveBalance,
+        carryForwardLeave: leaveContext.carryForward,
+      };
+
+      if (enterpriseRecord && enterpriseRecord.grossPay > 0) {
+        const earningsLines = mapEnterpriseEarningLines(enterpriseRecord);
+        const deductionLines = mapEnterpriseDeductionLines(enterpriseRecord);
+        const employerContributionLines = mapEnterpriseEmployerContributionLines(enterpriseRecord);
+        const totalEmployerContributions = roundMoney(employerContributionLines.reduce((sum, line) => sum + line.amount, 0));
+        const ytd = computeEnterpriseYtdTotals(period, releasedPayrollPeriods, enterpriseRecordsByPeriod);
+        return {
+          period,
+          periodLabel: periodTitle(period),
+          payPeriodStart: periodStartDate(period),
+          payPeriodEnd: monthEndDate(period),
+          payDate: monthEndDate(period),
+          payrollNumber: `DLE-${period.replace('-', '')}-${employee.employeeId}`,
+          payeReference: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
+          grossPay: roundMoney(enterpriseRecord.grossPay),
+          allowances: roundMoney(enterpriseRecord.allowances),
+          pensionEmployee: roundMoney(enterpriseRecord.pensionEmployee),
+          deductions: roundMoney(enterpriseRecord.totalDeductions),
+          netPay: roundMoney(enterpriseRecord.netPay),
+          status: 'Released',
+          dataSource: 'enterprise',
+          earnings: earningsLines,
+          deductionLines,
+          employerContributionLines,
+          totalEmployerContributions,
+          employeeInfo: sharedEmployeeInfo,
+          statutoryInfo: sharedStatutoryInfo,
+          leaveInfo: sharedLeaveInfo,
+          ytd,
+          verification: {
+            qrCode: `DLE|${employee.employeeId}|${period}|${roundMoney(enterpriseRecord.netPay)}`,
+            generatedAt: new Date().toISOString(),
+            approvalStatus: 'Payroll Released',
+          },
+        };
+      }
+
       const earnings = calculatePayrollEarnings(employee, { period, includePeriodAdjustments: includeAdjustments });
       const taxInput = {
         ...payrollInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }),
@@ -315,9 +408,12 @@ export async function GET(request: Request) {
         payrollNumber: `DLE-${period.replace('-', '')}-${employee.employeeId}`,
         payeReference: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
         grossPay: earnings.grossPay,
+        allowances: earnings.allowances,
+        pensionEmployee,
         deductions,
         netPay: roundMoney(Math.max(0, earnings.grossPay - deductions)),
         status: 'Released',
+        dataSource: 'calculated',
         earnings: earnings.paidEarningLines.map((line) => ({ code: line.code, label: line.name, units: line.amount > 0 ? 1 : 0, amount: line.amount, taxable: line.taxable })),
         deductionLines: [
           { code: 'PAYE', label: 'PAYE Tax', units: paye > 0 ? 1 : 0, amount: paye },
@@ -334,34 +430,9 @@ export async function GET(request: Request) {
           { code: 'OTHER_EMPLOYER', label: 'Other Employer Contributions', units: 0, amount: 0 },
         ].filter((line) => Math.abs(Number(line.amount || 0)) > 0.004),
         totalEmployerContributions,
-        employeeInfo: {
-          employeeCode: employee.employeeCode || employee.employeeId,
-          employeeName: employee.fullName,
-          employeeCategory: essEmployeeCategory(employee),
-          department: employee.department || 'Unassigned',
-          unit: employee.businessUnit || employee.division || 'DLE',
-          designation: employee.jobTitle || employee.designation || 'Employee',
-          gradeLevel: employee.salaryGrade || employee.jobGrade || 'Unassigned',
-          employmentType: employee.employmentType || 'Permanent',
-          dateOfEmployment: employee.dateJoined || employee.contractStartDate || '',
-          employeeStatus: employee.status || 'Active',
-          address: employeeAddress(employee),
-        },
-        statutoryInfo: {
-          bankName: payslipIdentity?.bankName || employeeAny.bankName || 'Not configured',
-          accountNumber: maskAccount(payslipIdentity?.accountNo || employeeAny.accountNo || employeeAny.accountNumber),
-          pensionFundAdministrator: nonPermanentPayroll ? '' : configured(payslipIdentity?.pensionProvider || employeeAny.pensionProvider),
-          pensionNumber: nonPermanentPayroll ? '' : configured(payslipIdentity?.pensionPin || employeeAny.pensionPin),
-          nhfNumber: nonPermanentPayroll ? '' : employeeAny.nhfNumber || 'Not applicable',
-          taxNumber: payslipIdentity?.taxIdentificationNumber || employeeAny.taxIdentificationNumber || employeeAny.taxNo || 'Not configured',
-          nhiaNumber: nonPermanentPayroll ? '' : employeeAny.nhiaNumber || 'Not applicable',
-        },
-        leaveInfo: {
-          annualLeaveEntitlement: leaveContext.annualEntitlement,
-          leaveTaken: leaveContext.leaveUsed,
-          leaveBalance: leaveContext.leaveBalance,
-          carryForwardLeave: leaveContext.carryForward,
-        },
+        employeeInfo: sharedEmployeeInfo,
+        statutoryInfo: sharedStatutoryInfo,
+        leaveInfo: sharedLeaveInfo,
         ytd: {
           grossEarnings: roundMoney(earnings.grossPay * monthNumber),
           taxPaid: roundMoney(paye * monthNumber),
@@ -412,8 +483,12 @@ export async function GET(request: Request) {
     const carryForward = 0;
     const annualBalance = Math.max(0, annualEntitlement - leaveUsed - pendingAnnualLeave);
     leaveContext = { annualEntitlement, leaveUsed, leaveBalance: annualBalance, carryForward };
-    const releasedPayrollPeriods = await listEmployeeAccessiblePayrollPeriods();
-    const payrollHistory = releasedPayrollPeriods.map((period) => payrollForPeriod(period, true));
+    releasedPayrollPeriods = await listEmployeeAccessiblePayrollPeriods();
+    enterpriseRecordsByPeriod = await readEnterpriseEmployeePayslipRecordsByPeriod(
+      [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId],
+      releasedPayrollPeriods,
+    ).catch(() => new Map());
+    const payrollHistory = releasedPayrollPeriods.map((period) => payrollForPeriod(period, true, enterpriseRecordsByPeriod.get(period)));
     const latestReleasedPayroll = payrollHistory[0] || null;
     const currentPeriodReleased = releasedPayrollPeriods.includes(ESS_CURRENT_PAYROLL_PERIOD);
     const sickUsed = employee.employeeDbId % 3;
@@ -524,8 +599,8 @@ export async function GET(request: Request) {
           currency: employee.payCurrency || 'NGN',
           payslips: payrollHistory.length,
           deductions: latestReleasedPayroll?.deductions || 0,
-          pension: latestReleasedPayroll?.deductionLines.find((line) => line.code === 'PENSION_EMPLOYEE')?.amount || 0,
-          allowances: latestReleasedPayroll ? calculatePayrollEarnings(employee, { period: latestReleasedPayroll.period, includePeriodAdjustments: true }).allowances : 0,
+          pension: latestReleasedPayroll?.pensionEmployee || latestReleasedPayroll?.deductionLines?.find((line) => line.code === 'PENSION_EMPLOYEE')?.amount || 0,
+          allowances: latestReleasedPayroll?.allowances || 0,
         },
         requests: { pending: requests.filter((item) => !['Approved', 'Rejected', 'Closed'].includes(item.status)).length, approved: requests.filter((item) => item.status === 'Approved').length, total: requests.length },
         loans: { applications: employeeLoans.length, outstanding: employeeLoans.reduce((sum, item) => sum + Number(item.outstandingBalance || 0), 0) },

@@ -147,6 +147,8 @@ type Payload = {
     byComponent: Array<{ id: string; label: string; amount: number; tone: Tone; payer: 'Employee' | 'Employer' | 'Both' }>;
   };
   controls: Array<{ id: string; label: string; status: string; detail: string; tone: Tone }>;
+  enterpriseSourceActive?: boolean;
+  toleranceMode?: boolean;
 };
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
@@ -357,6 +359,11 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
       {error && <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div>}
       {toast && <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div>}
       {payload?.dataSource?.warning && <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">{payload.dataSource.warning}</div>}
+      {payload?.enterpriseSourceActive ? (
+        <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+          June 2026 onward: payroll for {payload.periodLabel} is calculated and stored 100% in DLE_Enterprise. Sage is not used for validation or payslips.
+        </div>
+      ) : null}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${number(payload?.summary.employees)} employees in payroll scope`} icon={Banknote} tone="blue" />
@@ -369,11 +376,13 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
         <MetricCard label="Review Lines" value={number(payload?.summary.review)} detail="Require payroll or compliance review" icon={AlertTriangle} tone="amber" />
         <MetricCard label="Blocked Lines" value={number(payload?.summary.blocked)} detail={`${number(payload?.summary.exceptionCount)} total exception flags`} icon={ShieldCheck} tone={(payload?.summary.blocked || 0) > 0 ? 'red' : 'green'} />
       </div>
-      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <MetricCard label="Sage Gross" value={money(payload?.summary.sageGrossPay, canViewMoney)} detail="Actual Sage gross for selected period" icon={FileCheck2} tone="cyan" />
-        <MetricCard label="Gross Variance" value={money(payload?.summary.grossVariance, canViewMoney)} detail="Generated gross minus Sage gross" icon={AlertTriangle} tone={(payload?.summary.discrepancyCount || 0) > 0 ? 'amber' : 'green'} />
-        <MetricCard label="Discrepancies" value={number(payload?.summary.discrepancyCount)} detail="Generated payroll lines requiring review against Sage" icon={ShieldCheck} tone={(payload?.summary.discrepancyCount || 0) > 0 ? 'amber' : 'green'} />
-      </div>
+      {!payload?.enterpriseSourceActive ? (
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <MetricCard label="Sage Gross" value={money(payload?.summary.sageGrossPay, canViewMoney)} detail="Actual Sage gross for selected period" icon={FileCheck2} tone="cyan" />
+          <MetricCard label="Gross Variance" value={money(payload?.summary.grossVariance, canViewMoney)} detail="Generated gross minus Sage gross" icon={AlertTriangle} tone={(payload?.summary.discrepancyCount || 0) > 0 ? 'amber' : 'green'} />
+          <MetricCard label="Discrepancies" value={number(payload?.summary.discrepancyCount)} detail="Generated payroll lines requiring review against Sage" icon={ShieldCheck} tone={(payload?.summary.discrepancyCount || 0) > 0 ? 'amber' : 'green'} />
+        </div>
+      ) : null}
 
       <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -451,7 +460,9 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
           <div className="overflow-x-auto">
             <table className="min-w-[1480px] w-full divide-y divide-slate-100">
               <thead className="bg-slate-50">
-                <tr>{['Employee', 'Group', 'Generated Gross', 'Sage Gross', 'Gross Var.', 'PAYE', 'Pension', 'Deductions', 'Generated Net', 'Sage Net', 'Net Var.', 'Employer Cost', 'Status'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase tracking-normal text-slate-500">{header}</th>)}</tr>
+                <tr>{payload?.enterpriseSourceActive
+                  ? ['Employee', 'Group', 'Gross Pay', 'PAYE', 'Pension', 'Deductions', 'Net Pay', 'Employer Cost', 'Status'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase tracking-normal text-slate-500">{header}</th>)
+                  : ['Employee', 'Group', 'Generated Gross', 'Sage Gross', 'Gross Var.', 'PAYE', 'Pension', 'Deductions', 'Generated Net', 'Sage Net', 'Net Var.', 'Employer Cost', 'Status'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase tracking-normal text-slate-500">{header}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {filtered.map((record) => {
@@ -461,14 +472,22 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
                       <td className="px-4 py-3"><div className="font-black text-slate-950">{record.fullName}</div><div className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</div></td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{record.payrollGroup}</td>
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
-                      <td className="px-4 py-3 text-sm font-black text-cyan-800">{record.sageActual ? money(record.sageActual.grossPay, canViewMoney) : 'No Sage'}</td>
-                      <td className={`px-4 py-3 text-sm font-black ${Number(record.discrepancies.grossVariance || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{record.discrepancies.grossVariance === null ? 'N/A' : money(record.discrepancies.grossVariance, canViewMoney)}</td>
+                      {!payload?.enterpriseSourceActive ? (
+                        <>
+                          <td className="px-4 py-3 text-sm font-black text-cyan-800">{record.sageActual ? money(record.sageActual.grossPay, canViewMoney) : 'No Sage'}</td>
+                          <td className={`px-4 py-3 text-sm font-black ${Number(record.discrepancies.grossVariance || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{record.discrepancies.grossVariance === null ? 'N/A' : money(record.discrepancies.grossVariance, canViewMoney)}</td>
+                        </>
+                      ) : null}
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{money(record.paye, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-bold text-slate-700">{money(record.pensionEmployee, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-red-700">{money(record.totalDeductions, canViewMoney)}</td>
                       <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
-                      <td className="px-4 py-3 text-sm font-black text-cyan-800">{record.sageActual ? money(record.sageActual.netPay, canViewMoney) : 'No Sage'}</td>
-                      <td className={`px-4 py-3 text-sm font-black ${Number(record.discrepancies.netVariance || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{record.discrepancies.netVariance === null ? 'N/A' : money(record.discrepancies.netVariance, canViewMoney)}</td>
+                      {!payload?.enterpriseSourceActive ? (
+                        <>
+                          <td className="px-4 py-3 text-sm font-black text-cyan-800">{record.sageActual ? money(record.sageActual.netPay, canViewMoney) : 'No Sage'}</td>
+                          <td className={`px-4 py-3 text-sm font-black ${Number(record.discrepancies.netVariance || 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>{record.discrepancies.netVariance === null ? 'N/A' : money(record.discrepancies.netVariance, canViewMoney)}</td>
+                        </>
+                      ) : null}
                       <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.employerCost, canViewMoney)}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${styles.chip}`}>{record.status}</span>
@@ -478,7 +497,7 @@ function PayrollProcessingClient({ initialNow }: { initialNow: string }) {
                   );
                 })}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={13} className="px-4 py-12 text-center text-sm font-bold text-slate-500">No payroll lines match the current filters.</td></tr>
+                  <tr><td colSpan={payload?.enterpriseSourceActive ? 9 : 13} className="px-4 py-12 text-center text-sm font-bold text-slate-500">No payroll lines match the current filters.</td></tr>
                 )}
               </tbody>
             </table>

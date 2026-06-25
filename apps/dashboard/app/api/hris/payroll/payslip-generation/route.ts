@@ -8,6 +8,7 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
 import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import { enterprisePayrollSourceLabel, isEnterprisePayrollPeriod } from '@/lib/payroll-enterprise-source';
 import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { calculateTimesheetPeriod, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
@@ -279,7 +280,10 @@ const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: Pay
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
-  await syncPayslipIdentitiesFromSage({ migratedBy: 'Payslip Generation' }).catch(() => undefined);
+  const enterpriseSourceActive = isEnterprisePayrollPeriod(requestedPeriod);
+  if (!enterpriseSourceActive) {
+    await syncPayslipIdentitiesFromSage({ migratedBy: 'Payslip Generation' }).catch(() => undefined);
+  }
   const [employeeSource, taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications, batches, dailyAttendanceByKey, identityByKey] = await Promise.all([
     readPayrollEmployees(),
     readPayrollTaxConfig(),
@@ -296,7 +300,9 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   const fundsVersion = activeStatutoryFundsVersion(fundsConfig);
   const loansVersion = activeLoansVersion(loansConfig);
   if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) throw new Error('One or more payroll configuration versions are missing.');
-  await syncSageLeaveAllowanceEvents();
+  if (!enterpriseSourceActive) {
+    await syncSageLeaveAllowanceEvents();
+  }
 
   const currentBatch = batches.find((batch) => batch.period === requestedPeriod) || null;
   const loanInputs = loanInputsFromApplications(employeeSource.employees, loanApplications).reduce((map, input) => {
@@ -457,7 +463,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
 
   return {
     generatedAt: new Date().toISOString(),
-    source: 'DLE payslip generation engine',
+    source: enterprisePayrollSourceLabel(requestedPeriod),
     dataSource: payrollDataSourceInfo(employeeSource),
     company: {
       name: 'Dorman Long Engineering Limited',

@@ -1,3 +1,5 @@
+import type { PayrollCalculationRecord, PayrollRecordStatus } from '@/lib/payroll-calculation-service';
+
 /** May/June cutover: defer known migration gaps so payroll workflow can be exercised. Corrections land in the next period. */
 export const payrollTolerancePeriods = () =>
   String(process.env.HRIS_PAYROLL_TOLERANCE_PERIODS || '2026-05')
@@ -40,3 +42,39 @@ export const partitionPayrollIssues = (issues: string[], tolerance: boolean) => 
   }
   return { blocking, deferred };
 };
+
+const statusFromIssues = (issues: string[]): PayrollRecordStatus => {
+  if (issues.some((issue) => /missing|not payroll active|no active|pay amount is missing/i.test(issue))) return 'Blocked';
+  return issues.length ? 'Review' : 'Ready';
+};
+
+const riskSeverityFromIssues = (blocking: string[]): 'High' | 'Medium' | 'Low' =>
+  blocking.some((issue) => /not payroll active|Gross pay is missing|Payroll setup/.test(issue))
+    ? 'High'
+    : blocking.length
+      ? 'Medium'
+      : 'Low';
+
+/** Re-apply current tolerance policy to stored snapshot rows so UI gates stay consistent. */
+export const reapplyPayrollRecordValidationPolicy = (
+  record: PayrollCalculationRecord,
+  tolerance: boolean,
+): PayrollCalculationRecord => {
+  const mergedIssues = Array.from(new Set([...(record.exceptions || []), ...(record.deferredWarnings || [])]));
+  const { blocking, deferred } = partitionPayrollIssues(mergedIssues, tolerance);
+  const payrollStatus = statusFromIssues(blocking);
+  return {
+    ...record,
+    exceptions: blocking,
+    deferredWarnings: deferred,
+    exceptionCount: blocking.length,
+    payrollStatus,
+    status: payrollStatus,
+    riskSeverity: riskSeverityFromIssues(blocking),
+  };
+};
+
+export const reapplyPayrollValidationPolicy = (
+  records: PayrollCalculationRecord[],
+  tolerance: boolean,
+) => records.map((record) => reapplyPayrollRecordValidationPolicy(record, tolerance));

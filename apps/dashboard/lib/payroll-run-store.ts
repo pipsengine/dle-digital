@@ -543,6 +543,44 @@ export const readPayrollSnapshot = async (runId: string) => {
   return state.snapshots[runId] || null;
 };
 
+const sanitizePayrollPeriodCode = (period: string) => (/^\d{4}-\d{2}$/.test(String(period || '').trim()) ? String(period).trim() : '');
+
+export const readPayrollSnapshotsByPeriods = async (periods: string[]) => {
+  const safePeriods = Array.from(new Set(periods.map(sanitizePayrollPeriodCode).filter(Boolean)));
+  const snapshots = new Map<string, PayrollRunSnapshot>();
+  if (!safePeriods.length) return snapshots;
+
+  const pool = await getDleEnterpriseDbPool();
+  if (pool) {
+    await ensurePayrollSqlSchema(pool);
+    const periodList = safePeriods.map((period) => `'${period.replace(/'/g, "''")}'`).join(', ');
+    const result = await pool.request().query(`
+      SELECT r.period_code, s.snapshot_json
+      FROM [hris].[PayrollRuns] r
+      INNER JOIN [hris].[PayrollRunSnapshots] s
+        ON s.run_id = r.run_id
+      WHERE r.period_code IN (${periodList})
+    `);
+    for (const row of result.recordset || []) {
+      const period = String(row.period_code || '').trim();
+      if (!period) continue;
+      try {
+        snapshots.set(period, JSON.parse(String(row.snapshot_json || '')) as PayrollRunSnapshot);
+      } catch {
+        continue;
+      }
+    }
+    return snapshots;
+  }
+
+  const state = await readState();
+  for (const period of safePeriods) {
+    const run = state.runs.find((item) => item.period === period);
+    if (run && state.snapshots[run.id]) snapshots.set(period, state.snapshots[run.id]);
+  }
+  return snapshots;
+};
+
 export const appendPayrollArtifact = async (
   runId: string,
   artifact: Omit<PayrollRunArtifact, 'id' | 'generatedAt'> & { generatedAt?: string },

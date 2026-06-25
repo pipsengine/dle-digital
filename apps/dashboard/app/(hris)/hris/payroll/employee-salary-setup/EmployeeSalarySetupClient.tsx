@@ -69,6 +69,7 @@ type PayrollRecord = {
   riskSeverity: 'Low' | 'Medium' | 'High';
   exceptionCount: number;
   exceptions: string[];
+  deferredWarnings?: string[];
   isDailyRate: boolean;
   ratePerDay: number | null;
   ratePerHour: number | null;
@@ -93,7 +94,11 @@ type PayrollRecord = {
 type PayrollPayload = {
   generatedAt: string;
   source: string;
+  period?: string;
   periodLabel: string;
+  toleranceMode?: boolean;
+  enterpriseSourceActive?: boolean;
+  dataMode?: string;
   permissions: { canViewMoney: boolean; canExport: boolean };
   summary: {
     totalEmployees: number;
@@ -105,6 +110,7 @@ type PayrollPayload = {
     grossPay: number;
     netPay: number;
     exceptionCount: number;
+    deferredExceptionCount?: number;
   };
   records: PayrollRecord[];
 };
@@ -243,11 +249,21 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
       employeeName: record.fullName,
       issue,
       severity: record.riskSeverity,
+      kind: 'blocking' as const,
+    })),
+  );
+  const deferredValidationIssues = records.flatMap((record) =>
+    (record.deferredWarnings || []).map((issue) => ({
+      employeeId: record.employeeId,
+      employeeName: record.fullName,
+      issue,
+      severity: 'Low' as const,
+      kind: 'deferred' as const,
     })),
   );
   const criticalCount = validationIssues.filter((item) => item.severity === 'High').length;
   const warningCount = validationIssues.filter((item) => item.severity === 'Medium').length;
-  const infoCount = validationIssues.filter((item) => item.severity === 'Low').length;
+  const infoCount = validationIssues.filter((item) => item.severity === 'Low').length + deferredValidationIssues.length;
 
   const departmentPayroll = useMemo(() => {
     const map = new Map<string, number>();
@@ -409,7 +425,7 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
           <PremiumKpiCard label="Pending Review" value={number(payload?.summary.reviewEmployees || 0)} subtitle="Needs validation" icon={BadgeCheck} tone="amber" onClick={() => setStatus('Review')} />
           <PremiumKpiCard label="Missing Pay" value={number(missingPay)} subtitle={`${pctFmt.format((missingPay / Math.max(records.length, 1)) * 100)}% of employees`} icon={AlertTriangle} tone="red" />
           <PremiumKpiCard label="Net Payroll" value={money(payload?.summary.netPay, canViewMoney)} subtitle="After deductions" trend={4.8} icon={Banknote} tone="violet" />
-          <PremiumKpiCard label="Payroll Validation" value={number(payload?.summary.exceptionCount || validationIssues.length)} subtitle="Setup issues found" icon={ShieldCheck} tone="blue" onClick={() => setWorkspaceTab('validation')} />
+          <PremiumKpiCard label="Payroll Validation" value={number(payload?.summary.exceptionCount || validationIssues.length)} subtitle={payload?.toleranceMode ? `${payload?.summary.deferredExceptionCount || deferredValidationIssues.length} deferred to cutover` : 'Blocking setup issues'} icon={ShieldCheck} tone="blue" onClick={() => setWorkspaceTab('validation')} />
         </section>
 
         <div className="sticky top-0 z-20 -mx-1 rounded-[18px] border border-[#E5E7EB] bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
@@ -438,7 +454,7 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
         </div>
 
         <PanelShell title="Employee Salary Workspace" subtitle="Search, filter, validate, and manage employee compensation setup.">
-          <WorkspaceTabs tabs={workspaceTabs} active={workspaceTab} onChange={setWorkspaceTab} badges={{ validation: validationIssues.length || undefined }} />
+          <WorkspaceTabs tabs={workspaceTabs} active={workspaceTab} onChange={setWorkspaceTab} badges={{ validation: (validationIssues.length + deferredValidationIssues.length) || undefined }} />
 
           {workspaceTab === 'salaries' ? (
             <>
@@ -695,24 +711,38 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
 
           {workspaceTab === 'validation' ? (
             <div className="p-5">
+              {payload?.enterpriseSourceActive ? (
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950">
+                  <p className="font-semibold">DLE_Enterprise is the authoritative payroll source for {payload.periodLabel || payload.period}.</p>
+                  <p className="mt-1 text-emerald-900">Validation uses DLE_Enterprise employee setup, timesheets, and payroll rules only. Sage comparison is disabled from June 2026 onward.</p>
+                </div>
+              ) : payload?.toleranceMode ? (
+                <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+                  <p className="font-semibold">May/June cutover tolerance is active for {payload.periodLabel || payload.period}.</p>
+                  <p className="mt-1 text-blue-900">Sage variance, pension setup gaps, and timesheet deferrals are informational only. Only blocking master-data issues stop payroll release.</p>
+                </div>
+              ) : null}
               <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
                 <div className={`rounded-xl border p-4 ${setupToneStyles.red.chip}`}>
                   <p className="text-sm font-medium">Critical</p>
                   <p className="mt-1 text-3xl font-bold">{criticalCount}</p>
+                  <p className="mt-1 text-xs opacity-80">Blocking payroll release</p>
                 </div>
                 <div className={`rounded-xl border p-4 ${setupToneStyles.amber.chip}`}>
                   <p className="text-sm font-medium">Warning</p>
                   <p className="mt-1 text-3xl font-bold">{warningCount}</p>
+                  <p className="mt-1 text-xs opacity-80">Needs review before approval</p>
                 </div>
                 <div className={`rounded-xl border p-4 ${setupToneStyles.blue.chip}`}>
                   <p className="text-sm font-medium">Information</p>
                   <p className="mt-1 text-3xl font-bold">{infoCount}</p>
+                  <p className="mt-1 text-xs opacity-80">Deferred / informational checks</p>
                 </div>
               </div>
               <div className="max-h-[520px] space-y-2 overflow-y-auto">
-                {validationIssues.slice(0, 120).map((item, index) => (
+                {[...validationIssues, ...deferredValidationIssues].slice(0, 120).map((item, index) => (
                   <button
-                    key={`${item.employeeId}-${index}`}
+                    key={`${item.employeeId}-${item.kind}-${index}`}
                     type="button"
                     onClick={() => {
                       setSelectedId(item.employeeId);
@@ -725,10 +755,13 @@ export default function EmployeeSalarySetupClient({ initialNow }: { initialNow: 
                       <p className="text-xs text-[#64748B]">{item.employeeId}</p>
                       <p className="mt-1 text-sm text-[#475569]">{item.issue}</p>
                     </div>
-                    <StatusPill label={item.severity} tone={item.severity === 'High' ? 'red' : item.severity === 'Medium' ? 'amber' : 'blue'} />
+                    <StatusPill
+                      label={item.kind === 'deferred' ? 'Deferred' : item.severity}
+                      tone={item.kind === 'deferred' ? 'blue' : item.severity === 'High' ? 'red' : item.severity === 'Medium' ? 'amber' : 'blue'}
+                    />
                   </button>
                 ))}
-                {!validationIssues.length ? <p className="py-8 text-center text-sm text-[#64748B]">No validation issues found.</p> : null}
+                {!validationIssues.length && !deferredValidationIssues.length ? <p className="py-8 text-center text-sm text-[#64748B]">No validation issues found.</p> : null}
               </div>
             </div>
           ) : null}
