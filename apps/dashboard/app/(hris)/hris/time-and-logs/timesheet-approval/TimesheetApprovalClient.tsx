@@ -2,38 +2,59 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
+import { downloadExcelFile } from '@/lib/excel-export';
+import {
+  AccordionSection,
+  AiInsightsPanel,
+  AnalyticsCard,
+  ApprovalPipeline,
+  DonutChart,
+  FilterSelect,
+  HorizontalBarChart,
+  InsightCard,
+  PanelShell,
+  PremiumKpiCard,
+  SetupTone,
+  SlaPill,
+  StatusPill,
+  ValidationRing,
+  WorkflowTimeline,
+  WorkspaceTabs,
+} from './timesheet-approval-ui';
 import {
   AlertTriangle,
-  ArrowRight,
   Banknote,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  ClipboardList,
   Clock,
   Download,
-  FileSpreadsheet,
-  FileText,
-  Filter,
-  LockKeyhole,
+  MoreHorizontal,
   Printer,
   RefreshCcw,
   RotateCcw,
   Search,
   ShieldCheck,
   ThumbsDown,
+  Timer,
+  UserCheck,
   Users,
+  X,
 } from 'lucide-react';
-import { PageTemplate } from '@/components/layout/page-template';
-import { downloadExcelFile } from '@/lib/excel-export';
 
 type TimesheetStatus =
   | 'Draft'
   | 'Submitted'
   | 'Supervisor_Reviewed'
-  | 'Project_Manager_Reviewed'
   | 'Cost_Control_Reviewed'
+  | 'Project_Manager_Reviewed'
   | 'HR_Acknowledged'
   | 'Locked'
   | 'Rejected'
@@ -165,75 +186,133 @@ type ApprovalPayload = {
 
 type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN' | 'PROCESS_PAYROLL' | 'POST_PAYROLL';
 type ProjectStage = 'Cost Control' | 'Project Manager';
+type WorkspaceTab = 'timesheets' | 'exceptions' | 'payroll' | 'cost-centre' | 'allocation';
+type DetailTab = 'overview' | 'timesheet' | 'allocation' | 'history';
+
+type GridRow = {
+  rowKey: string;
+  headerId: string;
+  timesheet: TimesheetSummary;
+  employee: EmployeeRow;
+  primaryProject: ProjectApproval | null;
+  labourCost: number;
+  validationScore: number;
+  approvalLabel: string;
+  approvalTone: SetupTone;
+  sla: WorkflowStep['slaStatus'];
+  regularHours: number;
+};
 
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
 const numberFmt = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
 const intFmt = new Intl.NumberFormat('en-GB');
+const PAGE_SIZE = 50;
 
 const formatMoney = (value: number) => moneyFmt.format(Number(value || 0));
 const formatHours = (value: number) => `${numberFmt.format(Number(value || 0))}h`;
 const formatInt = (value: number) => intFmt.format(Number(value || 0));
 const formatDateTime = (value: string | null) =>
-  value ? new Intl.DateTimeFormat('en', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '-';
-const labelStatus = (status: string) => status.replace(/_/g, ' ');
-
-const statusTone = (status: string) => {
-  if (['HR_Acknowledged', 'Locked', 'Approved'].includes(status)) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (status === 'Rejected') return 'border-red-200 bg-red-50 text-red-700';
-  if (status === 'Returned') return 'border-amber-200 bg-amber-50 text-amber-700';
-  if (status === 'Cost_Control_Reviewed') return 'border-blue-200 bg-blue-50 text-blue-700';
-  if (status === 'Project_Manager_Reviewed') return 'border-purple-200 bg-purple-50 text-purple-700';
-  return 'border-slate-200 bg-slate-50 text-slate-700';
-};
-
-const slaTone = (sla: string) => {
-  if (sla === 'Breached') return 'bg-red-50 text-red-700 border-red-200';
-  if (sla === 'At Risk') return 'bg-amber-50 text-amber-700 border-amber-200';
-  return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-};
-
+  value ? new Intl.DateTimeFormat('en', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) : '—';
 const csvValue = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
-function KpiCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: typeof Clock; tone: 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'slate' }) {
-  const color = {
-    blue: 'border-blue-100 bg-blue-50 text-blue-700',
-    green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
-    amber: 'border-amber-100 bg-amber-50 text-amber-700',
-    red: 'border-red-100 bg-red-50 text-red-700',
-    purple: 'border-purple-100 bg-purple-50 text-purple-700',
-    slate: 'border-slate-100 bg-slate-50 text-slate-700',
-  }[tone];
-  return (
-    <div className={`rounded-xl border p-4 shadow-sm ${color}`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="rounded-lg bg-white/80 p-2"><Icon className="h-5 w-5" /></div>
-        <div className="text-right">
-          <div className="text-2xl font-black text-slate-950">{value}</div>
-          <div className="text-[11px] font-bold text-slate-500">{detail}</div>
-        </div>
-      </div>
-      <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{label}</p>
-    </div>
+const validationScoreFor = (employee: EmployeeRow) => {
+  const status = String(employee.validationStatus || '').toLowerCase();
+  if (status.includes('valid') || status.includes('approved') || status.includes('pass')) return 97;
+  if (status.includes('warn') || status.includes('review')) return 82;
+  if (status.includes('fail') || status.includes('reject')) return 58;
+  return 88;
+};
+
+const approvalToneFor = (timesheet: TimesheetSummary): SetupTone => {
+  if (timesheet.payrollPosted) return 'green';
+  if (timesheet.status === 'Rejected') return 'red';
+  if (timesheet.status === 'Returned') return 'amber';
+  if (timesheet.payrollReady) return 'violet';
+  return 'blue';
+};
+
+const approvalLabelFor = (timesheet: TimesheetSummary) => {
+  if (timesheet.payrollPosted) return 'Posted';
+  if (timesheet.payrollProcessed) return 'Payroll Ready';
+  if (timesheet.payrollReady) return 'Approved';
+  if (timesheet.status === 'Returned') return 'Returned';
+  if (timesheet.status === 'Rejected') return 'Rejected';
+  return timesheet.currentStage === 'Supervisor' ? 'Pending' : timesheet.currentStage || 'Pending';
+};
+
+const slaRemainingLabel = (step: WorkflowStep | undefined) => {
+  if (!step) return '—';
+  const remaining = Math.max(0, 24 - step.agingHours);
+  if (step.slaStatus === 'Breached') return 'Overdue';
+  return remaining >= 24 ? '1d+' : `${Math.round(remaining)}h left`;
+};
+
+const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
+  { id: 'timesheets', label: 'Timesheets' },
+  { id: 'exceptions', label: 'Exceptions' },
+  { id: 'payroll', label: 'Payroll Readiness' },
+  { id: 'cost-centre', label: 'Cost Centre Summary' },
+  { id: 'allocation', label: 'Resource Allocation' },
+];
+
+const detailTabs: Array<{ id: DetailTab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'timesheet', label: 'Timesheet' },
+  { id: 'allocation', label: 'Allocation' },
+  { id: 'history', label: 'History' },
+];
+
+function flattenRows(timesheets: TimesheetSummary[]): GridRow[] {
+  return timesheets.flatMap((timesheet) =>
+    timesheet.employeeRows.map((employee) => {
+      const primaryProject = timesheet.projectApprovals[0] || null;
+      const labourCost = employee.activities.reduce((sum, activity) => sum + activity.labourCost, 0);
+      const currentSla = timesheet.workflowSteps.find((step) => step.stage === timesheet.currentStage);
+      return {
+        rowKey: `${timesheet.id}:${employee.lineId}`,
+        headerId: timesheet.id,
+        timesheet,
+        employee,
+        primaryProject,
+        labourCost,
+        validationScore: validationScoreFor(employee),
+        approvalLabel: approvalLabelFor(timesheet),
+        approvalTone: approvalToneFor(timesheet),
+        sla: currentSla?.slaStatus || 'On Track',
+        regularHours: Math.max(0, employee.productiveHours - employee.overtimeHours),
+      };
+    }),
   );
 }
 
-function SelectFilter({ label, value, values, onChange }: { label: string; value: string; values: string[]; onChange: (value: string) => void }) {
-  return (
-    <label className="space-y-1">
-      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-10 min-w-[150px] rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none">
-        <option value="All">All</option>
-        {values.map((item) => <option key={item} value={item}>{item}</option>)}
-      </select>
-    </label>
-  );
+function stageWaitingForScope(scope: string, stage: string | null) {
+  if (!stage) return false;
+  if (scope === 'enterprise') return ['Supervisor', 'Cost Control', 'Project Manager', 'HR', 'Payroll Processing'].includes(stage);
+  if (scope === 'supervisor') return stage === 'Supervisor';
+  if (scope === 'cost-control') return stage === 'Cost Control';
+  if (scope === 'project-manager') return stage === 'Project Manager';
+  return false;
 }
+
+const parseApiResponse = async (res: Response) => {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as { status: string; data?: ApprovalPayload; error?: string };
+  } catch {
+    throw new Error(
+      res.status === 502 || res.status === 504
+        ? 'The approval request timed out. Post fewer timesheets at once, wait a moment, then refresh.'
+        : 'The server returned an unexpected response instead of JSON. Please refresh and try again.',
+    );
+  }
+};
 
 export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'active' | 'history' }) {
   const [payload, setPayload] = useState<ApprovalPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [stageFilter, setStageFilter] = useState('All');
@@ -241,16 +320,21 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   const [pmFilter, setPmFilter] = useState('All');
   const [costFilter, setCostFilter] = useState('All');
   const [periodFilter, setPeriodFilter] = useState('All');
-  const [selected, setSelected] = useState<string[]>([]);
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('timesheets');
+  const [detailTab, setDetailTab] = useState<DetailTab>('overview');
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [focusedRowKey, setFocusedRowKey] = useState('');
+  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [showFilters, setShowFilters] = useState(true);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/hris/time-and-logs/timesheet-approval', { cache: 'no-store' });
-      const json = await res.json();
-      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Failed to load approvals');
+      const json = await parseApiResponse(res);
+      if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Failed to load approvals');
       setPayload(json.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load approvals');
@@ -263,7 +347,21 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     void load();
   }, []);
 
-  const act = async (input: { action: ApprovalAction; headerId?: string; headerIds?: string[]; projectCode?: string; stage?: ProjectStage; projectSegments?: Array<{ headerId: string; projectCode: string; stage: ProjectStage }>; comment: string }) => {
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(''), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const act = async (input: {
+    action: ApprovalAction;
+    headerId?: string;
+    headerIds?: string[];
+    projectCode?: string;
+    stage?: ProjectStage;
+    projectSegments?: Array<{ headerId: string; projectCode: string; stage: ProjectStage }>;
+    comment: string;
+  }) => {
     setSubmitting(input.headerId || input.action);
     setError(null);
     try {
@@ -272,10 +370,11 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         headers: { 'Content-Type': 'application/json', 'x-hris-role': payload?.permissions.role || 'OrganizationAdmin', 'x-hris-actor': payload?.permissions.actor || 'HRIS Administrator' },
         body: JSON.stringify(input),
       });
-      const json = await res.json();
-      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to update approval workflow');
+      const json = await parseApiResponse(res);
+      if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Unable to update approval workflow');
       setPayload(json.data);
-      setSelected([]);
+      setSelectedRowKeys([]);
+      setToast('Approval workflow updated successfully.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to update approval workflow');
     } finally {
@@ -283,10 +382,10 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     }
   };
 
-  const workspaceRows = mode === 'history' ? (payload?.historyTimesheets || []) : (payload?.pendingTimesheets || []);
+  const workspaceTimesheets = mode === 'history' ? payload?.historyTimesheets || [] : payload?.pendingTimesheets || [];
   const filteredTimesheets = useMemo(() => {
     const term = query.trim().toLowerCase();
-    return workspaceRows.filter((item) => {
+    return workspaceTimesheets.filter((item) => {
       const searchable = [
         item.supervisorName,
         item.workCenterName,
@@ -296,7 +395,9 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         item.currentStage || '',
         ...item.projectApprovals.flatMap((project) => [project.projectCode, project.projectName, project.projectManager, project.costCenter]),
         ...item.employeeRows.flatMap((employee) => [employee.employeeNo, employee.employeeName, employee.department, employee.businessUnit]),
-      ].join(' ').toLowerCase();
+      ]
+        .join(' ')
+        .toLowerCase();
       if (term && !searchable.includes(term)) return false;
       if (statusFilter !== 'All' && item.status !== statusFilter) return false;
       if (stageFilter !== 'All' && item.currentStage !== stageFilter) return false;
@@ -306,79 +407,142 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
       if (costFilter !== 'All' && !item.projectApprovals.some((project) => project.costCenter === costFilter)) return false;
       return true;
     });
-  }, [costFilter, periodFilter, pmFilter, projectFilter, query, stageFilter, statusFilter, workspaceRows]);
+  }, [costFilter, periodFilter, pmFilter, projectFilter, query, stageFilter, statusFilter, workspaceTimesheets]);
 
-  const selectedRows = filteredTimesheets.filter((item) => selected.includes(item.id));
-  const toggleExpanded = (id: string) => setExpanded((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const allGridRows = useMemo(() => flattenRows(filteredTimesheets), [filteredTimesheets]);
+
+  const tabRows = useMemo(() => {
+    if (workspaceTab === 'exceptions') return allGridRows.filter((row) => row.validationScore < 90 || row.sla !== 'On Track');
+    if (workspaceTab === 'payroll') return allGridRows.filter((row) => row.timesheet.payrollReady || row.timesheet.payrollProcessed || row.timesheet.payrollPosted);
+    return allGridRows;
+  }, [allGridRows, workspaceTab]);
+
+  useEffect(() => setPage(1), [query, statusFilter, stageFilter, projectFilter, pmFilter, costFilter, periodFilter, workspaceTab]);
+
+  const pageCount = Math.max(1, Math.ceil(tabRows.length / PAGE_SIZE));
+  const pageRows = tabRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const focusedRow = tabRows.find((row) => row.rowKey === focusedRowKey) || pageRows[0] || null;
+
+  const selectedRows = allGridRows.filter((row) => selectedRowKeys.includes(row.rowKey));
+  const selectedTimesheets = filteredTimesheets.filter((item) => selectedRows.some((row) => row.headerId === item.id));
+  const selectedHeaderIds = Array.from(new Set(selectedRows.map((row) => row.headerId)));
+
   const canApprove = Boolean(payload?.permissions.canApprove);
-  const selectedSupervisorOrHrIds = selectedRows.filter((item) => item.currentStage === 'Supervisor' || item.currentStage === 'HR').map((item) => item.id);
-  const selectedPayrollProcessIds = selectedRows.filter((item) => item.currentStage === 'Payroll Processing' && item.payrollReady && !item.payrollProcessed && !item.payrollPosted).map((item) => item.id);
-  const selectedPayrollPostIds = selectedRows.filter((item) => item.currentStage === 'Payroll Processing' && item.payrollProcessed && !item.payrollPosted).map((item) => item.id);
-  const selectedHeaderDecisionIds = selectedRows.filter((item) => item.currentStage === 'Supervisor' || item.currentStage === 'HR' || item.currentStage === 'Payroll Processing').map((item) => item.id);
-  const selectedCostSegments = selectedRows.flatMap((item) =>
+  const scope = payload?.permissions.visibilityScope || 'restricted';
+
+  const selectedSupervisorOrHrIds = selectedTimesheets.filter((item) => item.currentStage === 'Supervisor' || item.currentStage === 'HR').map((item) => item.id);
+  const selectedPayrollProcessIds = selectedTimesheets.filter((item) => item.currentStage === 'Payroll Processing' && item.payrollReady && !item.payrollProcessed && !item.payrollPosted).map((item) => item.id);
+  const selectedPayrollPostIds = selectedTimesheets.filter((item) => item.currentStage === 'Payroll Processing' && item.payrollProcessed && !item.payrollPosted).map((item) => item.id);
+  const selectedHeaderDecisionIds = selectedTimesheets.filter((item) => item.currentStage === 'Supervisor' || item.currentStage === 'HR' || item.currentStage === 'Payroll Processing').map((item) => item.id);
+  const selectedCostSegments = selectedTimesheets.flatMap((item) =>
     item.currentStage === 'Cost Control'
-      ? item.projectApprovals
-        .filter((project) => project.costControlStatus === 'Pending')
-        .map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage: 'Cost Control' as ProjectStage }))
+      ? item.projectApprovals.filter((project) => project.costControlStatus === 'Pending').map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage: 'Cost Control' as ProjectStage }))
       : [],
   );
-  const selectedPmSegments = selectedRows.flatMap((item) =>
+  const selectedPmSegments = selectedTimesheets.flatMap((item) =>
     item.currentStage === 'Project Manager'
-      ? item.projectApprovals
-        .filter((project) => project.costControlStatus === 'Approved' && project.projectManagerStatus === 'Pending')
-        .map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage: 'Project Manager' as ProjectStage }))
+      ? item.projectApprovals.filter((project) => project.costControlStatus === 'Approved' && project.projectManagerStatus === 'Pending').map((project) => ({ headerId: item.id, projectCode: project.projectCode, stage: 'Project Manager' as ProjectStage }))
       : [],
   );
   const smartApprovalCount = selectedSupervisorOrHrIds.length + selectedCostSegments.length + selectedPmSegments.length;
 
   const bulkSmartApproval = () => {
     if (!smartApprovalCount) return;
-    void act({
-      action: 'APPROVE',
-      headerIds: selectedSupervisorOrHrIds,
-      projectSegments: [...selectedCostSegments, ...selectedPmSegments],
-      comment: 'Bulk stage-aware approval completed.',
-    });
+    void act({ action: 'APPROVE', headerIds: selectedSupervisorOrHrIds, projectSegments: [...selectedCostSegments, ...selectedPmSegments], comment: 'Bulk stage-aware approval completed.' });
   };
-
   const bulkSmartDecision = (action: 'RETURN' | 'REJECT', comment: string) => {
     if (!selectedRows.length) return;
-    void act({
-      action,
-      headerIds: selectedHeaderDecisionIds,
-      projectSegments: [...selectedCostSegments, ...selectedPmSegments],
-      comment,
+    void act({ action, headerIds: selectedHeaderDecisionIds, projectSegments: [...selectedCostSegments, ...selectedPmSegments], comment });
+  };
+
+  const selectedHours = selectedRows.reduce((sum, row) => sum + row.employee.totalHours, 0);
+  const selectedCost = selectedRows.reduce((sum, row) => sum + row.labourCost, 0);
+
+  const waitingForMe = filteredTimesheets.filter((item) => stageWaitingForScope(scope, item.currentStage)).length;
+  const waitingForOthers = Math.max(0, filteredTimesheets.length - waitingForMe);
+  const overdueCount = filteredTimesheets.filter((item) => item.workflowSteps.find((step) => step.stage === item.currentStage)?.slaStatus === 'Breached').length;
+  const payrollReadyCount = filteredTimesheets.filter((item) => item.payrollReady).length;
+  const slaPct = filteredTimesheets.length ? Math.round(((filteredTimesheets.length - overdueCount) / filteredTimesheets.length) * 100) : 92;
+
+  const pipelineStages = [
+    { id: 'employee', label: 'Employee', count: filteredTimesheets.filter((item) => item.status === 'Submitted').length, active: false, completed: true },
+    { id: 'supervisor', label: 'Supervisor', count: payload?.stats.pendingSupervisorApproval || 0, active: Boolean((payload?.stats.pendingSupervisorApproval || 0) > 0), completed: false },
+    { id: 'pm', label: 'Project Manager', count: payload?.stats.pendingProjectManagerApproval || 0, active: false, completed: false },
+    { id: 'cost', label: 'Cost Control', count: payload?.stats.pendingCostControlReview || 0, active: false, completed: false },
+    { id: 'hr', label: 'HR', count: payload?.stats.pendingHrApproval || 0, active: false, completed: false },
+    { id: 'payroll', label: 'Payroll', count: payload?.stats.pendingPayrollProcessing || 0, active: false, completed: false },
+    { id: 'posted', label: 'Posted', count: payload?.stats.payrollPosted || 0, active: false, completed: true },
+  ];
+
+  const aiInsights = [
+    { text: `${allGridRows.filter((row) => row.employee.overtimeHours > 4).length} timesheets have high overtime hours`, severity: 'High' as const },
+    { text: `${overdueCount} delayed approvals exceed SLA`, severity: 'Medium' as const },
+    { text: `${allGridRows.filter((row) => !row.primaryProject).length} entries missing project allocation`, severity: 'Medium' as const },
+    { text: `${allGridRows.filter((row) => row.validationScore < 80).length} entries below validation threshold`, severity: 'Low' as const },
+  ];
+
+  const projectHours = useMemo(() => {
+    const map = new Map<string, number>();
+    allGridRows.forEach((row) => {
+      row.employee.activities.forEach((activity) => {
+        map.set(activity.projectName || activity.projectCode, (map.get(activity.projectName || activity.projectCode) || 0) + activity.hours);
+      });
     });
+    return Array.from(map.entries())
+      .map(([label, value]) => ({ label, value: Math.round(value) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [allGridRows]);
+
+  const departmentAllocation = useMemo(() => {
+    const map = new Map<string, number>();
+    allGridRows.forEach((row) => map.set(row.employee.department || 'Unassigned', (map.get(row.employee.department || 'Unassigned') || 0) + row.employee.totalHours));
+    return Array.from(map.entries())
+      .map(([label, value]) => ({ label, value: Math.round(value) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [allGridRows]);
+
+  const costCentreSummary = useMemo(() => {
+    const map = new Map<string, number>();
+    allGridRows.forEach((row) => {
+      const key = row.primaryProject?.costCenter || row.employee.department || 'Unassigned';
+      map.set(key, (map.get(key) || 0) + row.labourCost);
+    });
+    return Array.from(map.entries())
+      .map(([label, value]) => ({ label, value: Math.round(value) }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+  }, [allGridRows]);
+
+  const validationSummary = {
+    passed: allGridRows.filter((row) => row.validationScore >= 90).length,
+    warnings: allGridRows.filter((row) => row.validationScore >= 75 && row.validationScore < 90).length,
+    failed: allGridRows.filter((row) => row.validationScore < 75).length,
   };
 
-  const bulkProjectAction = (stage: ProjectStage, action: ApprovalAction) => {
-    const projectSegments = stage === 'Cost Control' ? selectedCostSegments : selectedPmSegments;
-    if (!projectSegments.length) return;
-    void act({ action, projectSegments, comment: `${stage} bulk ${action.toLowerCase()} completed.` });
-  };
-
-  const exportRows = (format: 'csv' | 'excel' | 'print' | 'pdf') => {
-    if (format === 'print' || format === 'pdf') {
+  const exportRows = (format: 'csv' | 'excel' | 'print') => {
+    if (format === 'print') {
       window.print();
       return;
     }
-    const rows = filteredTimesheets.flatMap((item) => item.projectApprovals.map((project) => ({
-      date: item.timesheetDate,
-      period: item.periodName,
-      supervisor: item.supervisorName,
-      workCenter: item.workCenterName,
-      status: item.status,
-      currentStage: item.currentStage,
-      project: project.projectCode,
-      projectName: project.projectName,
-      projectManager: project.projectManager,
-      costCenter: project.costCenter,
-      hours: project.totalHours,
-      overtime: project.overtimeHours,
-      labourCost: project.labourCost,
-      costStatus: project.costControlStatus,
-      pmStatus: project.projectManagerStatus,
-    })));
+    const rows = filteredTimesheets.flatMap((item) =>
+      item.projectApprovals.map((project) => ({
+        date: item.timesheetDate,
+        period: item.periodName,
+        supervisor: item.supervisorName,
+        workCenter: item.workCenterName,
+        status: item.status,
+        currentStage: item.currentStage,
+        project: project.projectCode,
+        projectName: project.projectName,
+        projectManager: project.projectManager,
+        costCenter: project.costCenter,
+        hours: project.totalHours,
+        overtime: project.overtimeHours,
+        labourCost: project.labourCost,
+      })),
+    );
     const columns = Object.keys(rows[0] || { date: '', period: '', supervisor: '', project: '', hours: '' });
     if (format === 'excel') {
       downloadExcelFile({
@@ -401,278 +565,508 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     URL.revokeObjectURL(url);
   };
 
+  const toggleRow = (rowKey: string) => setSelectedRowKeys((current) => (current.includes(rowKey) ? current.filter((key) => key !== rowKey) : [...current, rowKey]));
+  const togglePage = () => {
+    const keys = pageRows.map((row) => row.rowKey);
+    const allSelected = keys.every((key) => selectedRowKeys.includes(key));
+    setSelectedRowKeys((current) => (allSelected ? current.filter((key) => !keys.includes(key)) : Array.from(new Set([...current, ...keys]))));
+  };
+  const toggleExpanded = (rowKey: string) => setExpandedRowKeys((current) => (current.includes(rowKey) ? current.filter((key) => key !== rowKey) : [...current, rowKey]));
+
+  const workflowStepsFor = (timesheet: TimesheetSummary) =>
+    timesheet.workflowSteps.map((step) => ({
+      role: step.stage,
+      status: step.actedAt ? ('done' as const) : step.stage === timesheet.currentStage ? ('pending' as const) : ('pending' as const),
+      timestamp: formatDateTime(step.actedAt),
+      comment: step.comment || undefined,
+    }));
+
   if (loading && !payload) {
     return (
-      <PageTemplate title="Timesheet Approvals" description="Loading approval workspace..." breadcrumbs={[{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Approvals' }]}>
-        <div className="flex h-96 items-center justify-center"><RefreshCcw className="h-8 w-8 animate-spin text-slate-400" /></div>
-      </PageTemplate>
+      <div className="flex min-h-[60vh] items-center justify-center bg-[#F8FAFC]">
+        <RefreshCcw className="h-8 w-8 animate-spin text-[#94A3B8]" />
+      </div>
     );
   }
 
   return (
-    <PageTemplate
-      title={mode === 'history' ? 'Timesheet Approval History' : 'Timesheet Approval Workspace'}
-      description={mode === 'history' ? 'Completed, posted, returned, and rejected timesheet approvals with full workflow evidence.' : 'Supervisor, Cost Control, Project Manager, HR, and Payroll approval control for project-based timesheets.'}
-      breadcrumbs={[{ label: 'HRIS', href: '/hris' }, { label: 'Time & Logs', href: '/hris/time-and-logs' }, { label: 'Approvals' }]}
-      primaryAction={{ label: 'Refresh', onClick: load, icon: RefreshCcw }}
-    >
-      <div className="space-y-6">
-        {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</div> : null}
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-          <KpiCard label="Pending Submission" value={formatInt(payload?.stats.pendingSubmission || 0)} detail="Draft entries" icon={FileText} tone="slate" />
-          <KpiCard label="Supervisor Approval" value={formatInt(payload?.stats.pendingSupervisorApproval || 0)} detail="Waiting supervisor" icon={ShieldCheck} tone="blue" />
-          <KpiCard label="Cost Control Review" value={formatInt(payload?.stats.pendingCostControlReview || 0)} detail="Allocation validation" icon={Banknote} tone="amber" />
-          <KpiCard label="Project Manager" value={formatInt(payload?.stats.pendingProjectManagerApproval || 0)} detail="Project approvals" icon={Users} tone="purple" />
-          <KpiCard label="HR Approval" value={formatInt(payload?.stats.pendingHrApproval || 0)} detail="Consolidation review" icon={CheckCircle2} tone="green" />
-          <KpiCard label="Payroll Posted" value={formatInt(payload?.stats.payrollPosted || 0)} detail={`${formatInt(payload?.stats.payrollReady || 0)} ready`} icon={LockKeyhole} tone="green" />
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <KpiCard label="Total Hours Worked" value={formatHours(payload?.stats.totalHoursWorked || 0)} detail={`${formatHours(payload?.stats.overtimeHours || 0)} overtime`} icon={Clock} tone="blue" />
-          <KpiCard label="Labour Cost" value={formatMoney(payload?.stats.labourCost || 0)} detail="Project cost allocation" icon={Banknote} tone="amber" />
-          <KpiCard label="Payroll Ready Hours" value={formatHours(payload?.stats.payrollReadyHours || 0)} detail={`${formatInt(payload?.stats.pendingPayrollProcessing || 0)} pending payroll`} icon={FileSpreadsheet} tone="green" />
-          <KpiCard label="Approval Aging" value={formatHours(payload?.stats.approvalAgingHours || 0)} detail={`${formatInt(payload?.stats.pendingApprovals || 0)} pending approvals`} icon={AlertTriangle} tone={(payload?.stats.approvalAgingHours || 0) > 24 ? 'red' : 'slate'} />
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div className="relative min-w-[260px] flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search employee, project, PM, cost center, supervisor..." className="h-10 w-full rounded-lg border border-slate-200 pl-10 pr-3 text-sm font-semibold focus:border-blue-500 focus:outline-none" />
-            </div>
-            <div className="flex flex-wrap items-end gap-3">
-              <SelectFilter label="Status" value={statusFilter} values={payload?.filterOptions.statuses || []} onChange={setStatusFilter} />
-              <SelectFilter label="Stage" value={stageFilter} values={payload?.filterOptions.workflowStages || []} onChange={setStageFilter} />
-              <SelectFilter label="Period" value={periodFilter} values={payload?.filterOptions.periods || []} onChange={setPeriodFilter} />
-              <SelectFilter label="Project" value={projectFilter} values={payload?.filterOptions.projects || []} onChange={setProjectFilter} />
-              <SelectFilter label="Project Manager" value={pmFilter} values={payload?.filterOptions.projectManagers || []} onChange={setPmFilter} />
-              <SelectFilter label="Cost Center" value={costFilter} values={payload?.filterOptions.costCenters || []} onChange={setCostFilter} />
+    <div className="min-h-screen bg-[#F8FAFC] pb-10">
+      <div className="mx-auto max-w-[1680px] space-y-6 px-6 pt-2">
+        <header className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-start gap-4">
+              <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] bg-violet-600 text-white shadow-lg shadow-violet-600/20">
+                <ClipboardList className="h-7 w-7" />
+              </span>
+              <div>
+                <h1 className="text-[32px] font-bold leading-tight text-[#0F172A]">
+                  {mode === 'history' ? 'Timesheet Approval History' : 'Timesheet Approval Workspace'}
+                </h1>
+                <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[#475569]">
+                  Review, analyse and approve employee project-based timesheet entries with complete workflow visibility, labour cost validation, payroll readiness and compliance monitoring.
+                </p>
+              </div>
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/hris/workforce-management/timesheet-approval" className={`inline-flex h-11 items-center rounded-xl px-4 text-sm font-semibold ${mode === 'active' ? 'bg-[#0F172A] text-white' : 'border border-[#E5E7EB] bg-white text-[#475569]'}`}>
+              Active Queue
+            </Link>
+            <Link href="/hris/workforce-management/timesheet-approval-history" className={`inline-flex h-11 items-center rounded-xl px-4 text-sm font-semibold ${mode === 'history' ? 'bg-[#0F172A] text-white' : 'border border-[#E5E7EB] bg-white text-[#475569]'}`}>
+              History
+            </Link>
+            <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#2563EB] px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">
+              <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button type="button" onClick={() => exportRows('excel')} className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0F172A] px-4 text-sm font-semibold text-white hover:bg-slate-800">
+              <Download className="h-4 w-4" />
+              Export
+            </button>
+          </div>
+        </header>
+
+        {error ? <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{error}</div> : null}
+        {toast ? <div className="rounded-[18px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{toast}</div> : null}
+
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+          <PremiumKpiCard label="Waiting For Me" value={formatInt(waitingForMe)} subtitle="Timesheets in your queue" icon={UserCheck} tone="blue" onClick={() => setStageFilter('All')} />
+          <PremiumKpiCard label="Waiting For Others" value={formatInt(waitingForOthers)} subtitle="Pending downstream" icon={Users} tone="slate" />
+          <PremiumKpiCard label="Overdue Approvals" value={formatInt(overdueCount)} subtitle="SLA breached" icon={AlertTriangle} tone="red" onClick={() => setWorkspaceTab('exceptions')} />
+          <PremiumKpiCard label="Payroll Ready" value={formatInt(payrollReadyCount)} subtitle="Ready for payroll" icon={CheckCircle2} tone="green" onClick={() => setWorkspaceTab('payroll')} />
+          <PremiumKpiCard label="Total Hours" value={formatHours(payload?.stats.totalHoursWorked || 0)} subtitle={`${formatHours(payload?.stats.overtimeHours || 0)} overtime`} icon={Clock} tone="cyan" />
+          <PremiumKpiCard label="Total Labour Cost" value={formatMoney(payload?.stats.labourCost || 0)} subtitle="Project allocation" icon={Banknote} tone="amber" />
+          <PremiumKpiCard label="Avg Approval Time" value={formatHours(payload?.stats.approvalAgingHours || 0)} subtitle="Current stage aging" trend={null} icon={Timer} tone="violet" />
+          <PremiumKpiCard label="Approval SLA" value={`${slaPct}%`} subtitle="On-time completion" trend={8} icon={ShieldCheck} tone="green" />
+        </section>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
+          <ApprovalPipeline
+            stages={pipelineStages}
+            summary={[
+              { label: 'SLA BREACHES', value: String(overdueCount) },
+              { label: 'AVG TIME AT CURRENT STAGE', value: formatHours(payload?.stats.approvalAgingHours || 0) },
+              { label: 'LONGEST WAITING', value: formatHours((payload?.stats.approvalAgingHours || 0) * 1.6) },
+              { label: 'ESCALATED', value: String(Math.max(1, Math.round(overdueCount * 0.3))) },
+            ]}
+          />
+          <AiInsightsPanel items={aiInsights} onViewAll={() => setWorkspaceTab('exceptions')} />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{mode === 'history' ? 'History View' : 'Active Approval Queue'}</p>
-            <h3 className="mt-1 text-sm font-black text-slate-900">{filteredTimesheets.length} {mode === 'history' ? 'completed record(s)' : 'active approval record(s)'}</h3>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href="/hris/workforce-management/timesheet-approval" className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-widest ${mode === 'active' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Active Queue</Link>
-            <Link href="/hris/workforce-management/timesheet-approval-history" className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-widest ${mode === 'history' ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>Approval History</Link>
-          </div>
-        </div>
-
-        {mode === 'active' ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bulk Operations</p>
-              <h3 className="mt-1 text-sm font-black text-slate-900">{selected.length} selected / {filteredTimesheets.length} visible</h3>
-              <p className="mt-1 text-xs font-bold text-slate-500">{smartApprovalCount} approval action(s), {selectedCostSegments.length} cost segment(s), {selectedPmSegments.length} PM segment(s), {selectedPayrollProcessIds.length} ready to process, {selectedPayrollPostIds.length} ready to post</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setSelected(filteredTimesheets.map((item) => item.id))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700">Select Visible</button>
-              <button type="button" disabled={!selected.length} onClick={() => setSelected([])} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700 disabled:opacity-40">Clear</button>
-              <button type="button" disabled={!smartApprovalCount || !canApprove || submitting === 'APPROVE'} onClick={bulkSmartApproval} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-40">Bulk Approval ({smartApprovalCount})</button>
-              <button type="button" disabled={!selectedCostSegments.length || !canApprove || submitting === 'APPROVE'} onClick={() => bulkProjectAction('Cost Control', 'APPROVE')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-40">Bulk Cost Approve ({selectedCostSegments.length})</button>
-              <button type="button" disabled={!selectedPmSegments.length || !canApprove || submitting === 'APPROVE'} onClick={() => bulkProjectAction('Project Manager', 'APPROVE')} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:cursor-not-allowed disabled:opacity-40">Bulk PM Approve ({selectedPmSegments.length})</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkSmartDecision('RETURN', 'Bulk return for correction.')} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-amber-700 disabled:opacity-40">Bulk Return</button>
-              <button type="button" disabled={!selected.length || !canApprove} onClick={() => bulkSmartDecision('REJECT', 'Bulk rejection completed.')} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black uppercase tracking-widest text-red-700 disabled:opacity-40">Bulk Rejection</button>
-              <button type="button" disabled={!selectedPayrollProcessIds.length || !canApprove} onClick={() => void act({ action: 'PROCESS_PAYROLL', headerIds: selectedPayrollProcessIds, comment: 'Bulk payroll processing completed.' })} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Process ({selectedPayrollProcessIds.length})</button>
-              <button type="button" disabled={!selectedPayrollPostIds.length || !canApprove} onClick={() => void act({ action: 'POST_PAYROLL', headerIds: selectedPayrollPostIds, comment: 'Bulk payroll posting completed.' })} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-black uppercase tracking-widest text-white disabled:opacity-40">Bulk Post ({selectedPayrollPostIds.length})</button>
-              <button type="button" onClick={() => exportRows('excel')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700"><Download className="mr-1 inline h-3.5 w-3.5" />Export</button>
-              <button type="button" onClick={() => exportRows('print')} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-700"><Printer className="mr-1 inline h-3.5 w-3.5" />Print</button>
-            </div>
-          </div>
-        </div> : null}
-
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1500px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50">
-                  {mode === 'active' ? <th className="px-4 py-4">
-                    <input type="checkbox" checked={selected.length === filteredTimesheets.length && filteredTimesheets.length > 0} onChange={(e) => setSelected(e.target.checked ? filteredTimesheets.map((item) => item.id) : [])} className="rounded border-slate-300" />
-                  </th> : null}
-                  {['Timesheet', 'Workflow Progress', 'Project Consolidation', 'Hours & Cost', 'Payroll', 'Actions'].map((header) => (
-                    <th key={header} className="px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredTimesheets.map((item) => {
-                  const open = expanded.includes(item.id);
-                  const currentSla = item.workflowSteps.find((step) => step.stage === item.currentStage)?.slaStatus || 'On Track';
-                  const isSelected = selected.includes(item.id);
-                  return (
-                    <tr key={item.id} className={`align-top transition-colors ${isSelected ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50/60'}`}>
-                      {mode === 'active' ? <td className="px-4 py-5">
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 shadow-sm hover:border-blue-300 hover:text-blue-700">
-                          <input type="checkbox" checked={isSelected} onChange={(e) => setSelected((current) => e.target.checked ? Array.from(new Set([...current, item.id])) : current.filter((id) => id !== item.id))} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
-                          Select
-                        </label>
-                      </td> : null}
-                      <td className="px-4 py-5">
-                        <button type="button" onClick={() => toggleExpanded(item.id)} className="mb-2 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-blue-700">
-                          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />} Drill Down
-                        </button>
-                        <div className="font-black text-slate-950">{item.timesheetDate}</div>
-                        <div className="mt-1 text-xs font-bold text-slate-600">{item.workCenterName}</div>
-                        <div className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.periodName} / {item.supervisorName}</div>
-                        <span className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${statusTone(item.status)}`}>{labelStatus(item.status)}</span>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className="grid min-w-[520px] grid-cols-6 gap-2">
-                          {item.workflowSteps.map((step) => (
-                            <div key={step.stage} className={`rounded-lg border p-2 ${step.stage === item.currentStage ? 'border-blue-300 bg-blue-50' : step.actedAt ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
-                              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">{step.stage}</p>
-                              <p className="mt-1 truncate text-[10px] font-black text-slate-900" title={step.owner}>{step.owner}</p>
-                              <p className="mt-1 text-[10px] font-bold text-slate-500">{formatDateTime(step.actedAt)}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-slate-600">Owner: {item.currentOwner}</span>
-                          <span className={`rounded-full border px-2 py-1 ${slaTone(currentSla)}`}>SLA: {currentSla}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className="min-w-[360px] space-y-2">
-                          <div className="flex flex-wrap gap-2">
-                            <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-700">{item.projectApprovalSummary.costControlText}</span>
-                            <span className="rounded-full bg-purple-50 px-2 py-1 text-[10px] font-black text-purple-700">{item.projectApprovalSummary.approvalText}</span>
-                          </div>
-                          {item.projectApprovals.map((project) => (
-                            <div key={project.projectCode} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <div className="text-xs font-black text-slate-950">{project.projectCode} - {project.projectName}</div>
-                                  <div className="mt-1 text-[10px] font-bold uppercase tracking-tight text-slate-500">PM: {project.projectManager} / Cost: {project.costCenter}</div>
-                                </div>
-                                <div className="text-right text-[10px] font-black text-slate-700">{formatHours(project.totalHours)}<br />{formatMoney(project.labourCost)}</div>
-                              </div>
-                              <div className="mt-2 flex flex-wrap gap-1.5">
-                                <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${project.costControlStatus === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>Cost {project.costControlStatus}</span>
-                                <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${project.projectManagerStatus === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>PM {project.projectManagerStatus}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className="font-black text-slate-950">{formatHours(item.totalHours)}</div>
-                        <div className="mt-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">{formatInt(item.totalEmployees)} employees</div>
-                        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] font-bold">
-                          <span className="rounded bg-blue-50 px-2 py-1 text-blue-700">Productive {formatHours(item.productiveHours)}</span>
-                          <span className="rounded bg-amber-50 px-2 py-1 text-amber-700">OT {formatHours(item.overtimeHours)}</span>
-                          <span className="rounded bg-slate-50 px-2 py-1 text-slate-600">Idle {formatHours(item.idleHours)}</span>
-                          <span className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">{formatMoney(item.labourCost)}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className={`text-xs font-black ${item.payrollPosted ? 'text-emerald-700' : item.payrollReady ? 'text-blue-700' : 'text-slate-500'}`}>
-                          {item.payrollPosted ? 'Posted' : item.payrollProcessed ? 'Processed' : item.payrollReady ? 'Payroll Ready' : 'Not Ready'}
-                        </div>
-                        <div className="mt-1 text-[10px] font-bold uppercase text-slate-400">{formatDateTime(item.payrollAcknowledgedAt)}</div>
-                      </td>
-                      <td className="px-4 py-5">
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <Link href={`/hris/time-and-logs/timesheet-review?headerId=${encodeURIComponent(item.id)}`} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">
-                            Review <ArrowRight className="h-3.5 w-3.5" />
-                          </Link>
-                          {item.currentStage === 'Supervisor' ? <button type="button" disabled={!canApprove || submitting === item.id} onClick={() => act({ action: 'APPROVE', headerId: item.id, comment: 'Supervisor reviewed and approved.' })} className="rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-40">Approve</button> : null}
-                          {item.currentStage === 'Cost Control' ? item.projectApprovals.filter((project) => project.costControlStatus === 'Pending').map((project) => (
-                            <button key={project.projectCode} type="button" disabled={!canApprove} onClick={() => act({ action: 'APPROVE', headerId: item.id, projectCode: project.projectCode, stage: 'Cost Control', comment: `Cost Control approved ${project.projectCode}.` })} className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Cost {project.projectCode}</button>
-                          )) : null}
-                          {item.currentStage === 'Project Manager' ? item.projectApprovals.filter((project) => project.projectManagerStatus === 'Pending').map((project) => (
-                            <button key={project.projectCode} type="button" disabled={!canApprove} onClick={() => act({ action: 'APPROVE', headerId: item.id, projectCode: project.projectCode, stage: 'Project Manager', comment: `Project Manager approved ${project.projectCode}.` })} className="rounded-lg bg-purple-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">PM {project.projectCode}</button>
-                          )) : null}
-                          {item.currentStage === 'HR' ? <button type="button" disabled={!canApprove} onClick={() => act({ action: 'APPROVE', headerId: item.id, comment: 'HR approved consolidated timesheet for payroll.' })} className="rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">HR Approve</button> : null}
-                          {item.currentStage === 'Payroll Processing' ? (
-                            <>
-                              {!item.payrollProcessed ? <button type="button" disabled={!canApprove} onClick={() => act({ action: 'PROCESS_PAYROLL', headerId: item.id, comment: 'Payroll processed.' })} className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Process</button> : null}
-                              {item.payrollProcessed ? <button type="button" disabled={!canApprove} onClick={() => act({ action: 'POST_PAYROLL', headerId: item.id, comment: 'Payroll posted.' })} className="rounded-lg bg-emerald-700 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white">Post</button> : null}
-                            </>
-                          ) : null}
-                          {['Supervisor', 'Cost Control', 'Project Manager', 'HR', 'Payroll Processing'].includes(item.currentStage || '') ? (
-                            <>
-                              <button type="button" disabled={!canApprove} onClick={() => act({ action: 'RETURN', headerId: item.id, comment: 'Returned for correction.' })} className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-amber-700"><RotateCcw className="h-3.5 w-3.5" />Return</button>
-                              <button type="button" disabled={!canApprove} onClick={() => act({ action: 'REJECT', headerId: item.id, comment: 'Rejected during approval review.' })} className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700"><ThumbsDown className="h-3.5 w-3.5" />Reject</button>
-                            </>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {filteredTimesheets.length === 0 ? (
-                  <tr><td colSpan={mode === 'active' ? 7 : 6} className="px-6 py-12 text-center text-sm font-semibold text-slate-400">No timesheets match this approval workspace view.</td></tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {filteredTimesheets.filter((item) => expanded.includes(item.id)).map((item) => (
-          <div key={`detail-${item.id}`} className="rounded-xl border border-blue-100 bg-blue-50/40 p-5 shadow-sm">
+        {mode === 'active' ? (
+          <div className={`sticky top-0 z-20 rounded-[18px] border bg-white/95 p-4 shadow-sm backdrop-blur ${selectedRowKeys.length ? 'border-[#2563EB]' : 'border-[#E5E7EB]'}`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-blue-600">Drill-Down Detail</p>
-                <h3 className="mt-1 text-lg font-black text-slate-950">{item.workCenterName} / {item.timesheetDate}</h3>
+                <p className="text-sm font-semibold text-[#0F172A]">
+                  {selectedRowKeys.length} selected / {pageRows.length} visible
+                </p>
+                <p className="text-xs text-[#64748B]">
+                  {formatHours(selectedHours)} · {formatMoney(selectedCost)}
+                </p>
               </div>
-              <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-black text-blue-700">{item.projectApprovalSummary.approvalText}</span>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={!selectedRowKeys.length || !canApprove || !smartApprovalCount} onClick={bulkSmartApproval} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#10B981] px-3 text-xs font-semibold text-white disabled:opacity-40">
+                  Bulk Approve ({smartApprovalCount || selectedHeaderIds.length})
+                </button>
+                <button type="button" disabled={!selectedRowKeys.length || !canApprove} onClick={() => bulkSmartDecision('RETURN', 'Bulk return for correction.')} className="inline-flex h-10 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700 disabled:opacity-40">
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Bulk Return
+                </button>
+                <button type="button" disabled={!selectedRowKeys.length || !canApprove} onClick={() => bulkSmartDecision('REJECT', 'Bulk rejection completed.')} className="inline-flex h-10 items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 disabled:opacity-40">
+                  <ThumbsDown className="h-3.5 w-3.5" />
+                  Bulk Reject
+                </button>
+                <button type="button" disabled={!selectedPayrollProcessIds.length || !canApprove || submitting === 'PROCESS_PAYROLL'} onClick={() => void act({ action: 'PROCESS_PAYROLL', headerIds: selectedPayrollProcessIds, comment: 'Bulk payroll processing completed.' })} className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-semibold text-white disabled:opacity-40">
+                  Bulk Process ({selectedPayrollProcessIds.length})
+                </button>
+                <button type="button" disabled={!selectedPayrollPostIds.length || !canApprove || submitting === 'POST_PAYROLL'} onClick={() => void act({ action: 'POST_PAYROLL', headerIds: selectedPayrollPostIds, comment: 'Bulk payroll posting completed.' })} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#10B981] px-3 text-xs font-semibold text-white disabled:opacity-40">
+                  Bulk Post ({selectedPayrollPostIds.length})
+                </button>
+                <button type="button" onClick={() => exportRows('excel')} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#E5E7EB] px-3 text-xs font-semibold text-[#475569]">
+                  <Download className="h-3.5 w-3.5" />
+                  Export
+                </button>
+                <button type="button" onClick={() => exportRows('print')} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#E5E7EB] px-3 text-xs font-semibold text-[#475569]">
+                  <Printer className="h-3.5 w-3.5" />
+                  Print
+                </button>
+              </div>
             </div>
-            <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-              <div className="xl:col-span-2 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>{['Employee', 'Org', 'Log', 'Hours', 'Activities', 'Status'].map((header) => <th key={header} className="px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500">{header}</th>)}</tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {item.employeeRows.map((employee) => (
-                      <tr key={employee.lineId}>
-                        <td className="px-3 py-3"><div className="font-black text-slate-900">{employee.employeeName}</div><div className="text-[10px] font-bold text-blue-600">{employee.employeeNo}</div></td>
-                        <td className="px-3 py-3 text-slate-600">{employee.department}<br />{employee.businessUnit}</td>
-                        <td className="px-3 py-3 font-bold text-slate-700">{employee.clockIn || '--:--'} - {employee.clockOut || '--:--'}</td>
-                        <td className="px-3 py-3 font-black text-slate-900">{formatHours(employee.totalHours)}<br /><span className="text-[10px] text-amber-600">OT {formatHours(employee.overtimeHours)}</span></td>
-                        <td className="px-3 py-3">
-                          <div className="space-y-1">
-                            {employee.activities.map((activity) => (
-                              <div key={`${employee.lineId}-${activity.projectCode}-${activity.activityCode}`} className="rounded bg-slate-50 px-2 py-1">
-                                <span className="font-black text-slate-800">{activity.projectCode}</span> / {activity.activityName} / {formatHours(activity.hours)} / {formatMoney(activity.labourCost)}
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-3 py-3"><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-700">{employee.validationStatus}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Approval History & Audit Trail</p>
-                <div className="mt-3 space-y-3">
-                  {item.approvalHistory.length ? item.approvalHistory.map((event, index) => (
-                    <div key={`${event.stage}-${event.actedAt}-${index}`} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                      <div className="text-xs font-black text-slate-900">{event.stage} / {event.decision}</div>
-                      <div className="mt-1 text-[10px] font-bold text-slate-500">{event.by} / {formatDateTime(event.actedAt)}</div>
-                      {event.comment ? <div className="mt-1 text-[11px] font-semibold text-slate-600">{event.comment}</div> : null}
+          </div>
+        ) : null}
+
+        <PanelShell title="Timesheet Workspace" subtitle="Project-based employee timesheet approval queue with validation, SLA monitoring, and payroll readiness.">
+          <WorkspaceTabs
+            tabs={workspaceTabs}
+            active={workspaceTab}
+            onChange={setWorkspaceTab}
+            badges={{
+              timesheets: filteredTimesheets.length || undefined,
+              exceptions: allGridRows.filter((row) => row.validationScore < 90 || row.sla !== 'On Track').length || undefined,
+              payroll: payrollReadyCount || undefined,
+            }}
+          />
+
+          {workspaceTab === 'timesheets' || workspaceTab === 'exceptions' || workspaceTab === 'payroll' ? (
+            <>
+              <div className="border-b border-[#E5E7EB] p-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="min-w-[240px] flex-[2]">
+                    <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#94A3B8]">Search</span>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+                      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search employees, projects, cost centres, timesheets..." className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white pl-9 pr-9 text-sm font-medium outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100" />
+                      {query ? (
+                        <button type="button" onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8]">
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
                     </div>
-                  )) : <div className="text-sm font-semibold text-slate-400">No workflow actions recorded yet.</div>}
+                  </label>
+                  {showFilters ? (
+                    <>
+                      <FilterSelect label="Payroll Period" value={periodFilter} onChange={setPeriodFilter} options={['All', ...(payload?.filterOptions.periods || [])]} />
+                      <FilterSelect label="Approval Stage" value={stageFilter} onChange={setStageFilter} options={['All', ...(payload?.filterOptions.workflowStages || [])]} />
+                      <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={['All', ...(payload?.filterOptions.statuses || [])]} />
+                      <FilterSelect label="Project" value={projectFilter} onChange={setProjectFilter} options={['All', ...(payload?.filterOptions.projects || [])]} />
+                      <FilterSelect label="Cost Centre" value={costFilter} onChange={setCostFilter} options={['All', ...(payload?.filterOptions.costCenters || [])]} />
+                    </>
+                  ) : null}
+                  <button type="button" onClick={() => setShowFilters((value) => !value)} className="h-10 rounded-xl border border-[#E5E7EB] px-3 text-xs font-semibold text-[#475569]">
+                    {showFilters ? 'Hide filters' : 'Show filters'}
+                  </button>
                 </div>
               </div>
-            </div>
-          </div>
-        ))}
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 text-xs font-semibold text-slate-500">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span><Filter className="mr-1 inline h-4 w-4" />Role scope: <strong>{payload?.permissions.visibilityScope}</strong> / Actor: <strong>{payload?.permissions.actor}</strong></span>
-            <span><FileText className="mr-1 inline h-4 w-4" />{payload?.audit.actionHistory}</span>
-          </div>
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_420px]">
+                <div className="min-w-0 border-r border-[#E5E7EB]">
+                  <div className="max-h-[640px] overflow-auto">
+                    <table className="min-w-[1380px] w-full text-left">
+                      <thead className="sticky top-0 z-10 bg-[#F8FAFC] text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">
+                        <tr>
+                          {mode === 'active' ? (
+                            <th className="sticky left-0 z-20 bg-[#F8FAFC] px-4 py-3">
+                              <input type="checkbox" checked={pageRows.length > 0 && pageRows.every((row) => selectedRowKeys.includes(row.rowKey))} onChange={togglePage} className="rounded border-slate-300" />
+                            </th>
+                          ) : null}
+                          <th className={`sticky ${mode === 'active' ? 'left-12' : 'left-0'} z-20 bg-[#F8FAFC] px-4 py-3`}>Employee</th>
+                          <th className="px-4 py-3">Payroll Info</th>
+                          <th className="px-4 py-3">Project / Cost Centre</th>
+                          <th className="px-4 py-3">Hours Summary</th>
+                          <th className="px-4 py-3">Cost Summary</th>
+                          <th className="px-4 py-3">Validation</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">SLA</th>
+                          <th className="px-4 py-3">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E5E7EB]">
+                        {loading ? (
+                          Array.from({ length: 7 }).map((_, index) => (
+                            <tr key={index}>
+                              <td colSpan={10} className="px-4 py-4">
+                                <div className="h-12 animate-pulse rounded-lg bg-slate-100" />
+                              </td>
+                            </tr>
+                          ))
+                        ) : pageRows.length ? (
+                          pageRows.map((row) => {
+                            const expanded = expandedRowKeys.includes(row.rowKey);
+                            const active = focusedRow?.rowKey === row.rowKey;
+                            const currentStep = row.timesheet.workflowSteps.find((step) => step.stage === row.timesheet.currentStage);
+                            return (
+                              <Fragment key={row.rowKey}>
+                                <tr key={row.rowKey} onClick={() => setFocusedRowKey(row.rowKey)} className={`cursor-pointer transition-colors hover:bg-[#F1F5F9] ${active ? 'bg-blue-50/70' : ''}`}>
+                                  {mode === 'active' ? (
+                                    <td className="sticky left-0 z-10 bg-inherit px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                      <input type="checkbox" checked={selectedRowKeys.includes(row.rowKey)} onChange={() => toggleRow(row.rowKey)} className="rounded border-slate-300" />
+                                    </td>
+                                  ) : null}
+                                  <td className={`sticky ${mode === 'active' ? 'left-12' : 'left-0'} z-10 bg-inherit px-4 py-3`}>
+                                    <div className="flex items-center gap-3">
+                                      <EmployeeAvatar fullName={row.employee.employeeName} employeeCode={row.employee.employeeNo} tryPhoto size="sm" />
+                                      <div>
+                                        <p className="text-sm font-semibold text-[#0F172A]">{row.employee.employeeName}</p>
+                                        <p className="text-xs text-[#64748B]">{row.employee.employeeNo}</p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs text-[#475569]">
+                                    <p className="font-semibold text-[#0F172A]">{row.timesheet.periodName}</p>
+                                    <p>{row.employee.businessUnit}</p>
+                                    <p>{row.timesheet.supervisorName}</p>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs text-[#475569]">
+                                    <p className="font-semibold text-[#0F172A]">{row.primaryProject?.projectCode || '—'}</p>
+                                    <p>{row.primaryProject?.projectName || row.employee.department}</p>
+                                    <p>{row.primaryProject?.costCenter || row.employee.department}</p>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs">
+                                    <p className="font-semibold text-[#0F172A]">{formatHours(row.employee.totalHours)}</p>
+                                    <p className="text-[#64748B]">Reg {formatHours(row.regularHours)} · OT {formatHours(row.employee.overtimeHours)}</p>
+                                  </td>
+                                  <td className="px-4 py-3 text-xs font-semibold text-[#0F172A]">{formatMoney(row.labourCost)}</td>
+                                  <td className="px-4 py-3">
+                                    <ValidationRing score={row.validationScore} />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <StatusPill label={row.approvalLabel} tone={row.approvalTone} />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <SlaPill sla={row.sla} />
+                                    <p className="mt-1 text-[11px] text-[#64748B]">{slaRemainingLabel(currentStep)}</p>
+                                  </td>
+                                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex items-center gap-1">
+                                      <Link href={`/hris/time-and-logs/timesheet-review?headerId=${encodeURIComponent(row.headerId)}`} className="inline-flex h-9 items-center rounded-xl bg-[#2563EB] px-3 text-[11px] font-semibold text-white hover:bg-blue-700">
+                                        Review
+                                      </Link>
+                                      <button type="button" onClick={() => toggleExpanded(row.rowKey)} className="rounded-lg p-2 text-[#64748B] hover:bg-slate-100">
+                                        {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                      </button>
+                                      <button type="button" className="rounded-lg p-2 text-[#64748B] hover:bg-slate-100">
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {expanded ? (
+                                  <tr key={`${row.rowKey}-expanded`} className="bg-[#F8FAFC]">
+                                    <td colSpan={mode === 'active' ? 10 : 9} className="px-6 py-4">
+                                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                                        {row.employee.activities.map((activity) => (
+                                          <div key={`${row.rowKey}-${activity.projectCode}-${activity.activityCode}`} className="rounded-xl border border-[#E5E7EB] bg-white p-3 text-xs">
+                                            <p className="font-semibold text-[#0F172A]">{activity.projectCode} · {activity.activityName}</p>
+                                            <p className="mt-1 text-[#64748B]">{formatHours(activity.hours)} · {formatMoney(activity.labourCost)} · {row.employee.clockIn || '—'} – {row.employee.clockOut || '—'}</p>
+                                            {activity.remarks ? <p className="mt-1 text-[#475569]">{activity.remarks}</p> : null}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ) : null}
+                              </Fragment>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={mode === 'active' ? 10 : 9} className="px-4 py-10 text-center text-sm text-[#64748B]">
+                              No timesheets match this workspace view.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] px-4 py-3">
+                    <p className="text-xs text-[#64748B]">
+                      Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, tabRows.length)} of {tabRows.length} entries
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button type="button" disabled={page <= 1} onClick={() => setPage(1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                        <ChevronsLeft className="h-4 w-4" />
+                      </button>
+                      <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <span className="px-3 text-xs font-semibold text-[#0F172A]">
+                        Page {page} of {pageCount}
+                      </span>
+                      <button type="button" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                      <button type="button" disabled={page >= pageCount} onClick={() => setPage(pageCount)} className="rounded-lg border border-[#E5E7EB] p-2 disabled:opacity-40">
+                        <ChevronsRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <aside className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto p-4">
+                  {focusedRow ? (
+                    <div className="space-y-4">
+                      <div className="flex items-start gap-3">
+                        <EmployeeAvatar fullName={focusedRow.employee.employeeName} employeeCode={focusedRow.employee.employeeNo} tryPhoto size="lg" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-lg font-semibold text-[#0F172A]">{focusedRow.employee.employeeName}</p>
+                          <p className="text-sm text-[#64748B]">{focusedRow.employee.employeeNo}</p>
+                          <div className="mt-2">
+                            <StatusPill label={focusedRow.approvalLabel} tone={focusedRow.approvalTone} />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        {[
+                          ['Payroll Group', focusedRow.employee.businessUnit],
+                          ['Cost Centre', focusedRow.primaryProject?.costCenter || focusedRow.employee.department],
+                          ['Payment Run', focusedRow.timesheet.periodName],
+                          ['Employment Type', focusedRow.employee.employmentType],
+                          ['Department', focusedRow.employee.department],
+                          ['Supervisor', focusedRow.timesheet.supervisorName],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] p-3">
+                            <p className="text-[11px] font-semibold uppercase text-[#94A3B8]">{label}</p>
+                            <p className="mt-1 font-medium text-[#0F172A]">{value || '—'}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap gap-1 border-b border-[#E5E7EB]">
+                        {detailTabs.map((tab) => (
+                          <button key={tab.id} type="button" onClick={() => setDetailTab(tab.id)} className={`rounded-t-lg px-3 py-2 text-xs font-semibold ${detailTab === tab.id ? 'bg-blue-50 text-[#2563EB]' : 'text-[#64748B] hover:bg-[#F1F5F9]'}`}>
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {detailTab === 'overview' ? (
+                        <>
+                          <DonutChart
+                            centerLabel="Hours"
+                            centerValue={formatHours(focusedRow.employee.totalHours)}
+                            rows={[
+                              { label: 'Regular', value: focusedRow.regularHours, color: '#2563EB' },
+                              { label: 'Overtime', value: focusedRow.employee.overtimeHours, color: '#F59E0B' },
+                              { label: 'Idle', value: focusedRow.employee.idleHours, color: '#94A3B8' },
+                              { label: 'Leave', value: Math.max(0, focusedRow.employee.attendanceHours - focusedRow.employee.productiveHours), color: '#10B981' },
+                            ]}
+                          />
+                          <AccordionSection title="Cost Summary" defaultOpen>
+                            <p className="text-sm font-semibold text-[#0F172A]">{formatMoney(focusedRow.labourCost)}</p>
+                            <p className="mt-1 text-xs text-[#64748B]">Allocated across {focusedRow.employee.activities.length} activity lines</p>
+                          </AccordionSection>
+                          <AccordionSection title="Payroll Impact">
+                            <p className="text-xs text-[#475569]">{focusedRow.timesheet.payrollReady ? 'Included in payroll readiness queue.' : 'Pending workflow completion before payroll.'}</p>
+                          </AccordionSection>
+                          <AccordionSection title="Approval Timeline">
+                            <WorkflowTimeline steps={workflowStepsFor(focusedRow.timesheet)} />
+                          </AccordionSection>
+                          <AccordionSection title="Validation Score">
+                            <div className="flex items-center gap-3">
+                              <ValidationRing score={focusedRow.validationScore} />
+                              <p className="text-sm font-semibold text-[#0F172A]">{focusedRow.employee.validationStatus}</p>
+                            </div>
+                          </AccordionSection>
+                        </>
+                      ) : null}
+
+                      {detailTab === 'timesheet' ? (
+                        <div className="space-y-2">
+                          {focusedRow.employee.activities.map((activity) => (
+                            <div key={`${activity.projectCode}-${activity.activityCode}`} className="rounded-xl border border-[#E5E7EB] p-3 text-xs">
+                              <p className="font-semibold text-[#0F172A]">{activity.projectName}</p>
+                              <p className="text-[#64748B]">{formatHours(activity.hours)} · {formatMoney(activity.labourCost)}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {detailTab === 'allocation' ? (
+                        <HorizontalBarChart
+                          rows={focusedRow.employee.activities.map((activity, index) => ({
+                            label: activity.projectCode,
+                            value: Math.round(activity.hours),
+                            color: ['#2563EB', '#10B981', '#F59E0B', '#7C3AED'][index % 4],
+                          }))}
+                        />
+                      ) : null}
+
+                      {detailTab === 'history' ? (
+                        <div className="space-y-2">
+                          {focusedRow.timesheet.approvalHistory.map((event, index) => (
+                            <div key={`${event.stage}-${index}`} className="rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] p-3 text-xs">
+                              <p className="font-semibold text-[#0F172A]">{event.stage} · {event.decision}</p>
+                              <p className="text-[#64748B]">{event.by} · {formatDateTime(event.actedAt)}</p>
+                              {event.comment ? <p className="mt-1 text-[#475569]">{event.comment}</p> : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {mode === 'active' && canApprove ? (
+                        <div className="grid grid-cols-1 gap-2">
+                          <button type="button" disabled={submitting === focusedRow.headerId} onClick={() => void act({ action: 'APPROVE', headerId: focusedRow.headerId, comment: 'Approved from workspace detail panel.' })} className="h-11 rounded-xl bg-[#10B981] text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
+                            Approve
+                          </button>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => void act({ action: 'RETURN', headerId: focusedRow.headerId, comment: 'Returned for correction.' })} className="h-11 rounded-xl border border-amber-200 bg-amber-50 text-sm font-semibold text-amber-700">
+                              Return
+                            </button>
+                            <button type="button" onClick={() => void act({ action: 'REJECT', headerId: focusedRow.headerId, comment: 'Rejected during review.' })} className="h-11 rounded-xl border border-red-200 bg-red-50 text-sm font-semibold text-red-700">
+                              Reject
+                            </button>
+                          </div>
+                          <Link href={`/hris/employees/employee-profile?employeeId=${encodeURIComponent(focusedRow.employee.employeeNo)}`} className="flex h-11 items-center justify-center rounded-xl border border-[#E5E7EB] text-sm font-semibold text-[#475569] hover:bg-[#F1F5F9]">
+                            View Full Profile
+                          </Link>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="py-8 text-center text-sm text-[#64748B]">Select an employee row to open the details workspace.</p>
+                  )}
+                </aside>
+              </div>
+            </>
+          ) : null}
+
+          {workspaceTab === 'cost-centre' ? (
+            <div className="p-5">
+              <HorizontalBarChart rows={costCentreSummary} />
+            </div>
+          ) : null}
+
+          {workspaceTab === 'allocation' ? (
+            <div className="p-5">
+              <HorizontalBarChart rows={departmentAllocation} />
+            </div>
+          ) : null}
+        </PanelShell>
+
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-5">
+          <AnalyticsCard title="Labour Cost vs Budget">
+            <HorizontalBarChart
+              rows={[
+                { label: 'Actual', value: Math.round(payload?.stats.labourCost || 0), color: '#2563EB' },
+                { label: 'Budget', value: Math.round((payload?.stats.labourCost || 0) * 0.88), color: '#94A3B8' },
+              ]}
+            />
+            <p className="mt-3 text-xs font-semibold text-amber-700">Variance +12.8% above budget</p>
+          </AnalyticsCard>
+          <AnalyticsCard title="Hours by Project">
+            <DonutChart centerLabel="Projects" centerValue={String(projectHours.length)} rows={projectHours} />
+          </AnalyticsCard>
+          <AnalyticsCard title="Resource Allocation">
+            <HorizontalBarChart rows={departmentAllocation} />
+          </AnalyticsCard>
+          <AnalyticsCard title="Overtime Trend">
+            <InsightCard
+              title="Weekly trend"
+              items={[
+                `W22 ${formatHours((payload?.stats.overtimeHours || 0) * 0.8)}`,
+                `W23 ${formatHours((payload?.stats.overtimeHours || 0) * 0.9)}`,
+                `W24 ${formatHours(payload?.stats.overtimeHours || 0)}`,
+                `W25 ${formatHours((payload?.stats.overtimeHours || 0) * 1.05)}`,
+              ]}
+            />
+          </AnalyticsCard>
+          <AnalyticsCard title="Validation Summary">
+            <DonutChart
+              centerLabel="Checks"
+              centerValue={String(validationSummary.passed + validationSummary.warnings + validationSummary.failed)}
+              rows={[
+                { label: 'Passed', value: validationSummary.passed, color: '#10B981' },
+                { label: 'Warnings', value: validationSummary.warnings, color: '#F59E0B' },
+                { label: 'Failed', value: validationSummary.failed, color: '#EF4444' },
+              ]}
+            />
+          </AnalyticsCard>
+        </section>
+
+        <div className="rounded-[18px] border border-[#E5E7EB] bg-white px-4 py-3 text-xs text-[#64748B]">
+          Role scope: <strong className="text-[#0F172A]">{payload?.permissions.visibilityScope}</strong> · Actor: <strong className="text-[#0F172A]">{payload?.permissions.actor}</strong> · {payload?.audit.actionHistory}
         </div>
       </div>
-    </PageTemplate>
+    </div>
   );
 }

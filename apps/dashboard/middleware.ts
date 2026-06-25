@@ -13,54 +13,68 @@ const denied = (request: NextRequest, status = 403) => {
 };
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  if (pathname.startsWith('/change-password')) {
+  try {
+    const { pathname } = request.nextUrl;
+    if (pathname.startsWith('/change-password')) {
+      const session = await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
+      if (session?.isGlobalAdmin || (session && !session.firstLoginRequired && !session.passwordResetRequired)) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/';
+        url.search = '';
+        return NextResponse.redirect(url);
+      }
+    }
+    if (isPublicPath(pathname)) return NextResponse.next();
+
     const session = await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
-    if (session?.isGlobalAdmin || (session && !session.firstLoginRequired && !session.passwordResetRequired)) {
+    if (!session) return denied(request, 401);
+
+    if (!session.isGlobalAdmin && (session.firstLoginRequired || session.passwordResetRequired) && !pathname.startsWith('/change-password') && !pathname.startsWith('/api/auth/change-password')) {
       const url = request.nextUrl.clone();
-      url.pathname = '/';
-      url.search = '';
+      url.pathname = '/change-password';
+      url.searchParams.set('next', pathname + request.nextUrl.search);
       return NextResponse.redirect(url);
     }
-  }
-  if (isPublicPath(pathname)) return NextResponse.next();
 
-  const session = await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
-  if (!session) return denied(request, 401);
+    if ((!pathname.startsWith('/api') || pathname.startsWith('/api/hris')) && !canAccessRoute(session, pathname)) {
+      return denied(request, 403);
+    }
 
-  if (!session.isGlobalAdmin && (session.firstLoginRequired || session.passwordResetRequired) && !pathname.startsWith('/change-password') && !pathname.startsWith('/api/auth/change-password')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/change-password';
-    url.searchParams.set('next', pathname + request.nextUrl.search);
-    return NextResponse.redirect(url);
-  }
+    const roles = session.roles;
+    const permissions = session.permissions;
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-auth-user', session.username || '');
+    requestHeaders.set('x-auth-roles', roles.join(','));
+    requestHeaders.set('x-auth-permissions', permissions.join(','));
+    requestHeaders.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
+    requestHeaders.set('x-hris-actor', session.fullName || session.username || 'HRIS User');
+    if (!requestHeaders.get('x-hris-role')) {
+      requestHeaders.set('x-hris-role', roles.includes('Super Administrator') ? 'Super Administrator' : 'OrganizationAdmin');
+    }
 
-  if ((!pathname.startsWith('/api') || pathname.startsWith('/api/hris')) && !canAccessRoute(session, pathname)) {
-    return denied(request, 403);
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set('x-auth-user', session.username || '');
+    response.headers.set('x-auth-roles', roles.join(','));
+    response.headers.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
+    if (pathname.startsWith('/hris') || pathname.startsWith('/api/hris')) {
+      response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      response.headers.set('Pragma', 'no-cache');
+      response.headers.set('Expires', '0');
+    }
+    return response;
+  } catch (error) {
+    console.error('[middleware] request failed', error);
+    const detail = error instanceof Error ? error.message : String(error);
+    if (request.nextUrl.pathname.startsWith('/api')) {
+      return NextResponse.json({ status: 'error', error: 'Internal Server Error', detail: process.env.NODE_ENV === 'development' ? detail : undefined }, { status: 500 });
+    }
+    const body = process.env.NODE_ENV === 'development'
+      ? `Internal Server Error\n\n${detail}\n\nTry: npm run dev:3020:restart`
+      : 'Internal Server Error';
+    return new NextResponse(body, { status: 500 });
   }
-
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-auth-user', session.username);
-  requestHeaders.set('x-auth-roles', session.roles.join(','));
-  requestHeaders.set('x-auth-permissions', session.permissions.join(','));
-  requestHeaders.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
-  requestHeaders.set('x-hris-actor', session.fullName || session.username);
-  if (!requestHeaders.get('x-hris-role')) {
-    requestHeaders.set('x-hris-role', session.roles.includes('Super Administrator') ? 'Super Administrator' : 'OrganizationAdmin');
-  }
-
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
-  response.headers.set('x-auth-user', session.username);
-  response.headers.set('x-auth-roles', session.roles.join(','));
-  response.headers.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
-  if (pathname.startsWith('/hris') || pathname.startsWith('/api/hris')) {
-    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    response.headers.set('Pragma', 'no-cache');
-    response.headers.set('Expires', '0');
-  }
-  return response;
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|brand/).*)'],
 };

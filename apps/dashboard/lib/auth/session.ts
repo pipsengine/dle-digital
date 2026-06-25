@@ -105,6 +105,17 @@ export const createSessionToken = async (user: SessionUser) => {
   return `${body}.${await sign(body)}`;
 };
 
+export const normalizeSession = (session: SessionPayload): SessionPayload => ({
+  ...session,
+  username: String(session.username || '').trim(),
+  fullName: String(session.fullName || session.username || 'User').trim(),
+  roles: Array.isArray(session.roles) ? session.roles.filter(Boolean) : [],
+  permissions: Array.isArray(session.permissions) ? session.permissions.filter(Boolean) : [],
+  firstLoginRequired: Boolean(session.firstLoginRequired),
+  passwordResetRequired: Boolean(session.passwordResetRequired),
+  isGlobalAdmin: Boolean(session.isGlobalAdmin),
+});
+
 export const verifySessionToken = async (token?: string | null): Promise<SessionPayload | null> => {
   if (!token || !token.includes('.')) return null;
   const [body, signature] = token.split('.');
@@ -114,7 +125,7 @@ export const verifySessionToken = async (token?: string | null): Promise<Session
   try {
     const payload = JSON.parse(base64UrlDecode(body)) as SessionPayload;
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
-    return payload;
+    return normalizeSession(payload);
   } catch {
     return null;
   }

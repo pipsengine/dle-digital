@@ -1,5 +1,6 @@
 import type {Metadata} from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
+import { ChunkLoadRecovery } from '@/components/layout/chunk-load-recovery';
 import { RouteTitle } from '@/components/layout/route-title';
 import './globals.css';
 
@@ -25,6 +26,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="font-sans antialiased text-slate-900 bg-slate-50" suppressHydrationWarning>
+        <ChunkLoadRecovery />
         <RouteTitle />
         {children}
       </body>

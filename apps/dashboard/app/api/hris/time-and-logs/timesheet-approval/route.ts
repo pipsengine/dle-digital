@@ -4,16 +4,18 @@ import {
   advanceProjectTimesheetApproval,
   advanceTimesheetWorkflow,
   buildProjectTimesheetApprovals,
+  calculateTimesheetPeriod,
   normalizePaidWorkHours,
   normalizeTimesheetStatus,
   readProjects,
   readTimesheetData,
   readTimesheetPayrollUpdates,
-  readTimesheetPeriod,
+  readTimesheetPeriods,
   writeTimesheetPayrollUpdates,
   writeTimesheetHeaderLines,
   type TimesheetHeader,
   type TimesheetLine,
+  type TimesheetPeriod,
   type TimesheetStatus,
   type TimesheetWorkflowStage,
 } from '@/lib/timesheet-entry-store';
@@ -30,6 +32,30 @@ type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN' | 'PROCESS_PAYROLL' | 'POS
 type ProjectApprovalStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR' | 'Payroll';
 type BulkMode = 'HEADER' | 'PROJECT';
 const activeApprovalStatuses = new Set<TimesheetStatus>(['Submitted', 'Supervisor_Reviewed', 'Cost_Control_Reviewed', 'Project_Manager_Reviewed', 'HR_Acknowledged']);
+
+export const maxDuration = 120;
+
+const resolvePeriod = (periods: TimesheetPeriod[], dateStr: string): TimesheetPeriod => {
+  const calculated = calculateTimesheetPeriod(new Date(dateStr));
+  const stored = periods.find((period) => period.id === calculated.id);
+  if (stored) {
+    return { ...calculated, ...stored, startDate: calculated.startDate, endDate: calculated.endDate, name: calculated.name };
+  }
+  return calculated;
+};
+
+type PayrollEmployeeRow = Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number];
+
+const buildEmployeeLookup = (employees: PayrollEmployeeRow[]) => {
+  const lookup = new Map<string, PayrollEmployeeRow>();
+  for (const item of employees) {
+    for (const key of [item.employeeCode, item.employeeId, item.fullName]) {
+      const normalized = lower(key);
+      if (normalized) lookup.set(normalized, item);
+    }
+  }
+  return lookup;
+};
 
 const statusLabel = (status: TimesheetStatus) => normalizeTimesheetStatus(status).replace(/_/g, ' ');
 
@@ -106,8 +132,11 @@ const requireProjectStageAccess = (stage: ProjectApprovalStage, actor: string, r
   if (!stageAccess(stage, actor, role)) throw new Error(`Only ${stage} can perform this project-level approval.`);
 };
 
-const employeeMeta = (employees: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'], line: TimesheetLine) => {
-  const match = employees.find((item) => [item.employeeCode, item.employeeId, item.fullName].some((value) => lower(value) === lower(line.employeeNo) || lower(value) === lower(line.employeeId) || lower(value) === lower(line.employeeName)));
+const employeeMeta = (lookup: Map<string, PayrollEmployeeRow>, line: TimesheetLine) => {
+  const match =
+    lookup.get(lower(line.employeeNo)) ||
+    lookup.get(lower(line.employeeId)) ||
+    lookup.get(lower(line.employeeName));
   return {
     department: match?.department || 'Unassigned',
     businessUnit: match?.businessUnit || match?.payrollGroup || 'DLE',
@@ -159,27 +188,31 @@ const canSeeHeader = (scope: string, header: TimesheetHeader, projectApprovals: 
 const buildPayload = async (request: Request) => {
   const access = resolveAccessContext(request);
   const uiPermissions = getUiPermissions(access);
-  const [{ headers, lines }, projects, payrollUpdates, employees] = await Promise.all([
+  const [{ headers, lines }, projects, payrollUpdates, employees, periods] = await Promise.all([
     readTimesheetData(),
     readProjects(),
     readTimesheetPayrollUpdates(),
     readPayrollEmployees(),
+    readTimesheetPeriods(),
   ]);
   const payrollEmployees = employees.employees;
+  const employeeLookup = buildEmployeeLookup(payrollEmployees);
   const scope = roleScope(access.role, access.actor);
   const lineByHeader = new Map<string, TimesheetLine[]>();
   for (const line of lines) lineByHeader.set(line.headerId, [...(lineByHeader.get(line.headerId) || []), line]);
 
-  const summaries = await Promise.all(headers.filter((header) => normalizeTimesheetStatus(header.status) !== 'Draft').map(async (header) => {
+  const summaries = headers
+    .filter((header) => normalizeTimesheetStatus(header.status) !== 'Draft')
+    .map((header) => {
     const status = normalizeTimesheetStatus(header.status);
     const headerLines = lineByHeader.get(header.id) || [];
-    const period = await readTimesheetPeriod(new Date(header.timesheetDate));
+    const period = resolvePeriod(periods, header.timesheetDate);
     const payrollUpdate = payrollUpdates.find((update) => update.headerIds.includes(header.id));
     const allProjectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
     if (!canSeeHeader(scope, header, allProjectApprovals, access.actor)) return null;
     const visibleProjectApprovals = scope === 'project-manager' ? buildProjectTimesheetApprovals(header, headerLines, projects, access.actor) : allProjectApprovals;
     const employeeRows = headerLines.map((line) => {
-      const meta = employeeMeta(payrollEmployees, line);
+      const meta = employeeMeta(employeeLookup, line);
       return {
         lineId: line.id,
         employeeId: line.employeeId,
@@ -212,7 +245,7 @@ const buildPayload = async (request: Request) => {
     const projectBreakdowns = visibleProjectApprovals.map((project) => {
       const projectLines = headerLines.filter((line) => line.projectAllocations.some((allocation) => lower(allocation.projectCode) === lower(project.projectCode)));
       const labourCost = projectLines.reduce((sum, line) => {
-        const meta = employeeMeta(payrollEmployees, line);
+        const meta = employeeMeta(employeeLookup, line);
         const hours = line.projectAllocations.filter((allocation) => lower(allocation.projectCode) === lower(project.projectCode)).reduce((h, allocation) => h + Number(allocation.hours || 0), 0);
         return sum + hours * meta.labourRate;
       }, 0);
@@ -273,7 +306,7 @@ const buildPayload = async (request: Request) => {
         consolidatedForHr: status === 'Project_Manager_Reviewed' || status === 'HR_Acknowledged' || status === 'Locked',
       },
     };
-  }));
+  });
 
   const allTimesheets = summaries.filter(Boolean).sort((a, b) => new Date(b!.timesheetDate).getTime() - new Date(a!.timesheetDate).getTime());
   const pendingTimesheets = allTimesheets.filter((item) => activeApprovalStatuses.has(item!.status));
@@ -335,65 +368,97 @@ const buildPayload = async (request: Request) => {
   };
 };
 
-const processPayroll = async (headerId: string, actor: string, post = false) => {
-  const { headers, lines } = await readTimesheetData();
-  const header = headers.find((item) => item.id === headerId);
-  if (!header) throw new Error('Timesheet header not found.');
-  const status = normalizeTimesheetStatus(header.status);
-  if (status !== 'HR_Acknowledged' && status !== 'Locked') throw new Error('Only HR-approved timesheets can be processed by Payroll.');
-  const updates = await readTimesheetPayrollUpdates();
-  const existingPeriodUpdate = updates.find((update) => update.periodId === header.periodId);
-  const mergedHeaderIds = Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), headerId]));
-  const totals = new Map<string, {
-    employeeId: string;
-    employeeName: string;
-    daysWorked: number;
-    attendanceHours: number;
-    bookedHours: number;
-    idleHours: number;
-  }>();
-  for (const line of lines.filter((item) => mergedHeaderIds.includes(item.headerId))) {
-    const current = totals.get(line.employeeId) || {
-      employeeId: line.employeeId,
-      employeeName: line.employeeName,
-      daysWorked: 0,
-      attendanceHours: 0,
-      bookedHours: 0,
-      idleHours: 0,
-    };
-    current.daysWorked += line.clockIn ? 1 : 0;
-    current.attendanceHours = round(current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration));
-    current.bookedHours = round(current.bookedHours + normalizePaidWorkHours(line.totalHours));
-    current.idleHours = round(current.idleHours + line.idleHours);
-    totals.set(line.employeeId, current);
+const processPayrollBatch = async (headerIds: string[], actor: string, post: boolean) => {
+  const uniqueHeaderIds = Array.from(new Set(headerIds.filter(Boolean)));
+  if (!uniqueHeaderIds.length) return { processed: 0 };
+
+  const [{ headers, lines }, periods] = await Promise.all([readTimesheetData(), readTimesheetPeriods()]);
+  let updates = await readTimesheetPayrollUpdates();
+  const touchedHeaders: TimesheetHeader[] = [];
+
+  const groupedByPeriod = new Map<string, string[]>();
+  for (const headerId of uniqueHeaderIds) {
+    const header = headers.find((item) => item.id === headerId);
+    if (!header) throw new Error(`Timesheet ${headerId} was not found.`);
+    const status = normalizeTimesheetStatus(header.status);
+    if (status !== 'HR_Acknowledged' && status !== 'Locked') {
+      throw new Error(`Timesheet ${header.workCenterName || headerId} is not payroll-ready.`);
+    }
+    const bucket = groupedByPeriod.get(header.periodId) || [];
+    bucket.push(headerId);
+    groupedByPeriod.set(header.periodId, bucket);
   }
-  const period = await readTimesheetPeriod(new Date(header.timesheetDate));
-  await writeTimesheetPayrollUpdates([
-    {
-      id: existingPeriodUpdate?.id || `payroll-${header.periodId}-${Date.now()}`,
-      periodId: header.periodId,
-      periodName: period.name,
-      acknowledgedAt: new Date().toISOString(),
-      acknowledgedBy: actor,
-      headerIds: mergedHeaderIds,
-      employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
-    },
-    ...updates.filter((update) => update.periodId !== header.periodId),
-  ]);
-  if (post) header.status = 'Locked';
-  header.currentApprovalStage = null;
-  header.currentApprover = null;
-  header.workflowHistory = [
-    ...(header.workflowHistory || []),
-    {
-      stage: 'HR',
-      decision: post ? 'Approved' : 'Acknowledged',
-      by: actor,
-      actedAt: new Date().toISOString(),
-      comment: post ? 'Payroll posted and timesheet locked.' : 'Payroll processing completed for this timesheet.',
-    },
-  ];
-  await writeTimesheetHeaderLines(header, lines.filter((line) => line.headerId === headerId));
+
+  for (const [periodId, periodHeaderIds] of groupedByPeriod) {
+    const sampleHeader = headers.find((item) => item.id === periodHeaderIds[0]);
+    if (!sampleHeader) continue;
+    const existingPeriodUpdate = updates.find((update) => update.periodId === periodId);
+    const mergedHeaderIds = Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), ...periodHeaderIds]));
+    const totals = new Map<string, {
+      employeeId: string;
+      employeeName: string;
+      daysWorked: number;
+      attendanceHours: number;
+      bookedHours: number;
+      idleHours: number;
+    }>();
+
+    for (const line of lines.filter((item) => mergedHeaderIds.includes(item.headerId))) {
+      const current = totals.get(line.employeeId) || {
+        employeeId: line.employeeId,
+        employeeName: line.employeeName,
+        daysWorked: 0,
+        attendanceHours: 0,
+        bookedHours: 0,
+        idleHours: 0,
+      };
+      current.daysWorked += line.clockIn ? 1 : 0;
+      current.attendanceHours = round(current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration));
+      current.bookedHours = round(current.bookedHours + normalizePaidWorkHours(line.totalHours));
+      current.idleHours = round(current.idleHours + line.idleHours);
+      totals.set(line.employeeId, current);
+    }
+
+    const period = resolvePeriod(periods, sampleHeader.timesheetDate);
+    updates = [
+      {
+        id: existingPeriodUpdate?.id || `payroll-${periodId}-${Date.now()}`,
+        periodId,
+        periodName: period.name,
+        acknowledgedAt: new Date().toISOString(),
+        acknowledgedBy: actor,
+        headerIds: mergedHeaderIds,
+        employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+      },
+      ...updates.filter((update) => update.periodId !== periodId),
+    ];
+  }
+
+  for (const headerId of uniqueHeaderIds) {
+    const header = headers.find((item) => item.id === headerId);
+    if (!header) continue;
+    if (post) header.status = 'Locked';
+    header.currentApprovalStage = null;
+    header.currentApprover = null;
+    header.workflowHistory = [
+      ...(header.workflowHistory || []),
+      {
+        stage: 'HR',
+        decision: post ? 'Approved' : 'Acknowledged',
+        by: actor,
+        actedAt: new Date().toISOString(),
+        comment: post ? 'Payroll posted and timesheet locked.' : 'Payroll processing completed for this timesheet.',
+      },
+    ];
+    touchedHeaders.push(header);
+  }
+
+  await writeTimesheetPayrollUpdates(updates);
+  for (const header of touchedHeaders) {
+    await writeTimesheetHeaderLines(header, lines.filter((line) => line.headerId === header.id));
+  }
+
+  return { processed: touchedHeaders.length };
 };
 
 export async function GET(request: Request) {
@@ -434,12 +499,15 @@ export async function PATCH(request: Request) {
         throw new Error(`Project Manager can only approve ${segment.projectCode} after Cost Control review is complete.`);
       }
     };
+    const payrollHeaderIds: string[] = [];
     const applyHeader = async (headerId: string) => {
       const header = headers.find((item) => item.id === headerId);
       if (!header) throw new Error(`Timesheet ${headerId} was not found.`);
       requireHeaderStageAccess(header, payload.action!, access.actor, access.role);
-      if (payload.action === 'PROCESS_PAYROLL') return processPayroll(headerId, access.actor, false);
-      if (payload.action === 'POST_PAYROLL') return processPayroll(headerId, access.actor, true);
+      if (payload.action === 'PROCESS_PAYROLL' || payload.action === 'POST_PAYROLL') {
+        payrollHeaderIds.push(headerId);
+        return;
+      }
       return advanceTimesheetWorkflow(headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, payload.comment);
     };
 
@@ -474,11 +542,16 @@ export async function PATCH(request: Request) {
       const headerIds = payload.headerIds?.length ? payload.headerIds : payload.headerId ? [payload.headerId] : [];
       if (!headerIds.length && !payload.projectSegments?.length) return err(400, 'Timesheet header ID is required.');
       for (const headerId of headerIds) await applyHeader(headerId);
+      if (payrollHeaderIds.length) {
+        await processPayrollBatch(payrollHeaderIds, access.actor, payload.action === 'POST_PAYROLL');
+      }
     }
 
     return ok(await buildPayload(request));
   } catch (error) {
     console.error('Approval API Error:', error);
-    return err(400, error instanceof Error ? error.message : 'Unable to update approval workflow.');
+    const message = error instanceof Error ? error.message : 'Unable to update approval workflow.';
+    const status = /not found|not payroll-ready|permission|only/i.test(message) ? 400 : 500;
+    return err(status, message);
   }
 }
