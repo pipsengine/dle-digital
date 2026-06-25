@@ -110,6 +110,14 @@ const resolveDashboardRoot = () => {
 const DATA_DIR = path.join(resolveDashboardRoot(), 'data', 'auth');
 const ACCESS_PATH = path.join(DATA_DIR, 'access-control.json');
 const ACCESS_STATE_KEY = 'global-access-control-centre';
+const ACCESS_STATE_CACHE_MS = Number(process.env.ACCESS_CONTROL_STATE_CACHE_MS || 30000);
+
+let dbReady: Promise<sql.ConnectionPool> | null = null;
+let cachedAccessState: { state: AccessControlState; expiresAt: number } | null = null;
+
+export const invalidateAccessControlStateCache = () => {
+  cachedAccessState = null;
+};
 
 const nowIso = () => new Date().toISOString();
 const compact = (value: unknown) => String(value || '').trim();
@@ -358,9 +366,7 @@ const readLegacyState = async () => {
   }
 };
 
-const db = async () => {
-  const pool = await getDleEnterpriseDbPool();
-  if (!pool) throw new Error('DLE Enterprise database is not configured. Access Control Centre data must be stored in the database.');
+const ensureAccessControlSchema = async (pool: sql.ConnectionPool) => {
   await pool.request().query(`
 IF SCHEMA_ID(N'security') IS NULL EXEC(N'CREATE SCHEMA [security]');
 IF OBJECT_ID(N'[security].[AccessControlState]', N'U') IS NULL
@@ -394,7 +400,21 @@ CREATE TABLE [security].[AccessControlAudit] (
       .input('StateJson', sql.NVarChar(sql.MAX), JSON.stringify(legacy))
       .query(`INSERT [security].[AccessControlState] ([StateKey],[StateJson]) VALUES (@StateKey,@StateJson)`);
   }
-  return pool;
+};
+
+const db = async () => {
+  if (!dbReady) {
+    dbReady = (async () => {
+      const pool = await getDleEnterpriseDbPool();
+      if (!pool) throw new Error('DLE Enterprise database is not configured. Access Control Centre data must be stored in the database.');
+      await ensureAccessControlSchema(pool);
+      return pool;
+    })().catch((error) => {
+      dbReady = null;
+      throw error;
+    });
+  }
+  return dbReady;
 };
 
 const normalizeState = (state: AccessControlState): AccessControlState => ({
@@ -407,12 +427,17 @@ const normalizeState = (state: AccessControlState): AccessControlState => ({
 });
 
 const readState = async () => {
+  const now = Date.now();
+  if (cachedAccessState && cachedAccessState.expiresAt > now) return cachedAccessState.state;
+
   const pool = await db();
   const result = await pool.request()
     .input('StateKey', sql.NVarChar(120), ACCESS_STATE_KEY)
     .query(`SELECT [StateJson] FROM [security].[AccessControlState] WHERE [StateKey]=@StateKey`);
   const state = result.recordset[0]?.StateJson ? JSON.parse(result.recordset[0].StateJson) as AccessControlState : defaultState();
-  return normalizeState(state);
+  const normalized = normalizeState(state);
+  cachedAccessState = { state: normalized, expiresAt: now + ACCESS_STATE_CACHE_MS };
+  return normalized;
 };
 
 const writeState = async (state: AccessControlState) => {
@@ -425,6 +450,7 @@ MERGE [security].[AccessControlState] AS target
 USING (SELECT @StateKey AS [StateKey]) AS source ON target.[StateKey]=source.[StateKey]
 WHEN MATCHED THEN UPDATE SET [StateJson]=@StateJson,[UpdatedAt]=SYSUTCDATETIME()
 WHEN NOT MATCHED THEN INSERT ([StateKey],[StateJson]) VALUES (@StateKey,@StateJson);`);
+  invalidateAccessControlStateCache();
 };
 
 const isProtectedPermission = (permission: string) => permission === '*' || ['admin.roles', 'admin.users', 'audit', 'security'].some((prefix) => permission === `${prefix}.*` || permission.startsWith(`${prefix}.`));
@@ -463,11 +489,14 @@ export const effectivePermissionsForRoles = async (roles: string[]) => {
 export const effectivePermissionsForUser = async (userId: string, roles: string[]) => {
   if (roles.includes('Super Administrator') || userId === 'global-admin') return ['*'];
   const state = await readState();
-  const base = await effectivePermissionsForRoles(roles);
+  const base = permissionsForRoles(roles);
+  const roleGrants = state.published
+    .filter((item) => item.subjectType === 'role' && roles.includes(item.subjectId) && item.status === 'published')
+    .flatMap((item) => item.permissions);
   const userGrants = state.published
     .filter((item) => item.subjectType === 'user' && item.subjectId === userId && item.status === 'published')
     .flatMap((item) => item.permissions);
-  return unique([...base, ...userGrants]);
+  return unique([...base, ...roleGrants, ...userGrants]);
 };
 
 export const saveAccessAssignment = async (

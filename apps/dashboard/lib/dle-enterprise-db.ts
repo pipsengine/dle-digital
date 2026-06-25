@@ -349,8 +349,8 @@ const config = (): sql.config | null => {
     },
     pool: {
       max: Number(process.env.DLE_ENTERPRISE_DB_POOL_MAX || 10),
-      min: 0,
-      idleTimeoutMillis: Number(process.env.DLE_ENTERPRISE_DB_POOL_IDLE_TIMEOUT_MS || 30000),
+      min: Number(process.env.DLE_ENTERPRISE_DB_POOL_MIN || 2),
+      idleTimeoutMillis: Number(process.env.DLE_ENTERPRISE_DB_POOL_IDLE_TIMEOUT_MS || 120000),
     },
     requestTimeout: Number(process.env.DLE_ENTERPRISE_DB_REQUEST_TIMEOUT_MS || 60000),
     connectionTimeout: Number(process.env.DLE_ENTERPRISE_DB_CONNECTION_TIMEOUT_MS || 20000),
@@ -802,10 +802,25 @@ export const findEmployeeDuplicatesInDb = async (payload: any): Promise<Duplicat
   ];
 };
 
-export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirectoryRow[] | null> => {
-  const p = await pool();
-  if (!p) return null;
-  const rs = await p.request().query(`
+const DIRECTORY_EMPLOYEE_FROM_SQL = `
+    FROM [hris].[EmployeeMasterView] v
+    LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = v.employee_id
+    LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = v.employee_id
+    LEFT JOIN [hris].[EmployeeContactInfo] contact ON contact.employee_id = v.employee_id
+    LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = v.employee_id
+    LEFT JOIN [hris].[EmployeePayrollSetup] payroll ON payroll.employee_id = v.employee_id
+    LEFT JOIN (
+      SELECT employee_id, COUNT_BIG(*) AS emergency_contact_count
+      FROM [hris].[EmployeeEmergencyContacts]
+      GROUP BY employee_id
+    ) ec ON ec.employee_id = v.employee_id
+    LEFT JOIN (
+      SELECT employee_id, COUNT_BIG(*) AS document_count
+      FROM [hris].[EmployeeDocuments]
+      GROUP BY employee_id
+    ) doc ON doc.employee_id = v.employee_id`;
+
+const DIRECTORY_EMPLOYEE_SELECT_SQL = `
     SELECT
       v.employee_id,
       v.employee_code,
@@ -881,144 +896,176 @@ export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirector
       payroll.hours_per_day,
       payroll.hours_per_period,
       payroll.setup_assigned_to_payroll,
-      ec.emergency_contact_count,
-      doc.document_count,
+      ISNULL(ec.emergency_contact_count, 0) AS emergency_contact_count,
+      ISNULL(doc.document_count, 0) AS document_count,
       CASE
         WHEN pinfo.photo_data IS NOT NULL AND DATALENGTH(pinfo.photo_data) > 0 THEN 1
         WHEN pinfo.photo_size_bytes IS NOT NULL AND pinfo.photo_size_bytes > 0 THEN 1
         ELSE 0
       END AS has_photo
-    FROM [hris].[EmployeeMasterView] v
-    LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = v.employee_id
-    LEFT JOIN [hris].[EmployeePersonalInfo] pinfo ON pinfo.employee_id = v.employee_id
-    LEFT JOIN [hris].[EmployeeContactInfo] contact ON contact.employee_id = v.employee_id
-    LEFT JOIN [hris].[EmployeeEmploymentInfo] emp ON emp.employee_id = v.employee_id
-    LEFT JOIN [hris].[EmployeePayrollSetup] payroll ON payroll.employee_id = v.employee_id
-    OUTER APPLY (
-      SELECT COUNT_BIG(*) AS emergency_contact_count
-      FROM [hris].[EmployeeEmergencyContacts] c
-      WHERE c.employee_id = v.employee_id
-    ) ec
-    OUTER APPLY (
-      SELECT COUNT_BIG(*) AS document_count
-      FROM [hris].[EmployeeDocuments] d
-      WHERE d.employee_id = v.employee_id
-    ) doc
-    ORDER BY v.employee_code;
-  `);
+    ${DIRECTORY_EMPLOYEE_FROM_SQL}`;
 
-  return (rs.recordset || []).map((row: any) => {
-    const rawEmployeeCode = str(row.employee_code);
-    const rawEmploymentType = str(row.employment_type) || 'Not assigned';
-    const typeCode = employeeTypeCodeFromRawCode(rawEmployeeCode) || inferEmployeeTypeCode(rawEmploymentType, row.staff_category, row.employee_category, row.job_title);
-    const employeeCode = normalizeEmployeeCodeForType(rawEmployeeCode, typeCode);
-    const employmentType = typeCode === 'N' ? 'NYSC' : typeCode === 'I' ? 'IT' : rawEmploymentType;
-    const status = str(row.employment_status) || 'Inactive';
-    const workMode = str(row.work_mode);
-    const workLocation = str(row.work_location);
-    const officeLocation = str(row.office_location);
-    const projectSite = str(row.project_site);
-    const nationality = str(row.nationality) || 'Not recorded';
-    const emergencyContactCount = Number(row.emergency_contact_count || 0);
-    const documentCount = Number(row.document_count || 0);
-    const contractEndDate = isoDate(row.contract_end_date);
-    const missingProfileBits = [row.official_email, row.primary_phone, row.date_joined, row.reporting_manager].filter((x) => !str(x)).length;
-    const aiRiskScore = Math.min(95, missingProfileBits * 18 + (emergencyContactCount === 0 ? 18 : 0) + (documentCount === 0 ? 12 : 0));
+const mapDirectoryEmployeeRow = (row: any): DleEmployeeDirectoryRow => {
+  const rawEmployeeCode = str(row.employee_code);
+  const rawEmploymentType = str(row.employment_type) || 'Not assigned';
+  const typeCode = employeeTypeCodeFromRawCode(rawEmployeeCode) || inferEmployeeTypeCode(rawEmploymentType, row.staff_category, row.employee_category, row.job_title);
+  const employeeCode = normalizeEmployeeCodeForType(rawEmployeeCode, typeCode);
+  const employmentType = typeCode === 'N' ? 'NYSC' : typeCode === 'I' ? 'IT' : rawEmploymentType;
+  const status = str(row.employment_status) || 'Inactive';
+  const workMode = str(row.work_mode);
+  const workLocation = str(row.work_location);
+  const officeLocation = str(row.office_location);
+  const projectSite = str(row.project_site);
+  const nationality = str(row.nationality) || 'Not recorded';
+  const emergencyContactCount = Number(row.emergency_contact_count || 0);
+  const documentCount = Number(row.document_count || 0);
+  const contractEndDate = isoDate(row.contract_end_date);
+  const missingProfileBits = [row.official_email, row.primary_phone, row.date_joined, row.reporting_manager].filter((x) => !str(x)).length;
+  const aiRiskScore = Math.min(95, missingProfileBits * 18 + (emergencyContactCount === 0 ? 18 : 0) + (documentCount === 0 ? 12 : 0));
 
-    return {
-      id: employeeCode,
-      employeeId: employeeCode,
-      employeeCode,
-      employeeDbId: Number(row.employee_id),
-      fullName: composedEmployeeFullName(row, employeeCode),
-      preferredName: str(row.preferred_name) || undefined,
-      title: str(row.title),
-      firstName: str(row.first_name),
-      middleName: str(row.middle_name),
-      lastName: str(row.last_name),
-      gender: str(row.gender),
-      dateOfBirth: isoDate(row.date_of_birth),
-      maritalStatus: str(row.marital_status),
-      email: str(row.official_email),
-      officialEmail: str(row.official_email),
-      personalEmail: str(row.personal_email),
-      phone: str(row.primary_phone),
-      primaryPhone: str(row.primary_phone),
-      alternatePhone: str(row.alternate_phone),
-      officeExtension: str(row.office_extension),
-      residentialAddress: str(row.residential_address),
-      permanentAddress: str(row.permanent_address),
-      city: str(row.city),
-      state: str(row.state),
-      country: str(row.country),
-      postalCode: str(row.postal_code),
-      jobTitle: str(row.job_title) || 'Unassigned Job Title',
-      designation: str(row.designation),
-      jobGrade: str(row.job_grade),
-      department: str(row.department) || 'Unassigned Department',
-      division: str(row.division) || 'Unassigned Division',
-      businessUnit: str(row.business_unit) || 'Unassigned Business Unit',
-      costCenter: str(row.cost_center),
-      managerName: str(row.reporting_manager) || undefined,
-      functionalManager: str(row.functional_manager) || undefined,
-      departmentHead: str(row.department_head) || undefined,
-      hrBusinessPartner: str(row.hr_business_partner) || undefined,
-      location: officeLocation || workLocation || 'Unassigned Location',
-      workLocation,
-      officeLocation,
-      projectSite: projectSite || undefined,
-      shift: (['Day', 'Night', 'Rotational'].includes(str(row.shift_pattern)) ? str(row.shift_pattern) : undefined) as DleEmployeeDirectoryRow['shift'],
-      staffCategory: str(row.staff_category),
-      employeeCategory: str(row.employee_category),
-      employmentType,
-      status,
-      nationality,
-      expatriate: str(row.expatriate_status).toLowerCase() === 'expatriate' && !isLocalNationality(nationality),
-      fieldWorker: Boolean(projectSite) || ['Daily Rate', 'Lumpsum'].includes(employmentType),
-      remoteWorker: workMode.toLowerCase() === 'remote',
-      dateJoined: isoDate(row.date_joined),
-      probationStartDate: isoDate(row.probation_start_date),
-      probationEndDate: isoDate(row.probation_end_date),
-      confirmationDueDate: isoDate(row.confirmation_due_date),
-      contractStartDate: isoDate(row.contract_start_date),
-      yearsOfService: yearsSince(row.date_joined),
-      contractEndDate: contractEndDate || undefined,
-      emergencyContactsComplete: emergencyContactCount > 0,
-      emergencyContactCount,
-      documentCount,
-      hasManagerAssigned: Boolean(str(row.reporting_manager)),
-      hasPhoto: Number(row.has_photo || 0) === 1,
-      payrollSource: 'DLE_Enterprise HRIS',
-      payrollGroup: str(row.payroll_group),
-      salaryGrade: str(row.salary_grade),
-      benefitGroup: str(row.benefit_group),
-      payCurrency: str(row.pay_currency),
-      paymentRun: str(row.payment_run),
-      paymentType: str(row.payment_type),
-      bankName: str(row.bank_name),
-      bankCode: str(row.bank_code),
-      branchName: str(row.branch_name),
-      branchCode: str(row.branch_code),
-      accountNo: str(row.account_number),
-      accountName: str(row.account_name),
-      pensionProvider: str(row.pension_provider),
-      pensionPin: str(row.pension_pin),
-      taxIdentificationNumber: str(row.tax_identification_number),
-      periodSalary: Number(row.period_salary || 0) || null,
-      annualSalary: Number(row.annual_salary || 0) || null,
-      ratePerHour: Number(row.rate_per_hour || 0) || null,
-      ratePerDay: Number(row.rate_per_day || 0) || null,
-      hoursPerDay: Number(row.hours_per_day || 0) || null,
-      hoursPerPeriod: Number(row.hours_per_period || 0) || null,
-      setupAssignedToPayroll: Boolean(row.setup_assigned_to_payroll),
-      sourceSystem: 'DLE_Enterprise HRIS',
-      sourceEmployeeId: '',
-      createdAt: isoDateTime(row.created_at),
-      modifiedAt: isoDateTime(row.modified_at),
-      aiRiskScore,
-      trainingCompliance: aiRiskScore >= 70 ? 'Overdue' : aiRiskScore >= 40 ? 'At Risk' : 'Compliant',
-    };
-  });
+  return {
+    id: employeeCode,
+    employeeId: employeeCode,
+    employeeCode,
+    employeeDbId: Number(row.employee_id),
+    fullName: composedEmployeeFullName(row, employeeCode),
+    preferredName: str(row.preferred_name) || undefined,
+    title: str(row.title),
+    firstName: str(row.first_name),
+    middleName: str(row.middle_name),
+    lastName: str(row.last_name),
+    gender: str(row.gender),
+    dateOfBirth: isoDate(row.date_of_birth),
+    maritalStatus: str(row.marital_status),
+    email: str(row.official_email),
+    officialEmail: str(row.official_email),
+    personalEmail: str(row.personal_email),
+    phone: str(row.primary_phone),
+    primaryPhone: str(row.primary_phone),
+    alternatePhone: str(row.alternate_phone),
+    officeExtension: str(row.office_extension),
+    residentialAddress: str(row.residential_address),
+    permanentAddress: str(row.permanent_address),
+    city: str(row.city),
+    state: str(row.state),
+    country: str(row.country),
+    postalCode: str(row.postal_code),
+    jobTitle: str(row.job_title) || 'Unassigned Job Title',
+    designation: str(row.designation),
+    jobGrade: str(row.job_grade),
+    department: str(row.department) || 'Unassigned Department',
+    division: str(row.division) || 'Unassigned Division',
+    businessUnit: str(row.business_unit) || 'Unassigned Business Unit',
+    costCenter: str(row.cost_center),
+    managerName: str(row.reporting_manager) || undefined,
+    functionalManager: str(row.functional_manager) || undefined,
+    departmentHead: str(row.department_head) || undefined,
+    hrBusinessPartner: str(row.hr_business_partner) || undefined,
+    location: officeLocation || workLocation || 'Unassigned Location',
+    workLocation,
+    officeLocation,
+    projectSite: projectSite || undefined,
+    shift: (['Day', 'Night', 'Rotational'].includes(str(row.shift_pattern)) ? str(row.shift_pattern) : undefined) as DleEmployeeDirectoryRow['shift'],
+    staffCategory: str(row.staff_category),
+    employeeCategory: str(row.employee_category),
+    employmentType,
+    status,
+    nationality,
+    expatriate: str(row.expatriate_status).toLowerCase() === 'expatriate' && !isLocalNationality(nationality),
+    fieldWorker: Boolean(projectSite) || ['Daily Rate', 'Lumpsum'].includes(employmentType),
+    remoteWorker: workMode.toLowerCase() === 'remote',
+    dateJoined: isoDate(row.date_joined),
+    probationStartDate: isoDate(row.probation_start_date),
+    probationEndDate: isoDate(row.probation_end_date),
+    confirmationDueDate: isoDate(row.confirmation_due_date),
+    contractStartDate: isoDate(row.contract_start_date),
+    yearsOfService: yearsSince(row.date_joined),
+    contractEndDate: contractEndDate || undefined,
+    emergencyContactsComplete: emergencyContactCount > 0,
+    emergencyContactCount,
+    documentCount,
+    hasManagerAssigned: Boolean(str(row.reporting_manager)),
+    hasPhoto: Number(row.has_photo || 0) === 1,
+    payrollSource: 'DLE_Enterprise HRIS',
+    payrollGroup: str(row.payroll_group),
+    salaryGrade: str(row.salary_grade),
+    benefitGroup: str(row.benefit_group),
+    payCurrency: str(row.pay_currency),
+    paymentRun: str(row.payment_run),
+    paymentType: str(row.payment_type),
+    bankName: str(row.bank_name),
+    bankCode: str(row.bank_code),
+    branchName: str(row.branch_name),
+    branchCode: str(row.branch_code),
+    accountNo: str(row.account_number),
+    accountName: str(row.account_name),
+    pensionProvider: str(row.pension_provider),
+    pensionPin: str(row.pension_pin),
+    taxIdentificationNumber: str(row.tax_identification_number),
+    periodSalary: Number(row.period_salary || 0) || null,
+    annualSalary: Number(row.annual_salary || 0) || null,
+    ratePerHour: Number(row.rate_per_hour || 0) || null,
+    ratePerDay: Number(row.rate_per_day || 0) || null,
+    hoursPerDay: Number(row.hours_per_day || 0) || null,
+    hoursPerPeriod: Number(row.hours_per_period || 0) || null,
+    setupAssignedToPayroll: Boolean(row.setup_assigned_to_payroll),
+    sourceSystem: 'DLE_Enterprise HRIS',
+    sourceEmployeeId: '',
+    createdAt: isoDateTime(row.created_at),
+    modifiedAt: isoDateTime(row.modified_at),
+    aiRiskScore,
+    trainingCompliance: aiRiskScore >= 70 ? 'Overdue' : aiRiskScore >= 40 ? 'At Risk' : 'Compliant',
+  };
+};
+
+export const readEmployeeFromDbByCode = async (employeeCode: string): Promise<DleEmployeeDirectoryRow | null> => {
+  const code = str(employeeCode);
+  if (!code) return null;
+  const p = await pool();
+  if (!p) return null;
+  const rs = await p.request()
+    .input('employee_code', sql.NVarChar(50), code)
+    .query(`${DIRECTORY_EMPLOYEE_SELECT_SQL}
+    WHERE v.employee_code = @employee_code`);
+  const row = rs.recordset?.[0];
+  return row ? mapDirectoryEmployeeRow(row) : null;
+};
+
+export const countDirectReportsFromDb = async (employee: Pick<DleEmployeeDirectoryRow, 'fullName' | 'employeeCode'>) => {
+  const code = str(employee.employeeCode);
+  const fullName = str(employee.fullName);
+  if (!code && !fullName) return 0;
+  const p = await pool();
+  if (!p) return 0;
+  const rs = await p.request()
+    .input('employee_code', sql.NVarChar(50), code)
+    .input('full_name', sql.NVarChar(200), fullName)
+    .query(`
+      SELECT COUNT_BIG(1) AS team_size
+      FROM [hris].[EmployeeMasterView] v
+      LEFT JOIN [hris].[EmployeeJobInfo] j ON j.employee_id = v.employee_id
+      WHERE (@employee_code = '' OR v.employee_code <> @employee_code)
+        AND ISNULL(v.employment_status, '') NOT LIKE '%terminated%'
+        AND ISNULL(v.employment_status, '') NOT LIKE '%resigned%'
+        AND ISNULL(v.employment_status, '') NOT LIKE '%retired%'
+        AND ISNULL(v.employment_status, '') NOT LIKE '%inactive%'
+        AND ISNULL(v.employment_status, '') NOT LIKE '%deceased%'
+        AND ISNULL(v.employment_status, '') NOT LIKE '%suspend%'
+        AND (
+          (@full_name <> '' AND v.reporting_manager = @full_name)
+          OR (@employee_code <> '' AND v.reporting_manager = @employee_code)
+          OR (@full_name <> '' AND j.functional_manager = @full_name)
+          OR (@full_name <> '' AND j.department_head = @full_name)
+        )`);
+  return Number(rs.recordset[0]?.team_size || 0);
+};
+
+export const readEmployeeDirectoryFromDb = async (): Promise<DleEmployeeDirectoryRow[] | null> => {
+  const p = await pool();
+  if (!p) return null;
+  const rs = await p.request().query(`${DIRECTORY_EMPLOYEE_SELECT_SQL}
+    ORDER BY v.employee_code`);
+  return (rs.recordset || []).map(mapDirectoryEmployeeRow);
 };
 
 const contractTypeFromEmployment = (employmentType: string, jobTitle: string, staffCategory: string) => {

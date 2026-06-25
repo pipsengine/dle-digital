@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
-import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { countDirectReportsFromDb, readEmployeeFromDbByCode } from '@/lib/dle-enterprise-db';
+import { payrollDataSourceInfo, readDirectoryEmployees } from '@/lib/payroll-employee-source';
 import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { listEnterpriseNotifications } from '@/lib/enterprise-notifications-store';
 
@@ -90,23 +91,6 @@ const profileHref = (context: CurrentUserContext, employee: DleEmployeeDirectory
   return context === 'hris' ? '/hris/employees/employee-profile' : '/dashboard';
 };
 
-const sameIdentity = (a: unknown, b: unknown) => normalize(a) && normalize(a) === normalize(b);
-
-const isActiveEmployee = (employee: DleEmployeeDirectoryRow) => !normalize(employee.status).match(/terminated|resigned|retired|inactive|deceased|suspended/);
-
-const teamMembersFor = (employees: DleEmployeeDirectoryRow[], employee: DleEmployeeDirectoryRow | null) => {
-  if (!employee) return [];
-  return employees.filter((row) => {
-    if (sameIdentity(row.employeeCode, employee.employeeCode) || sameIdentity(row.employeeId, employee.employeeId)) return false;
-    return (
-      sameIdentity(row.managerName, employee.fullName) ||
-      sameIdentity(row.managerName, employee.employeeCode) ||
-      sameIdentity(row.functionalManager, employee.fullName) ||
-      sameIdentity(row.departmentHead, employee.fullName)
-    );
-  });
-};
-
 const availabilityStatus = (employee: DleEmployeeDirectoryRow | null) => {
   const status = normalize(employee?.status);
   if (status.includes('leave')) return 'On Leave';
@@ -141,7 +125,20 @@ export async function GET(request: Request) {
   const session = await verifySessionToken(token);
   const notificationCount = session ? await listEnterpriseNotifications(session, 'all').then((result) => result.counts.unread).catch(() => 0) : 0;
 
-  const employeeSource = await readPayrollEmployees();
+  const sessionIdentities = [session?.employeeCode, session?.employeeId, session?.username, session?.fullName].filter(Boolean) as string[];
+  const configuredIdentities = session ? sessionIdentities : configuredEmployeeIdentities(request, context);
+  const lookupCode = compact(session?.employeeCode || session?.employeeId);
+
+  let employee: DleEmployeeDirectoryRow | null = lookupCode ? await readEmployeeFromDbByCode(lookupCode) : null;
+  let employeeSource = employee
+    ? { employees: [employee], source: 'DLE_Enterprise HRIS' as const, databaseAvailable: true, warning: null }
+    : null;
+
+  if (!employee) {
+    employeeSource = await readDirectoryEmployees();
+    employee = findEmployee(employeeSource.employees, configuredIdentities);
+  }
+
   if (session?.isGlobalAdmin) {
     return NextResponse.json({
       status: 'success',
@@ -167,20 +164,15 @@ export async function GET(request: Request) {
         rbacRole: 'Super Administrator',
         linked: false,
         source: 'application-level-global-admin',
-        employeeSource: payrollDataSourceInfo(employeeSource),
+        employeeSource: payrollDataSourceInfo(employeeSource || { employees: [], source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null }),
       },
     });
   }
 
-  const sessionIdentities = [session?.employeeCode, session?.employeeId, session?.username, session?.fullName].filter(Boolean) as string[];
-  const configuredIdentities = session ? sessionIdentities : configuredEmployeeIdentities(request, context);
-  const configuredEmployee = findEmployee(employeeSource.employees, configuredIdentities);
-  const employee = configuredEmployee;
   const linked = Boolean(employee);
-  const teamMembers = teamMembersFor(employeeSource.employees, employee);
-  const activeTeamMembers = teamMembers.filter(isActiveEmployee);
-  const role = employee ? rbacRole(employee, teamMembers.length) : session?.roles?.[0] || 'Employee';
-  const pendingApprovals = role === 'Employee' || activeTeamMembers.length === 0 ? 0 : Math.min(24, Math.ceil(activeTeamMembers.length / 4));
+  const activeTeamSize = employee ? await countDirectReportsFromDb(employee) : 0;
+  const role = employee ? rbacRole(employee, activeTeamSize) : session?.roles?.[0] || 'Employee';
+  const pendingApprovals = role === 'Employee' || activeTeamSize === 0 ? 0 : Math.min(24, Math.ceil(activeTeamSize / 4));
   const sessionCode = compact(session?.employeeCode || session?.employeeId || session?.username);
   const sessionRole = compact(session?.roles?.[0]) || 'Signed-in User';
   const sessionDepartment = compact(session?.department || session?.unit) || 'Application Access';
@@ -206,11 +198,11 @@ export async function GET(request: Request) {
       onlineStatus: employee ? (availabilityStatus(employee) === 'Online' ? 'Online' : 'Offline') : 'Online',
       notificationCount,
       pendingApprovals,
-      teamSize: activeTeamMembers.length,
+      teamSize: activeTeamSize,
       rbacRole: role,
       linked,
-      source: linked ? employeeSource.source : 'unlinked',
-      employeeSource: payrollDataSourceInfo(employeeSource),
+      source: linked ? (employeeSource?.source || 'DLE_Enterprise HRIS') : 'unlinked',
+      employeeSource: payrollDataSourceInfo(employeeSource || { employees: employee ? [employee] : [], source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null }),
     },
   });
 }

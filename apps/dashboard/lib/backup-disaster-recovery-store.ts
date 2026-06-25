@@ -19,7 +19,10 @@ const SEEDED_QUEUE_JOBS = new Set(['Transaction Log Backup', 'Health Probe', 'Do
 const SEEDED_RESTORE_CONTROLS = new Set(['Full database restore drill', 'Document repository recovery', 'Configuration rollback package', 'RPO / RTO status']);
 const SEEDED_REPLICATION_LOCATIONS = new Set(['D:\\DLE_Backups', '\\\\BackupServer\\DLEConnect', '\\\\DRServer\\DLEConnect', 'Azure Blob Storage']);
 
+let schemaReady = false;
+
 const ensureSchema = async (pool: sql.ConnectionPool) => {
+  if (schemaReady) return;
   await pool.request().query(`
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'admin')
   EXEC(N'CREATE SCHEMA [admin]');
@@ -36,6 +39,7 @@ BEGIN
   );
 END;
 `);
+  schemaReady = true;
 };
 
 const normalizeState = (value: unknown): BackupDisasterRecoveryState => {

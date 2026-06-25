@@ -116,6 +116,12 @@ type Payload = {
   };
   attendance: { records: SimpleRecord[]; shifts: SimpleRecord[]; timesheets: SimpleRecord[] };
   payrollHistory: PayrollHistoryRow[];
+  payrollAccess?: {
+    currentPeriod: string;
+    currentPeriodReleased: boolean;
+    releasedPeriodCount: number;
+    message: string;
+  };
   performance: { goals: SimpleRecord[]; kpis: SimpleRecord[]; reviews: SimpleRecord[]; developmentPlans: SimpleRecord[] };
   learning: { courses: SimpleRecord[]; materials: SimpleRecord[]; certifications: SimpleRecord[] };
   claims: SimpleRecord[];
@@ -409,7 +415,15 @@ function PayslipWorkspace({ payload, employee }: { payload: Payload | null; empl
   }, [periods, selectedPeriod]);
 
   if (!selected) {
-    return <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-500">No payslip is available.</div>;
+    const pendingMessage = payload?.payrollAccess?.message
+      || 'No payslip is available yet. Payslips are published here only after payroll approval and release.';
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+        <LockKeyhole className="mx-auto h-8 w-8 text-amber-600" />
+        <p className="mt-3 text-sm font-extrabold text-amber-950">Payslip not yet released</p>
+        <p className="mt-2 text-sm font-semibold leading-6 text-amber-900">{pendingMessage}</p>
+      </div>
+    );
   }
 
   const info = selected.employeeInfo || {};
@@ -1302,7 +1316,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
             <section className="space-y-4">
               <Section title="Payroll Self-Service">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <MetricCard label="Gross Pay" value={money(widgets.payroll.monthlyPay)} detail="Current month" icon={Banknote} tone="bg-violet-100 text-violet-700" />
+                  <MetricCard label="Gross Pay" value={money(widgets.payroll.monthlyPay)} detail={payload?.payrollAccess?.currentPeriodReleased ? 'Latest released payslip' : 'Awaiting payroll release'} icon={Banknote} tone="bg-violet-100 text-violet-700" />
                   <MetricCard label="Allowances" value={money(widgets.payroll.allowances)} detail="Payroll configured" icon={WalletCards} tone="bg-emerald-100 text-emerald-700" />
                   <MetricCard label="Tax / Deductions" value={money(widgets.payroll.deductions)} detail="PAYE and statutory deductions" icon={FileText} tone="bg-amber-100 text-amber-700" />
                   <MetricCard label="Pension" value={money(widgets.payroll.pension)} detail="Employee contribution" icon={Landmark} tone="bg-cyan-100 text-cyan-700" />

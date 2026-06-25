@@ -58,7 +58,9 @@ const dailyWorkingDays = (hoursPerDay: number, hoursPerPeriod: unknown) => {
   return Number.isFinite(periodHours) && periodHours > 0 && hoursPerDay > 0 ? periodHours / hoursPerDay : 22;
 };
 loadWorkspaceEnv();
-const EMPLOYEE_SOURCE_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_CACHE_MS || 60000);
+const SAGE_PAYROLL_ENRICH_ENABLED = !['0', 'false', 'no', 'off'].includes(String(process.env.HRIS_SAGE_PAYROLL_ENRICH ?? 'false').toLowerCase());
+const EMPLOYEE_SOURCE_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_CACHE_MS || 120000);
+const DIRECTORY_SOURCE_CACHE_MS = Number(process.env.HRIS_DIRECTORY_CACHE_MS || 300000);
 const EMPLOYEE_SOURCE_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_STALE_MS || 900000);
 const EMPLOYEE_SOURCE_FALLBACK_CACHE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_CACHE_MS || 10000);
 const EMPLOYEE_SOURCE_FALLBACK_STALE_MS = Number(process.env.HRIS_EMPLOYEE_SOURCE_FALLBACK_STALE_MS || 60000);
@@ -73,7 +75,7 @@ const loadDirectoryEmployees = async (): Promise<PayrollEmployeeSource> => {
     const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
     if (employees && employees.length >= MIN_HRIS_EMPLOYEES) {
       const directoryEmployees = employees.filter((employee) => ![employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].some(isTemporaryPfCode) && !isExcludedFromHrisPayroll(employee));
-      const enriched = markInactiveNonDailyContractEmployees(await enrichEmployeesFromSagePayroll(directoryEmployees));
+      const enriched = markInactiveNonDailyContractEmployees(directoryEmployees);
       return {
         employees: (await applyPayrollEmployeeOptions(enriched)).map((employee) => withContractPayrollClassification(employee)),
         source: 'DLE_Enterprise HRIS',
@@ -113,8 +115,11 @@ export const readDirectoryEmployees = async (): Promise<PayrollEmployeeSource> =
   if (directorySourceCache?.value && directorySourceCache.expiresAt > now) return directorySourceCache.value;
   if (directorySourceCache?.pending) return directorySourceCache.pending;
   const pending = loadDirectoryEmployees().then((value) => {
-    const window = cacheWindow(value);
-    directorySourceCache = { value, expiresAt: Date.now() + window.expiresIn, staleUntil: Date.now() + window.staleFor };
+    directorySourceCache = {
+      value,
+      expiresAt: Date.now() + DIRECTORY_SOURCE_CACHE_MS,
+      staleUntil: Date.now() + DIRECTORY_SOURCE_CACHE_MS,
+    };
     return value;
   });
   directorySourceCache = { value: directorySourceCache?.value, expiresAt: 0, staleUntil: 0, pending };
@@ -209,6 +214,11 @@ const sageLineItems = (raw: string | null | undefined) => {
   } catch {
     return [];
   }
+};
+
+const maybeEnrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
+  if (!SAGE_PAYROLL_ENRICH_ENABLED) return employees;
+  return enrichEmployeesFromSagePayroll(employees);
 };
 
 const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
@@ -420,7 +430,7 @@ const loadPayrollEmployees = async (): Promise<PayrollEmployeeSource> => {
     const employees = await withTimeout(readEmployeeDirectoryFromDb(), EMPLOYEE_SOURCE_DB_TIMEOUT_MS, 'DLE_Enterprise HRIS employee source timed out.');
     if (employees && employees.length >= MIN_HRIS_EMPLOYEES) {
       const payrollEmployees = employees.filter((employee) => ![employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].some(isTemporaryPfCode) && !isExcludedFromHrisPayroll(employee));
-      const activePayrollEmployees = payrollActiveEmployees(await enrichEmployeesFromSagePayroll(payrollEmployees));
+      const activePayrollEmployees = payrollActiveEmployees(await maybeEnrichEmployeesFromSagePayroll(payrollEmployees));
       return { employees: await applyPayrollEmployeeOptions(activePayrollEmployees), source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null };
     }
     if (REQUIRE_HRIS_DB) {

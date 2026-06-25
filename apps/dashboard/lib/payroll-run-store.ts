@@ -389,6 +389,27 @@ export const listPayrollRuns = async () => {
   return [...state.runs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 };
 
+export const PAYROLL_ESS_RELEASED_STATUSES: UnifiedPayrollRunStatus[] = ['Released', 'Locked', 'Posted', 'Published', 'Closed'];
+
+export const isPayrollRunReleasedForEmployeeAccess = (run: UnifiedPayrollRun | null | undefined) => {
+  if (!run) return false;
+  if (run.releasedAt) return true;
+  return PAYROLL_ESS_RELEASED_STATUSES.includes(run.status);
+};
+
+export const listEmployeeAccessiblePayrollPeriods = async (limit = 24) => {
+  const runs = await listPayrollRuns();
+  const seen = new Set<string>();
+  const periods: string[] = [];
+  for (const run of runs) {
+    if (!isPayrollRunReleasedForEmployeeAccess(run)) continue;
+    if (!run.period || seen.has(run.period)) continue;
+    seen.add(run.period);
+    periods.push(run.period);
+  }
+  return periods.sort((a, b) => b.localeCompare(a)).slice(0, limit);
+};
+
 export const getPayrollRun = async (runId: string) => {
   const pool = await getDleEnterpriseDbPool();
   if (pool) {

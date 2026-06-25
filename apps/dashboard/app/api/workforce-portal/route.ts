@@ -11,6 +11,7 @@ import { activePensionVersion, calculatePension, pensionInputFromEmployee, readP
 import { hasLeaveAllowanceInYear } from '@/lib/payroll-leave-allowance-store';
 import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
+import { listEmployeeAccessiblePayrollPeriods } from '@/lib/payroll-run-store';
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
@@ -316,7 +317,7 @@ export async function GET(request: Request) {
         grossPay: earnings.grossPay,
         deductions,
         netPay: roundMoney(Math.max(0, earnings.grossPay - deductions)),
-        status: period === '2026-05' ? 'Downloaded' : 'Available',
+        status: 'Released',
         earnings: earnings.paidEarningLines.map((line) => ({ code: line.code, label: line.name, units: line.amount > 0 ? 1 : 0, amount: line.amount, taxable: line.taxable })),
         deductionLines: [
           { code: 'PAYE', label: 'PAYE Tax', units: paye > 0 ? 1 : 0, amount: paye },
@@ -371,7 +372,7 @@ export async function GET(request: Request) {
         verification: {
           qrCode: `DLE|${employee.employeeId}|${period}|${roundMoney(Math.max(0, earnings.grossPay - deductions))}`,
           generatedAt: new Date().toISOString(),
-          approvalStatus: 'Payroll Approved',
+          approvalStatus: 'Payroll Released',
         },
       };
     };
@@ -411,10 +412,10 @@ export async function GET(request: Request) {
     const carryForward = 0;
     const annualBalance = Math.max(0, annualEntitlement - leaveUsed - pendingAnnualLeave);
     leaveContext = { annualEntitlement, leaveUsed, leaveBalance: annualBalance, carryForward };
-    const currentPayroll = payrollForPeriod(ESS_CURRENT_PAYROLL_PERIOD);
-    const aprilPayroll = payrollForPeriod('2026-04');
-    const mayPayroll = payrollForPeriod('2026-05', true);
-    const monthlyPay = currentPayroll.grossPay;
+    const releasedPayrollPeriods = await listEmployeeAccessiblePayrollPeriods();
+    const payrollHistory = releasedPayrollPeriods.map((period) => payrollForPeriod(period, true));
+    const latestReleasedPayroll = payrollHistory[0] || null;
+    const currentPeriodReleased = releasedPayrollPeriods.includes(ESS_CURRENT_PAYROLL_PERIOD);
     const sickUsed = employee.employeeDbId % 3;
     const casualUsed = employee.employeeDbId % 2;
     const compassionateUsed = employee.employeeDbId % 2;
@@ -518,19 +519,26 @@ export async function GET(request: Request) {
       widgets: {
         leave: { entitlement: annualEntitlement, used: leaveUsed, balance: annualBalance, pending: requests.filter((item) => item.category === 'Leave' && !['Approved', 'Rejected', 'Terminated', 'Closed'].includes(item.status)).length },
         attendance: { monthRate: attendanceRate, lateArrivals: employee.employeeDbId % 3, overtimeHours: (employee.employeeDbId % 6) * 2, remoteDays: employee.remoteWorker ? 4 : 0 },
-        payroll: { monthlyPay, currency: employee.payCurrency || 'NGN', payslips: 12, deductions: currentPayroll.deductions, pension: currentPayroll.deductionLines.find((line) => line.code === 'PENSION_EMPLOYEE')?.amount || 0, allowances: calculatePayrollEarnings(employee).allowances },
+        payroll: {
+          monthlyPay: latestReleasedPayroll?.grossPay || 0,
+          currency: employee.payCurrency || 'NGN',
+          payslips: payrollHistory.length,
+          deductions: latestReleasedPayroll?.deductions || 0,
+          pension: latestReleasedPayroll?.deductionLines.find((line) => line.code === 'PENSION_EMPLOYEE')?.amount || 0,
+          allowances: latestReleasedPayroll ? calculatePayrollEarnings(employee, { period: latestReleasedPayroll.period, includePeriodAdjustments: true }).allowances : 0,
+        },
         requests: { pending: requests.filter((item) => !['Approved', 'Rejected', 'Closed'].includes(item.status)).length, approved: requests.filter((item) => item.status === 'Approved').length, total: requests.length },
         loans: { applications: employeeLoans.length, outstanding: employeeLoans.reduce((sum, item) => sum + Number(item.outstandingBalance || 0), 0) },
       },
       announcements: [
-        { id: 'ann-001', title: 'May payroll window is open', channel: 'Payroll', publishedAt: dateAdd(-1), priority: 'High' },
+        ...(currentPeriodReleased ? [{ id: 'ann-001', title: `${periodTitle(ESS_CURRENT_PAYROLL_PERIOD)} payslip is now available`, channel: 'Payroll', publishedAt: dateAdd(-1), priority: 'High' }] : []),
         { id: 'ann-002', title: 'Updated HSE handbook published', channel: 'Policy', publishedAt: dateAdd(-5), priority: 'Normal' },
         { id: 'ann-003', title: 'Q3 learning calendar available', channel: 'Learning', publishedAt: dateAdd(-8), priority: 'Normal' },
       ],
       notifications: [
         { id: 'ntf-001', title: 'Leave request awaiting line manager review', type: 'Workflow', status: 'Unread', createdAt: dateAdd(-1) },
         { id: 'ntf-002', title: 'Employee handbook acknowledgement due', type: 'Document', status: 'Unread', createdAt: dateAdd(-2) },
-        { id: 'ntf-003', title: 'May payslip is ready for download', type: 'Payroll', status: 'Read', createdAt: dateAdd(-4) },
+        ...(latestReleasedPayroll ? [{ id: 'ntf-003', title: `${latestReleasedPayroll.periodLabel || periodTitle(latestReleasedPayroll.period)} payslip is ready for download`, type: 'Payroll', status: 'Read', createdAt: dateAdd(-4) }] : []),
       ],
       birthdays: [
         { id: 'bd-001', fullName: 'Olamide Badetan', department: 'Human Resources', date: sampleDate(3) },
@@ -601,11 +609,15 @@ export async function GET(request: Request) {
           { id: 'ts-002', week: 'Previous Week', hours: 42, overtime: 2, status: 'Approved' },
         ],
       },
-      payrollHistory: [
-        currentPayroll,
-        mayPayroll,
-        aprilPayroll,
-      ],
+      payrollHistory,
+      payrollAccess: {
+        currentPeriod: ESS_CURRENT_PAYROLL_PERIOD,
+        currentPeriodReleased,
+        releasedPeriodCount: payrollHistory.length,
+        message: currentPeriodReleased
+          ? ''
+          : `Your ${periodTitle(ESS_CURRENT_PAYROLL_PERIOD)} payslip will appear here after payroll is approved and released by HR/Payroll.`,
+      },
       performance: {
         goals: [
           { id: 'goal-001', title: 'Improve project delivery turnaround', progress: 72, dueDate: sampleDate(45), status: 'On Track' },
