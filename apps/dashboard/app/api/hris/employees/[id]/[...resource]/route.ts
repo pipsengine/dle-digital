@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { readEmployeeContractsFromDb } from '@/lib/dle-enterprise-db';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { readDirectoryEmployees } from '@/lib/payroll-employee-source';
+import { ensureEmployeeLeaveFromSage } from '@/lib/sage-leave-sync';
 import { contractPayrollClassification, type ContractPayrollClassification } from '@/lib/payroll-employee-classification';
 
 type Role =
@@ -195,7 +196,17 @@ type DocumentItem = {
 
 type LeaveSummary = {
   balances: Record<string, number>;
+  balanceDetails?: Array<{
+    leaveType: string;
+    available: number;
+    entitlement: number;
+    used: number;
+    pending: number;
+    carryForward: number;
+  }>;
   history: { id: string; type: string; start: string; end: string; days: number; status: 'Approved' | 'Pending' | 'Rejected' }[];
+  sourceSystem?: string | null;
+  lastUpdatedAt?: string | null;
 };
 
 type AttendanceSummary = {
@@ -2423,6 +2434,8 @@ const valueOrNull = (value?: string | number | boolean | null) => {
   return s ? s : null;
 };
 
+const roundLeaveDays = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+
 const maskAccountNumber = (value?: string | null) => {
   const digits = String(value ?? '').replace(/\D/g, '');
   return digits ? `••••••${digits.slice(-4)}` : null;
@@ -2594,7 +2607,7 @@ const buildDbProfileRecord = (row: DleEmployeeDirectoryRow): EmployeeRecord => {
 
   rec.emergencyContacts = [];
   rec.documents = row.documentCount > 0 ? rec.documents.slice(0, row.documentCount) : [];
-  rec.leaveSummary = { balances: { Annual: 0, Sick: 0, Compassionate: 0 }, history: [] };
+  rec.leaveSummary = { balances: {}, history: [] };
   rec.attendanceSummary = { score: rec.overview.attendanceScore, presentDays: 0, absentDays: 0, lateComing: 0, earlyDeparture: 0, overtimeHours: 0, biometricLogs: [] };
   rec.performanceSummary = { currentRating: '-', lastReviewAt: null, goals: [], managerFeedback: null, aiSignals: [] };
   rec.training = [];
@@ -2629,6 +2642,14 @@ const ensureRecordFromDb = async (employeeId: string) => {
   const found = employeeSource.employees.find((row) => row.employeeCode.toLowerCase() === employeeId.toLowerCase() || row.employeeId.toLowerCase() === employeeId.toLowerCase());
   if (!found) return ensureRecord(employeeId);
   const record = applyOverrides(found.employeeCode, buildDbProfileRecord(found));
+  const leaveSummary = await ensureEmployeeLeaveFromSage(found);
+  record.leaveSummary = leaveSummary;
+  record.overview.leaveBalanceDays = roundLeaveDays(
+    leaveSummary.balances['Annual Leave']
+    ?? leaveSummary.balances.Annual
+    ?? Object.entries(leaveSummary.balances).find(([key]) => key.toLowerCase().includes('annual'))?.[1]
+    ?? 0,
+  );
   record.payrollClassification = found.payrollClassification || contractPayrollClassification(found);
   store.set(found.employeeCode, record);
   return record;

@@ -3,6 +3,7 @@ import path from 'node:path';
 import sql from 'mssql';
 import { getDleEnterpriseDbPool, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { syncSageLeaveToHris } from '@/lib/sage-leave-sync';
 
 export type LeaveRole = 'Leave Administrator' | 'HR Officer' | 'HR Manager' | 'Department Manager' | 'Supervisor' | 'Payroll Officer' | 'Employee' | 'Executive' | 'System Administrator';
 export type LeaveStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Withdrawn' | 'Cancelled' | 'Terminated' | 'Completed';
@@ -801,6 +802,12 @@ VALUES
 };
 
 const syncLeaveBalances = async (pool: sql.ConnectionPool, employees: DleEmployeeDirectoryRow[]) => {
+  const sageSyncedRows = await pool.request().query(`
+SELECT DISTINCT [EmployeeId]
+FROM [hris].[LeaveBalances]
+WHERE [SourceSystem] = N'Sage 300 People Payroll';`);
+  const sageSynced = new Set((sageSyncedRows.recordset as Array<{ EmployeeId: string }>).map((row) => row.EmployeeId));
+
   const existingRows = await pool.request().query(`
 SELECT [EmployeeId],[LeaveType],[CarryForwardBalance],[ForfeitedBalance]
 FROM [hris].[LeaveBalances];`);
@@ -822,6 +829,7 @@ GROUP BY [EmployeeId],[LeaveType];`);
   }
 
   for (const employee of employees.filter((row) => activeStatus(row.status))) {
+    if (sageSynced.has(employee.employeeId)) continue;
     const leaveType = 'Annual Leave';
     const key = `${employee.employeeId}::${leaveType}`;
     const entitlement = entitlementFor(employee, leaveType);
@@ -973,12 +981,22 @@ const permissionsFor = (role: LeaveRole): LeavePayload['permissions'] => ({
   canViewAudit: role !== 'Employee',
 });
 
+let lastSageLeaveSyncAt = 0;
+const sageLeaveSyncIntervalMs = () => Number(process.env.HRIS_SAGE_LEAVE_SYNC_MS || 900000);
+
+const maybeSyncSageLeave = async () => {
+  if (Date.now() - lastSageLeaveSyncAt < sageLeaveSyncIntervalMs()) return;
+  await syncSageLeaveToHris().catch(() => undefined);
+  lastSageLeaveSyncAt = Date.now();
+};
+
 export async function readLeaveManagementPayload(section = 'dashboard', roleInput?: string | null): Promise<LeavePayload> {
   const normalizedSection = normalizeSection(section);
   const role = normalizeRole(roleInput);
   const employeeSource = await readPayrollEmployees();
   const employees = employeeSource.employees;
   const pool = await ensureDb();
+  await maybeSyncSageLeave();
   await syncLeaveTypePolicies(pool);
   await upsertEssLeaveRequests(pool, employees);
   await syncLeaveBalances(pool, employees);

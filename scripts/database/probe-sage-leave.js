@@ -24,6 +24,8 @@ loadEnv();
     database: process.env.SAGE_PAYROLL_DB_NAME,
     user: process.env.SAGE_PAYROLL_DB_USER,
     password: process.env.SAGE_PAYROLL_DB_PASSWORD,
+    requestTimeout: 120000,
+    connectionTimeout: 30000,
     options: { encrypt: false, trustServerCertificate: true, instanceName: process.env.SAGE_PAYROLL_DB_INSTANCE || 'MSSQLSERVERPEOPL' },
   }).connect();
 

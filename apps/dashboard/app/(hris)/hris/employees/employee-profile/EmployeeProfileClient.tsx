@@ -130,7 +130,17 @@ type DocumentItem = {
 
 type LeaveSummary = {
   balances: Record<string, number>;
+  balanceDetails?: Array<{
+    leaveType: string;
+    available: number;
+    entitlement: number;
+    used: number;
+    pending: number;
+    carryForward: number;
+  }>;
   history: { id: string; type: string; start: string; end: string; days: number; status: 'Approved' | 'Pending' | 'Rejected' }[];
+  sourceSystem?: string | null;
+  lastUpdatedAt?: string | null;
 };
 
 type AttendanceSummary = {
@@ -447,15 +457,32 @@ const EditField = ({
   </div>
 );
 
-const SummaryCard = ({ label, value, tone }: { label: string; value: string; tone: { bg: string; fg: string } }) => (
+const SummaryCard = ({ label, value, tone, hint }: { label: string; value: string; tone: { bg: string; fg: string }; hint?: string }) => (
   <div className="rounded-xl border border-slate-200/70 bg-white p-3.5 relative overflow-hidden">
     <div className={`absolute inset-0 ${tone.bg}`} />
     <div className="relative">
       <div className="text-[11px] font-extrabold text-slate-600">{label}</div>
       <div className={`text-lg font-extrabold mt-1 ${tone.fg}`}>{value}</div>
+      {hint ? <div className="text-[10px] font-semibold text-slate-500 mt-1">{hint}</div> : null}
     </div>
   </div>
 );
+
+const leaveBalanceTone = (leaveType: string) => {
+  const normalized = leaveType.toLowerCase();
+  if (normalized.includes('annual')) return { bg: 'bg-emerald-600/5', fg: 'text-emerald-700' };
+  if (normalized.includes('sick')) return { bg: 'bg-amber-600/5', fg: 'text-amber-700' };
+  if (normalized.includes('compassion')) return { bg: 'bg-violet-600/5', fg: 'text-violet-700' };
+  if (normalized.includes('exam')) return { bg: 'bg-blue-600/5', fg: 'text-blue-700' };
+  if (normalized.includes('carry')) return { bg: 'bg-cyan-600/5', fg: 'text-cyan-700' };
+  return { bg: 'bg-slate-50', fg: 'text-slate-900' };
+};
+
+const leaveStatusTone = (status: 'Approved' | 'Pending' | 'Rejected') => {
+  if (status === 'Approved') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+  if (status === 'Rejected') return 'bg-rose-50 text-rose-700 border-rose-100';
+  return 'bg-amber-50 text-amber-700 border-amber-100';
+};
 
 const Section = ({
   title,
@@ -1950,38 +1977,104 @@ export default function EmployeeProfileClient({ employeeId, initialNow }: { empl
 
                   {tab === 'leave' && (
                     <div className="space-y-6">
-                      <Section title="Leave Summary" icon={Calendar}>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                          {Object.entries(profileData.leaveSummary.balances).map(([k, val]) => (
-                            <SummaryCard key={k} label={k} value={`${val} days`} tone={{ bg: 'bg-slate-50', fg: 'text-slate-900' }} />
-                          ))}
-                        </div>
+                      <Section
+                        title="Leave Summary"
+                        icon={Calendar}
+                        actions={
+                          <div className="flex items-center gap-2">
+                            {profileData.leaveSummary.sourceSystem ? (
+                              <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                {profileData.leaveSummary.sourceSystem}
+                              </span>
+                            ) : null}
+                            {profileData.leaveSummary.lastUpdatedAt ? (
+                              <span className="text-[11px] font-semibold text-slate-500">
+                                Updated {formatDateTimeUtc(profileData.leaveSummary.lastUpdatedAt)}
+                              </span>
+                            ) : null}
+                          </div>
+                        }
+                      >
+                        {(profileData.leaveSummary.balanceDetails?.length
+                          ? profileData.leaveSummary.balanceDetails
+                          : Object.entries(profileData.leaveSummary.balances).map(([leaveType, available]) => ({
+                              leaveType,
+                              available,
+                              entitlement: available,
+                              used: 0,
+                              pending: 0,
+                              carryForward: 0,
+                            }))
+                        ).length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                            {(profileData.leaveSummary.balanceDetails?.length
+                              ? profileData.leaveSummary.balanceDetails
+                              : Object.entries(profileData.leaveSummary.balances).map(([leaveType, available]) => ({
+                                  leaveType,
+                                  available,
+                                  entitlement: available,
+                                  used: 0,
+                                  pending: 0,
+                                  carryForward: 0,
+                                }))
+                            ).map((item) => {
+                              const tone = leaveBalanceTone(item.leaveType);
+                              return (
+                                <SummaryCard
+                                  key={item.leaveType}
+                                  label={item.leaveType}
+                                  value={`${item.available} days`}
+                                  tone={tone}
+                                  hint={`Entitlement ${item.entitlement} · Used ${item.used}${item.pending > 0 ? ` · Pending ${item.pending}` : ''}`}
+                                />
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center">
+                            <div className="text-sm font-extrabold text-slate-800">No Sage leave balances loaded yet</div>
+                            <div className="text-xs font-semibold text-slate-500 mt-1">
+                              Balances and history sync from Sage Payroll / ESS when the employee is linked to a Sage source record.
+                            </div>
+                          </div>
+                        )}
                       </Section>
                       <Section title="Leave History" icon={Calendar}>
-                        <div className="overflow-auto">
-                          <table className="w-full text-left">
-                            <thead className="bg-slate-50 border-b border-slate-100">
-                              <tr>
-                                <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Type</th>
-                                <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Start</th>
-                                <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">End</th>
-                                <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Days</th>
-                                <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {profileData.leaveSummary.history.slice(0, 20).map((h) => (
-                                <tr key={h.id} className="border-b border-slate-100">
-                                  <td className="px-4 py-3 text-sm font-extrabold text-slate-900">{h.type}</td>
-                                  <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateUtc(h.start)}</td>
-                                  <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateUtc(h.end)}</td>
-                                  <td className="px-4 py-3 text-xs font-extrabold text-slate-900">{h.days}</td>
-                                  <td className="px-4 py-3 text-xs font-extrabold text-slate-700">{h.status}</td>
+                        {profileData.leaveSummary.history.length > 0 ? (
+                          <div className="overflow-auto rounded-2xl border border-slate-200/70">
+                            <table className="w-full text-left">
+                              <thead className="bg-slate-50 border-b border-slate-100">
+                                <tr>
+                                  <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Type</th>
+                                  <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Start</th>
+                                  <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">End</th>
+                                  <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Days</th>
+                                  <th className="px-4 py-3 text-[11px] font-extrabold text-slate-600">Status</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                              </thead>
+                              <tbody>
+                                {profileData.leaveSummary.history.slice(0, 20).map((h) => (
+                                  <tr key={h.id} className="border-b border-slate-100 bg-white">
+                                    <td className="px-4 py-3 text-sm font-extrabold text-slate-900">{h.type}</td>
+                                    <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateUtc(h.start)}</td>
+                                    <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateUtc(h.end)}</td>
+                                    <td className="px-4 py-3 text-xs font-extrabold text-slate-900">{h.days}</td>
+                                    <td className="px-4 py-3">
+                                      <span className={`inline-flex text-[11px] font-extrabold px-2.5 py-1 rounded-full border ${leaveStatusTone(h.status)}`}>
+                                        {h.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center">
+                            <div className="text-sm font-extrabold text-slate-800">No leave transactions on record</div>
+                            <div className="text-xs font-semibold text-slate-500 mt-1">Approved and processed leave from Sage Payroll will appear here.</div>
+                          </div>
+                        )}
                       </Section>
                     </div>
                   )}
