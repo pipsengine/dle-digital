@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
-import { countDirectReportsFromDb, readEmployeeFromDbByCode } from '@/lib/dle-enterprise-db';
-import { payrollDataSourceInfo, readDirectoryEmployees, type PayrollEmployeeSource } from '@/lib/payroll-employee-source';
+import { countDirectReportsFromEmployees, payrollDataSourceInfo, readDirectoryEmployees } from '@/lib/payroll-employee-source';
 import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { listEnterpriseNotifications } from '@/lib/enterprise-notifications-store';
 
@@ -127,17 +126,9 @@ export async function GET(request: Request) {
 
   const sessionIdentities = [session?.employeeCode, session?.employeeId, session?.username, session?.fullName].filter(Boolean) as string[];
   const configuredIdentities = session ? sessionIdentities : configuredEmployeeIdentities(request, context);
-  const lookupCode = compact(session?.employeeCode || session?.employeeId);
 
-  let employee: DleEmployeeDirectoryRow | null = lookupCode ? await readEmployeeFromDbByCode(lookupCode) : null;
-  let employeeSource: PayrollEmployeeSource | null = employee
-    ? { employees: [employee], source: 'DLE_Enterprise HRIS', databaseAvailable: true, warning: null }
-    : null;
-
-  if (!employee) {
-    employeeSource = await readDirectoryEmployees();
-    employee = findEmployee(employeeSource.employees, configuredIdentities);
-  }
+  const employeeSource = await readDirectoryEmployees();
+  const employee = findEmployee(employeeSource.employees, configuredIdentities.length ? configuredIdentities : sessionIdentities);
 
   if (session?.isGlobalAdmin) {
     return NextResponse.json({
@@ -170,7 +161,7 @@ export async function GET(request: Request) {
   }
 
   const linked = Boolean(employee);
-  const activeTeamSize = employee ? await countDirectReportsFromDb(employee) : 0;
+  const activeTeamSize = employee ? countDirectReportsFromEmployees(employeeSource.employees, employee) : 0;
   const role = employee ? rbacRole(employee, activeTeamSize) : session?.roles?.[0] || 'Employee';
   const pendingApprovals = role === 'Employee' || activeTeamSize === 0 ? 0 : Math.min(24, Math.ceil(activeTeamSize / 4));
   const sessionCode = compact(session?.employeeCode || session?.employeeId || session?.username);

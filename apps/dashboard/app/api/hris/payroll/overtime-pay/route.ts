@@ -3,7 +3,8 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { isTimesheetPayrollReadyStatus, normalizePaidWorkHours, readTimesheetData, STANDARD_TIMESHEET_HOURS, type TimesheetHeader, type TimesheetLine } from '@/lib/timesheet-entry-store';
+import { isTimesheetPayrollReadyStatus, normalizePaidWorkHours, readTimesheetData, type TimesheetHeader, type TimesheetLine } from '@/lib/timesheet-entry-store';
+import { timesheetDayRulesForDate } from '@/lib/timesheet-entry-shared';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { calculatePayrollOvertime } from '@/lib/payroll-earnings-engine';
 
@@ -108,9 +109,11 @@ const buildPayload = async (request: Request) => {
       if (!header || !employee) return null;
       const date = header.timesheetDate;
       const dayType = dayTypeFor(date, holidays);
-      const hoursPerDay = STANDARD_TIMESHEET_HOURS;
+      const dayRules = timesheetDayRulesForDate(date, holidayDates);
+      const hoursPerDay = dayRules.standardProductiveHours;
       const workedHours = Math.max(normalizePaidWorkHours(num(line.attendanceDuration)), normalizePaidWorkHours(num(line.totalHours)), normalizePaidWorkHours(num(line.usedHours) + num(line.idleHours)));
-      const overtimeHours = Math.max(0, round2(normalizePaidWorkHours(num(line.totalHours)) - hoursPerDay));
+      const productiveHours = normalizePaidWorkHours(num(line.usedHours));
+      const overtimeHours = Math.max(0, round2(productiveHours - hoursPerDay));
       const payableHours = dayType === 'Weekday' ? overtimeHours : workedHours;
       const overtime = calculatePayrollOvertime(employee, dayType, payableHours);
       const hourlyRate = overtime.hourlyRate || hourlyRateFor(employee, hoursPerDay);

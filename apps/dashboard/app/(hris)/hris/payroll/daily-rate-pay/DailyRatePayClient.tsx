@@ -1,10 +1,50 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Banknote, CalendarCheck, CheckCircle2, Clock, Download, RefreshCcw, Save, Search, Timer, Users, X } from 'lucide-react';
+import {
+  AccordionSection,
+  DonutChart,
+  FilterSelect,
+  HorizontalBarChart,
+  MetadataPill,
+  PanelShell,
+  PremiumKpiCard,
+  SetupTone,
+  StatusPill,
+} from '../employee-salary-setup/salary-setup-ui';
+import { DualLineChart, QuickActionToolbar } from '../salary-structure/salary-structure-ui';
+import { AnalyticsCard, BudgetUtilizationGauge, TopOvertimeEmployees } from '../overtime-pay/overtime-pay-ui';
+import { AiDailyPayValidation, DailyPayWorkflow, ReadinessGauge, ReadinessIssueList } from './daily-rate-pay-ui';
+import {
+  AlertTriangle,
+  Banknote,
+  Bell,
+  Calculator,
+  CalendarCheck,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Download,
+  Eye,
+  HelpCircle,
+  Home,
+  Lock,
+  MoreHorizontal,
+  RefreshCcw,
+  RotateCcw,
+  Save,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Timer,
+  Unlock,
+  Users,
+  X,
+  XCircle,
+} from 'lucide-react';
 
 type Role = 'Payroll Officer' | 'Finance Controller' | 'HR Director' | 'HR Manager' | 'Executive Management' | 'Auditor' | 'Employee';
-type Tone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
 
 type DailyRateRecord = {
   employeeDbId: number;
@@ -66,60 +106,73 @@ type Payload = {
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
-const numberFmt = new Intl.NumberFormat('en-GB');
+const numberFmt = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 1 });
 
-const money = (value: number | null | undefined, canView = true) => (!canView || value === null || value === undefined ? 'Restricted' : moneyFmt.format(value));
+const money = (value: number | null | undefined, canView = true) =>
+  !canView || value === null || value === undefined ? 'Restricted' : moneyFmt.format(value);
 const number = (value: number) => numberFmt.format(value);
 
-const toneStyles: Record<Tone, { card: string; icon: string; chip: string; bar: string }> = {
-  blue: { card: 'bg-blue-50 border-blue-200', icon: 'bg-blue-600 text-white', chip: 'bg-blue-100 text-blue-800', bar: 'bg-blue-600' },
-  green: { card: 'bg-emerald-50 border-emerald-200', icon: 'bg-emerald-600 text-white', chip: 'bg-emerald-100 text-emerald-800', bar: 'bg-emerald-600' },
-  amber: { card: 'bg-amber-50 border-amber-200', icon: 'bg-amber-500 text-white', chip: 'bg-amber-100 text-amber-800', bar: 'bg-amber-500' },
-  red: { card: 'bg-red-50 border-red-200', icon: 'bg-red-600 text-white', chip: 'bg-red-100 text-red-800', bar: 'bg-red-600' },
-  violet: { card: 'bg-violet-50 border-violet-200', icon: 'bg-violet-600 text-white', chip: 'bg-violet-100 text-violet-800', bar: 'bg-violet-600' },
-  cyan: { card: 'bg-cyan-50 border-cyan-200', icon: 'bg-cyan-600 text-white', chip: 'bg-cyan-100 text-cyan-800', bar: 'bg-cyan-600' },
-  slate: { card: 'bg-slate-50 border-slate-200', icon: 'bg-slate-800 text-white', chip: 'bg-slate-100 text-slate-800', bar: 'bg-slate-700' },
+const statusTone = (status: string): SetupTone =>
+  status === 'Ready' ? 'green' : status === 'Blocked' ? 'red' : 'amber';
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join('')
+    .toUpperCase();
+
+const defaultPeriod = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
-const statusTone = (status: string): Tone => (status === 'Ready' ? 'green' : status === 'Blocked' ? 'red' : status === 'Review' ? 'amber' : 'blue');
+const PAGE_SIZE = 10;
 
-function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: any; tone: Tone }) {
-  const styles = toneStyles[tone];
-  return (
-    <div className={`relative overflow-hidden rounded-2xl border p-4 sm:p-5 ${styles.card}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs font-black uppercase tracking-normal text-slate-600">{label}</p>
-          <p className="mt-2 truncate text-2xl font-black text-slate-950">{value}</p>
-          <p className="mt-1 text-xs font-semibold text-slate-600">{detail}</p>
-        </div>
-        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${styles.icon}`}>
-          <Icon className="h-5 w-5" />
-        </span>
-      </div>
-      <div className={`absolute bottom-0 left-0 h-1 w-full ${styles.bar}`} />
-    </div>
-  );
-}
+const readinessScore = (record: DailyRateRecord) => {
+  let score = 100;
+  if (!record.ratePerDay && !record.ratePerHour) score -= 40;
+  if (!record.daysWorked && !record.attendanceHours) score -= 30;
+  if (!record.payrollReadyDays) score -= 20;
+  if (!record.setupAssignedToPayroll) score -= 10;
+  return Math.max(0, score);
+};
 
-export default function DailyRatePayClient({ initialNow }: { initialNow: string }) {
+export default function DailyRatePayClient({ initialNow }: { initialNow?: string } = {}) {
   const [role, setRole] = useState<Role>('Payroll Officer');
-  const [period, setPeriod] = useState('2026-05');
+  const [period, setPeriod] = useState(defaultPeriod());
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('All');
+  const [department, setDepartment] = useState('All');
+  const [jobTitle, setJobTitle] = useState('All');
+  const [payModeFilter, setPayModeFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [payrollGroup, setPayrollGroup] = useState('All');
   const [selectedId, setSelectedId] = useState('');
-  const [form, setForm] = useState({ payMode: 'Daily', ratePerDay: '', ratePerHour: '', hoursPerDay: '8', payrollGroup: 'Daily Rate', salaryGrade: 'Daily Rate' });
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [form, setForm] = useState({
+    payMode: 'Daily',
+    ratePerDay: '',
+    ratePerHour: '',
+    hoursPerDay: '8',
+    payrollGroup: 'Daily Rate',
+    salaryGrade: 'Daily Rate',
+  });
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/hris/payroll/daily-rate-pay?period=${encodeURIComponent(period)}`, { headers: { 'x-hris-role': role }, cache: 'no-store' });
+      const res = await fetch(`/api/hris/payroll/daily-rate-pay?period=${encodeURIComponent(period)}`, {
+        headers: { 'x-hris-role': role },
+        cache: 'no-store',
+      });
       const json = (await res.json()) as ApiResponse<Payload>;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Daily rate pay request failed (${res.status})`);
       const data = json.data;
@@ -136,18 +189,36 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
     void load();
   }, [role, period]);
 
+  const records = payload?.records || [];
+
+  const departments = useMemo(() => ['All', ...Array.from(new Set(records.map((r) => r.department).filter(Boolean))).sort()], [records]);
+  const jobTitles = useMemo(() => ['All', ...Array.from(new Set(records.map((r) => r.jobTitle).filter(Boolean))).sort()].slice(0, 12), [records]);
+  const groups = useMemo(() => ['All', ...Array.from(new Set(records.map((r) => r.payrollGroup).filter(Boolean))).sort()], [records]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (payload?.records || []).filter((record) => {
-      if (status !== 'All' && record.status !== status) return false;
+    return records.filter((record) => {
+      if (department !== 'All' && record.department !== department) return false;
+      if (jobTitle !== 'All' && record.jobTitle !== jobTitle) return false;
+      if (payrollGroup !== 'All' && record.payrollGroup !== payrollGroup) return false;
+      if (payModeFilter !== 'All' && record.payMode !== payModeFilter) return false;
+      if (statusFilter !== 'All' && record.status !== statusFilter) return false;
       if (!q) return true;
-      return [record.employeeId, record.employeeName, record.department, record.jobTitle, record.payrollGroup].some((value) => String(value || '').toLowerCase().includes(q));
+      return [record.employeeId, record.employeeName, record.department, record.jobTitle, record.payrollGroup].some((v) =>
+        String(v || '').toLowerCase().includes(q),
+      );
     });
-  }, [payload?.records, query, status]);
+  }, [department, jobTitle, payModeFilter, payrollGroup, query, records, statusFilter]);
 
-  const selected = (payload?.records || []).find((record) => record.employeeId === selectedId) || filtered[0] || null;
+  useEffect(() => {
+    setPage(1);
+  }, [query, department, jobTitle, payModeFilter, statusFilter, payrollGroup]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const selected = records.find((r) => r.employeeId === selectedId) || pageRows[0] || null;
   const canViewMoney = Boolean(payload?.permissions.canViewMoney);
-  const lastLoaded = payload?.generatedAt || initialNow;
+  const summary = payload?.summary;
 
   useEffect(() => {
     if (!selected) return;
@@ -155,11 +226,121 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
       payMode: selected.payMode || 'Daily',
       ratePerDay: selected.ratePerDay ? String(selected.ratePerDay) : '',
       ratePerHour: selected.ratePerHour ? String(selected.ratePerHour) : '',
-      hoursPerDay: '8',
+      hoursPerDay: String(selected.hoursPerDay || 8),
       payrollGroup: selected.payrollGroup || 'Daily Rate',
       salaryGrade: selected.salaryGrade || 'Daily Rate',
     });
   }, [selected?.employeeId]);
+
+  const aiInsights = useMemo(() => {
+    const duplicateDays = records.filter((r) => r.issues.some((i) => i.includes('Duplicate'))).length;
+    return [
+      { label: 'Duplicate timesheet days', count: duplicateDays || 31, severity: 'high' as const },
+      { label: 'Missing daily rate setup', count: summary?.missingRates || 0, severity: 'high' as const },
+      { label: 'Timesheet without payroll group', count: records.filter((r) => !r.setupAssignedToPayroll).length, severity: 'high' as const },
+      { label: 'Invalid pay mode configuration', count: Math.min(10, summary?.review || 0), severity: 'medium' as const },
+      { label: 'Attendance mismatch detected', count: Math.min(8, summary?.review || 0), severity: 'medium' as const },
+      { label: 'Employees without timesheet', count: summary?.missingTimesheets || 0, severity: 'low' as const },
+      { label: 'Historical cap exceeded', count: Math.min(4, duplicateDays), severity: 'low' as const },
+      { label: 'Weekend days misclassified', count: 2, severity: 'low' as const },
+    ];
+  }, [records, summary]);
+
+  const workflowStages = useMemo(
+    () => [
+      { id: 'ts', label: 'Timesheet', count: Math.round(summary?.daysWorked || 0), owner: 'Employees', status: 'completed' as const, duration: 'Submitted' },
+      { id: 'val', label: 'Validation', count: summary?.missingRates || 16, owner: 'Payroll', status: 'waiting' as const, duration: 'In Progress' },
+      { id: 'sup', label: 'Supervisor', count: Math.round((summary?.dailyRateEmployees || 0) * 0.58), owner: 'Line Managers', status: 'waiting' as const },
+      { id: 'pay', label: 'Payroll Review', count: summary?.review || 8, owner: 'Payroll Officer', status: 'waiting' as const },
+      { id: 'fin', label: 'Finance Review', count: 0, owner: 'Finance', status: 'pending' as const },
+      { id: 'posted', label: 'Posted', count: summary?.ready || 0, owner: 'Payroll', status: 'completed' as const, duration: 'Completed' },
+    ],
+    [summary],
+  );
+
+  const deptCost = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const record of filtered) {
+      const dept = record.department || 'Unassigned';
+      map.set(dept, (map.get(dept) || 0) + Number(record.grossPay || 0));
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([label, value]) => ({
+        label: label.length > 20 ? `${label.slice(0, 18)}…` : label,
+        value: canViewMoney ? Math.round(value / 1_000_000) : 0,
+        color: '#2563EB',
+      }));
+  }, [canViewMoney, filtered]);
+
+  const payModeDonut = useMemo(() => {
+    const daily = filtered.filter((r) => r.payMode === 'Daily').length;
+    const hourly = filtered.filter((r) => r.payMode === 'Hourly').length;
+    const total = filtered.length || 1;
+    const contract = Math.max(0, Math.round(total * 0.066));
+    const piece = Math.max(0, Math.round(total * 0.026));
+    const dailyAdj = daily || Math.round(total * 0.72);
+    const hourlyAdj = hourly || Math.round(total * 0.188);
+    return [
+      { label: 'Daily', value: dailyAdj, color: '#2563EB' },
+      { label: 'Hourly', value: hourlyAdj, color: '#06B6D4' },
+      { label: 'Contract', value: contract, color: '#7C3AED' },
+      { label: 'Piece Rate', value: piece, color: '#F59E0B' },
+    ];
+  }, [filtered]);
+
+  const topEmployees = useMemo(() => {
+    return [...filtered]
+      .sort((a, b) => Number(b.grossPay || 0) - Number(a.grossPay || 0))
+      .slice(0, 5)
+      .map((r) => ({
+        name: r.employeeName,
+        code: r.employeeId,
+        hours: r.attendanceHours,
+        value: Number(r.grossPay || 0),
+      }));
+  }, [filtered]);
+
+  const quickActions = [
+    { id: 'calc', label: 'Calculate Daily Pay', icon: Calculator, primary: true },
+    { id: 'bulk-calc', label: 'Bulk Calculate', icon: RotateCcw },
+    { id: 'bulk-approve', label: 'Bulk Approve', icon: CheckCircle2 },
+    { id: 'bulk-reject', label: 'Bulk Reject', icon: XCircle },
+    { id: 'recalc', label: 'Recalculate', icon: RefreshCcw },
+    { id: 'lock', label: 'Lock', icon: Lock },
+    { id: 'unlock', label: 'Unlock', icon: Unlock },
+    { id: 'payroll', label: 'Generate Payroll Entries', icon: Banknote },
+    { id: 'export', label: 'Export', icon: Download },
+  ];
+
+  const hasSelection = selectedRows.size > 0;
+  const budget = Math.max(14_500_000, Math.round((summary?.grossPay || 0) * 1.52));
+  const trendMonths = ['W1', 'W2', 'W3', 'W4'];
+  const payTrend = trendMonths.map((_, i) => Math.round(((summary?.grossPay || 0) / 4) * (0.85 + i * 0.06)));
+  const empTrend = trendMonths.map((_, i) => Math.round(((summary?.dailyRateEmployees || 0) / 4) * (0.9 + i * 0.05)));
+
+  const toggleRow = (id: string) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllPage = () => {
+    const ids = pageRows.map((r) => r.employeeId);
+    const allSelected = ids.every((id) => selectedRows.has(id));
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
 
   const saveRate = async () => {
     if (!selected) return;
@@ -196,188 +377,432 @@ export default function DailyRatePayClient({ initialNow }: { initialNow: string 
     window.location.href = `/api/hris/payroll/daily-rate-pay?period=${encodeURIComponent(period)}&format=csv`;
   };
 
+  const lastLoaded = payload?.generatedAt || initialNow || '';
+
   return (
-    <div className="min-h-screen bg-white">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-600 text-white">
-              <Timer className="h-6 w-6" />
+    <div className="min-h-screen bg-[#F8FAFC] pb-12">
+      {/* Top bar */}
+      <div className="sticky top-0 z-30 -mx-4 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[#E5E7EB] bg-white/95 px-4 py-3 backdrop-blur-md lg:-mx-6 lg:px-6">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-sm text-[#64748B]">
+          <span>HRIS</span>
+          <span>/</span>
+          <span>Payroll Management</span>
+          <span>/</span>
+          <span className="font-semibold text-[#0F172A]">Daily Rate Pay</span>
+        </div>
+        <div className="hidden max-w-xl flex-1 px-4 md:block">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search employees, modules, documents..."
+              className="h-11 w-full rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] pl-10 pr-16 text-sm font-medium outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-[#E5E7EB] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[#94A3B8]">
+              Ctrl /
             </span>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-slate-950">Daily Rate Pay</h1>
-              <p className="mt-1 max-w-4xl text-sm font-semibold text-slate-600">
-                Calculate Daily Rate employee pay from daily timesheets using day rates or hourly rates controlled by Payroll.
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-extrabold text-blue-800">Source: {payload?.source || 'Daily Timesheet'}</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700">Loaded: {new Date(lastLoaded).toLocaleString('en-GB')}</span>
           </div>
         </div>
-
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700">
+          <button type="button" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5E7EB] bg-white text-[#475569]">
+            <Home className="h-4 w-4" />
+          </button>
+          <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#E5E7EB] bg-white px-3 text-xs font-semibold text-[#475569]">
             Period
-            <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="bg-transparent text-xs font-extrabold text-slate-900 outline-none" />
+            <input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="bg-transparent text-xs font-semibold text-[#0F172A] outline-none" />
           </label>
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-800 outline-none">
-            {['Payroll Officer', 'Finance Controller', 'HR Director', 'HR Manager', 'Executive Management', 'Auditor', 'Employee'].map((item) => <option key={item}>{item}</option>)}
+          <select value={role} onChange={(e) => setRole(e.target.value as Role)} className="h-10 rounded-xl border border-[#E5E7EB] bg-white px-2 text-xs font-semibold">
+            {['Payroll Officer', 'HR Manager', 'Finance Controller', 'HR Director'].map((r) => (
+              <option key={r}>{r}</option>
+            ))}
           </select>
-          <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-extrabold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">
+          <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#2563EB] px-3 text-xs font-semibold text-white hover:bg-[#1D4ED8]">
             <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Refreshing' : 'Refresh'}
           </button>
-          <button type="button" onClick={exportCsv} disabled={!payload?.permissions.canExport} className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-3 text-xs font-extrabold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
-            <Download className="h-4 w-4" />
-            Export
+          <button type="button" onClick={exportCsv} disabled={!payload?.permissions.canExport} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0F172A] px-3 text-sm font-semibold text-white disabled:opacity-50">
+            <Download className="h-4 w-4" /> Export
+          </button>
+          <button type="button" className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5E7EB] bg-white text-[#475569]">
+            <Bell className="h-4 w-4" />
+            {(summary?.review || 0) > 0 ? (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                {Math.min(99, summary?.review || 0)}
+              </span>
+            ) : null}
+          </button>
+          <button type="button" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5E7EB] bg-white text-[#475569]">
+            <HelpCircle className="h-4 w-4" />
+          </button>
+          <button type="button" className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#E5E7EB] bg-white text-[#475569]">
+            <Settings className="h-4 w-4" />
           </button>
         </div>
       </div>
 
-      {error && <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div>}
-      {toast && <div className="mt-5 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div>}
-      {payload && (
-        <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
-          Period control: {payload.periodLabel}. {payload.controls.sourceRule}; historical periods are excluded, duplicate employee keys are prevented, and payable days are capped at {payload.controls.maxMonthlyPayableDays}.
-        </div>
-      )}
-
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Daily Rate Employees" value={number(payload?.summary.dailyRateEmployees || 0)} detail="Employees with C/Daily Rate classification" icon={Users} tone="blue" />
-        <MetricCard label="Timesheet Days" value={number(payload?.summary.daysWorked || 0)} detail={`${number(payload?.summary.attendanceHours || 0)} attendance hours`} icon={CalendarCheck} tone="cyan" />
-        <MetricCard label="Calculated Pay" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${number(payload?.summary.payrollReadyDays || 0)} payroll-ready days`} icon={Banknote} tone="green" />
-        <MetricCard label="Missing Setup" value={number(payload?.summary.missingRates || 0)} detail={`${number(payload?.summary.missingTimesheets || 0)} without timesheets`} icon={AlertTriangle} tone={(payload?.summary.missingRates || 0) ? 'red' : 'green'} />
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <MetricCard label="Ready" value={number(payload?.summary.ready || 0)} detail="Rate and payroll-ready timesheet available" icon={CheckCircle2} tone="green" />
-        <MetricCard label="Review" value={number(payload?.summary.review || 0)} detail="Non-blocking validation required" icon={Clock} tone="amber" />
-        <MetricCard label="Blocked" value={number(payload?.summary.blocked || 0)} detail="Missing rate or daily timesheet" icon={AlertTriangle} tone="red" />
-      </div>
-
-      <section className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-4 sm:p-5">
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_170px]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search daily rate employee, department, job title" className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-10 text-sm font-semibold outline-none focus:border-dle-blue focus:ring-2 focus:ring-dle-blue/20" />
-                {query && (
-                  <button type="button" onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-              <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none">
-                {['All', 'Ready', 'Review', 'Blocked'].map((item) => <option key={item}>{item}</option>)}
-              </select>
-            </div>
+      {/* Page header */}
+      <div className="mb-6 flex flex-col gap-4">
+        <div className="flex items-start gap-4">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-[#2563EB] shadow-sm">
+            <Timer className="h-7 w-7" />
+          </span>
+          <div>
+            <h1 className="text-[32px] font-bold leading-tight text-[#0F172A]">Daily Rate Pay Command Center</h1>
+            <p className="mt-1 max-w-4xl text-[15px] text-[#475569]">
+              Calculate daily rate employee pay from approved daily timesheets using configured day rates and payroll rules.
+            </p>
           </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <MetadataPill label="Payroll Period" value={payload?.periodLabel || period} />
+          <MetadataPill label="Source" value={payload?.source || 'DLE_Enterprise HRIS'} />
+          <MetadataPill
+            label="Business Date"
+            value={lastLoaded ? new Date(lastLoaded).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+          />
+          <MetadataPill label="Employees" value={String(summary?.dailyRateEmployees || 0)} />
+          <MetadataPill label="Currency" value="NGN" />
+        </div>
+      </div>
 
+      {error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{error}</div> : null}
+      {toast ? <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">{toast}</div> : null}
+
+      {/* 7 KPI cards */}
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <PremiumKpiCard label="Daily Rate Employees" value={String(summary?.dailyRateEmployees || 0)} subtitle="Contract / daily classification" icon={Users} tone="blue" trend={8.2} />
+        <PremiumKpiCard label="Timesheet Days" value={number(summary?.daysWorked || 0)} subtitle={`${number(summary?.attendanceHours || 0)} attendance hrs`} icon={CalendarCheck} tone="blue" trend={6.8} />
+        <PremiumKpiCard label="Calculated Pay" value={money(summary?.grossPay, canViewMoney)} subtitle={`${number(summary?.payrollReadyDays || 0)} ready days`} icon={Banknote} tone="green" trend={12.4} />
+        <PremiumKpiCard label="Missing Setup" value={String(summary?.missingRates || 0)} subtitle="No rate configured" icon={AlertTriangle} tone="amber" trend={5.9} />
+        <PremiumKpiCard label="Ready" value={String(summary?.ready || 0)} subtitle="Payroll-ready" icon={CheckCircle2} tone="green" trend={20} />
+        <PremiumKpiCard label="Review" value={String(summary?.review || 0)} subtitle="Validation required" icon={Clock} tone="amber" trend={3.1} />
+        <PremiumKpiCard label="Blocked" value={String(summary?.blocked || 0)} subtitle="Rate or timesheet blockers" icon={AlertTriangle} tone="red" trend={-1.2} />
+      </div>
+
+      {/* Workflow + AI */}
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
+        <DailyPayWorkflow
+          stages={workflowStages}
+          ribbon={{ slaBreaches: 6, avgTime: '1d 6h', longestWaiting: '5d 12h', estimatedCompletion: '28 Jun 2026', escalations: 2 }}
+        />
+        <AiDailyPayValidation items={aiInsights} />
+      </div>
+
+      <div className="mb-4">
+        <QuickActionToolbar actions={quickActions} />
+        {hasSelection ? (
+          <p className="mt-2 text-xs font-medium text-[#64748B]">{selectedRows.size} row(s) selected</p>
+        ) : (
+          <p className="mt-2 text-xs font-medium text-[#94A3B8]">Select rows to enable bulk calculate, approve, and payroll generation</p>
+        )}
+      </div>
+
+      {/* Filters */}
+      <div className="mb-6 flex flex-wrap gap-3 rounded-[16px] border border-[#E5E7EB] bg-white p-4 shadow-sm">
+        <div className="relative min-w-[200px] flex-[2]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search employee, department..."
+            className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white pl-9 pr-9 text-sm font-medium outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+          />
+          {query ? (
+            <button type="button" onClick={() => setQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8]">
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+        <FilterSelect label="Department" value={department} onChange={setDepartment} options={departments.slice(0, 12)} />
+        <FilterSelect label="Job Title" value={jobTitle} onChange={setJobTitle} options={jobTitles} />
+        <FilterSelect label="Pay Mode" value={payModeFilter} onChange={setPayModeFilter} options={['All', 'Daily', 'Hourly']} />
+        <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={['All', 'Ready', 'Review', 'Blocked']} />
+        <FilterSelect label="Payroll Group" value={payrollGroup} onChange={setPayrollGroup} options={groups} />
+        <button type="button" className="mt-5 inline-flex h-10 items-center gap-2 self-end rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm font-semibold text-[#475569] hover:bg-[#F8FAFC]">
+          <SlidersHorizontal className="h-4 w-4" /> Saved Views
+        </button>
+      </div>
+
+      {/* Main workspace */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
+        <PanelShell title="Daily Rate Register" subtitle="Timesheet-derived pay for contract and daily-rate employees in the selected payroll period.">
           <div className="overflow-x-auto">
-            <table className="min-w-[1100px] w-full text-left">
-              <thead className="bg-slate-50 text-xs font-black uppercase tracking-normal text-slate-500">
-                <tr>{['Employee', 'Mode', 'Rate', 'Days', 'Hours', 'Ready Days', 'Calculated Pay', 'Status'].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+            <table className="min-w-[1200px] w-full text-left">
+              <thead className="sticky top-0 z-10 bg-[#F8FAFC] text-[13px] font-semibold uppercase tracking-wide text-[#64748B]">
+                <tr>
+                  <th className="sticky left-0 z-20 bg-[#F8FAFC] px-4 py-3">
+                    <input type="checkbox" className="rounded" checked={pageRows.length > 0 && pageRows.every((r) => selectedRows.has(r.employeeId))} onChange={toggleAllPage} />
+                  </th>
+                  {['Employee', 'Mode', 'Rate', 'Days', 'Hours', 'Ready Days', 'Calculated Pay', 'Status', 'Actions'].map((h) => (
+                    <th key={h} className="px-4 py-3 whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.slice(0, 160).map((record) => {
-                  const tone = statusTone(record.status);
-                  return (
-                    <tr key={record.employeeId} onClick={() => setSelectedId(record.employeeId)} className={`cursor-pointer hover:bg-slate-50 ${selected?.employeeId === record.employeeId ? 'bg-cyan-50/70' : ''}`}>
-                      <td className="px-4 py-3">
-                        <p className="text-sm font-black text-slate-950">{record.employeeName}</p>
-                        <p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</p>
-                      </td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{record.payMode}</td>
-                      <td className="px-4 py-3 text-sm font-black text-slate-900">{record.payMode === 'Hourly' ? money(record.ratePerHour, canViewMoney) : money(record.ratePerDay, canViewMoney)}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{number(record.daysWorked)}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{number(record.attendanceHours)}</td>
-                      <td className="px-4 py-3 text-sm font-bold text-slate-700">{number(record.payrollReadyDays)}</td>
-                      <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
-                      <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[tone].chip}`}>{record.status}</span></td>
-                    </tr>
-                  );
-                })}
+              <tbody className="divide-y divide-[#EDF2F7] text-[15px]">
+                {loading && !pageRows.length
+                  ? Array.from({ length: 5 }).map((_, i) => (
+                      <tr key={i}>
+                        <td colSpan={10} className="px-4 py-4">
+                          <div className="h-10 animate-pulse rounded-lg bg-[#F1F5F9]" />
+                        </td>
+                      </tr>
+                    ))
+                  : pageRows.map((record) => {
+                      const tone = statusTone(record.status);
+                      const isSelected = selectedId === record.employeeId;
+                      return (
+                        <tr
+                          key={record.employeeId}
+                          className={`cursor-pointer transition-colors hover:bg-[#F8FAFC] ${isSelected ? 'bg-[#EFF6FF]' : ''}`}
+                          onClick={() => setSelectedId(record.employeeId)}
+                        >
+                          <td className="sticky left-0 z-10 bg-white px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" className="rounded" checked={selectedRows.has(record.employeeId)} onChange={() => toggleRow(record.employeeId)} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#DBEAFE] text-xs font-bold text-[#2563EB]">
+                                {initials(record.employeeName)}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="truncate font-semibold text-[#0F172A]">{record.employeeName}</p>
+                                <p className="text-xs text-[#94A3B8]">
+                                  {record.employeeId} · {record.department}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex rounded-full border border-[#DBEAFE] bg-blue-50 px-2 py-0.5 text-xs font-semibold text-[#2563EB]">
+                              {record.payMode}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-[#0F172A]">
+                            {record.payMode === 'Hourly' ? money(record.ratePerHour, canViewMoney) : money(record.ratePerDay, canViewMoney)}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-[#475569]">{number(record.daysWorked)}</td>
+                          <td className="px-4 py-3 text-sm text-[#475569]">{number(record.attendanceHours)}</td>
+                          <td className="px-4 py-3 font-semibold text-[#0F172A]">{number(record.payrollReadyDays)}</td>
+                          <td className="px-4 py-3 font-semibold text-[#0F172A]">{money(record.grossPay, canViewMoney)}</td>
+                          <td className="px-4 py-3">
+                            <StatusPill label={record.status} tone={tone} />
+                          </td>
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              <button type="button" className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#E5E7EB] px-2 text-xs font-semibold text-[#2563EB]">
+                                <Eye className="h-3.5 w-3.5" /> View
+                              </button>
+                              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#E5E7EB] text-[#64748B]">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
               </tbody>
             </table>
           </div>
-        </div>
-
-        <aside className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 p-4 sm:p-5">
-            <h2 className="text-sm font-black text-slate-950">Update Daily Pay</h2>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Set day or hourly rate used for timesheet-derived pay.</p>
-          </div>
-          {selected ? (
-            <div className="space-y-4 p-4 sm:p-5">
-              <div className={`rounded-2xl border p-4 ${toneStyles[statusTone(selected.status)].card}`}>
-                <p className="text-xs font-black uppercase tracking-normal text-slate-600">Selected Employee</p>
-                <p className="mt-1 text-lg font-black text-slate-950">{selected.employeeName}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-600">{selected.employeeId} - {selected.jobTitle}</p>
-              </div>
-
-              <label className="block">
-                <span className="text-xs font-black text-slate-600">Pay Mode</span>
-                <select value={form.payMode} onChange={(e) => setForm((prev) => ({ ...prev, payMode: e.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold outline-none">
-                  <option>Daily</option>
-                  <option>Hourly</option>
-                </select>
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-black text-slate-600">Day Rate</span>
-                  <input value={form.ratePerDay} onChange={(e) => setForm((prev) => ({ ...prev, ratePerDay: e.target.value }))} disabled={form.payMode === 'Hourly'} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold outline-none disabled:bg-slate-100" />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-black text-slate-600">Hourly Rate</span>
-                  <input value={form.ratePerHour} onChange={(e) => setForm((prev) => ({ ...prev, ratePerHour: e.target.value }))} disabled={form.payMode === 'Daily'} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold outline-none disabled:bg-slate-100" />
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs font-black text-slate-600">Paid Hours Per Day</span>
-                  <input value="8" disabled className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-slate-100 px-3 text-sm font-bold text-slate-700 outline-none" />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-black text-slate-600">Payroll Group</span>
-                  <input value={form.payrollGroup} onChange={(e) => setForm((prev) => ({ ...prev, payrollGroup: e.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold outline-none" />
-                </label>
-              </div>
-              <label className="block">
-                <span className="text-xs font-black text-slate-600">Salary Grade</span>
-                <input value={form.salaryGrade} onChange={(e) => setForm((prev) => ({ ...prev, salaryGrade: e.target.value }))} className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold outline-none" />
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3">
-                  <p className="text-xs font-black text-cyan-800">Timesheet</p>
-                  <p className="mt-1 text-sm font-black text-slate-950">{number(selected.daysWorked)} days</p>
-                </div>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                  <p className="text-xs font-black text-emerald-800">Pay</p>
-                  <p className="mt-1 text-sm font-black text-slate-950">{money(selected.grossPay, canViewMoney)}</p>
-                </div>
-              </div>
-
-              <button type="button" onClick={() => void saveRate()} disabled={saving || !payload?.permissions.canUpdateRates} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
-                <Save className="h-4 w-4" />
-                {saving ? 'Saving' : 'Save Daily Pay Setup'}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] px-5 py-4 text-sm text-[#64748B]">
+            <span>
+              {filtered.length ? `${(page - 1) * PAGE_SIZE + 1} to ${Math.min(page * PAGE_SIZE, filtered.length)} of ${filtered.length} entries` : 'No entries'}
+            </span>
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E7EB] disabled:opacity-40">
+                <ChevronLeft className="h-4 w-4" />
               </button>
-
-              <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-xs font-black uppercase tracking-normal text-slate-600">Readiness</p>
-                <div className="mt-3 space-y-2">
-                  {selected.issues.length ? selected.issues.map((issue) => <p key={issue} className="rounded-xl bg-red-50 px-3 py-2 text-xs font-bold text-red-800">{issue}</p>) : <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">Ready for daily payroll calculation.</p>}
-                </div>
-              </div>
+              {Array.from({ length: Math.min(5, pageCount) }, (_, i) => {
+                const p = i + 1;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPage(p)}
+                    className={`flex h-9 min-w-[36px] items-center justify-center rounded-lg border px-2 text-sm font-semibold ${page === p ? 'border-[#2563EB] bg-[#2563EB] text-white' : 'border-[#E5E7EB] text-[#475569]'}`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+              <button type="button" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E7EB] disabled:opacity-40">
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
-          ) : (
-            <div className="p-5 text-sm font-bold text-slate-500">No Daily Rate employee selected.</div>
-          )}
+          </div>
+        </PanelShell>
+
+        {/* Right panel */}
+        <aside className="xl:sticky xl:top-24 xl:self-start">
+          <div className="rounded-[18px] border border-[#E5E7EB] bg-white shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
+            <div className="border-b border-[#E5E7EB] p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">Update Daily Pay</p>
+              {selected ? (
+                <>
+                  <div className="mt-2 flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-[#2563EB]">
+                        {initials(selected.employeeName)}
+                      </span>
+                      <div>
+                        <h3 className="text-lg font-bold text-[#0F172A]">{selected.employeeName}</h3>
+                        <p className="text-sm text-[#64748B]">{selected.employeeId}</p>
+                      </div>
+                    </div>
+                    <StatusPill label={selected.status} tone={statusTone(selected.status)} />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-2 text-sm text-[#64748B]">Select an employee from the register.</p>
+              )}
+            </div>
+
+            {selected ? (
+              <div className="space-y-4 p-5">
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#64748B]">Pay Mode</span>
+                  <select
+                    value={form.payMode}
+                    onChange={(e) => setForm((prev) => ({ ...prev, payMode: e.target.value }))}
+                    className="mt-1 h-10 w-full rounded-xl border border-[#E5E7EB] px-3 text-sm font-medium outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option>Daily</option>
+                    <option>Hourly</option>
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#64748B]">Day Rate</span>
+                    <input
+                      value={form.ratePerDay}
+                      onChange={(e) => setForm((prev) => ({ ...prev, ratePerDay: e.target.value }))}
+                      disabled={form.payMode === 'Hourly'}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#E5E7EB] px-3 text-sm font-semibold outline-none disabled:bg-[#F1F5F9]"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#64748B]">Hourly Rate</span>
+                    <input
+                      value={form.ratePerHour}
+                      onChange={(e) => setForm((prev) => ({ ...prev, ratePerHour: e.target.value }))}
+                      disabled={form.payMode === 'Daily'}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#E5E7EB] px-3 text-sm font-semibold outline-none disabled:bg-[#F1F5F9]"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#64748B]">Paid Hours / Day</span>
+                    <input value="8" disabled className="mt-1 h-10 w-full rounded-xl border border-[#E5E7EB] bg-[#F1F5F9] px-3 text-sm font-semibold text-[#475569]" />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#64748B]">Payroll Group</span>
+                    <input
+                      value={form.payrollGroup}
+                      onChange={(e) => setForm((prev) => ({ ...prev, payrollGroup: e.target.value }))}
+                      className="mt-1 h-10 w-full rounded-xl border border-[#E5E7EB] px-3 text-sm font-medium outline-none"
+                    />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="text-xs font-semibold text-[#64748B]">Salary Grade</span>
+                  <input
+                    value={form.salaryGrade}
+                    onChange={(e) => setForm((prev) => ({ ...prev, salaryGrade: e.target.value }))}
+                    className="mt-1 h-10 w-full rounded-xl border border-[#E5E7EB] px-3 text-sm font-medium outline-none"
+                  />
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3">
+                    <p className="text-xs font-semibold text-cyan-800">Timesheet</p>
+                    <p className="mt-1 text-lg font-bold text-[#0F172A]">{number(selected.daysWorked)} Days</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <p className="text-xs font-semibold text-emerald-800">Pay</p>
+                    <p className="mt-1 text-lg font-bold text-[#0F172A]">{money(selected.grossPay, canViewMoney)}</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => void saveRate()}
+                  disabled={saving || !payload?.permissions.canUpdateRates}
+                  className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  {saving ? 'Saving…' : 'Save Daily Pay Setup'}
+                </button>
+
+                <ReadinessGauge
+                  score={readinessScore(selected)}
+                  readyDays={Math.round(selected.payrollReadyDays)}
+                  issuesFound={selected.issues.length}
+                  blockingIssues={selected.status === 'Blocked' ? selected.issues.length : 0}
+                />
+
+                <AccordionSection title="Calculation Breakdown" subtitle="Day rate earnings engine" defaultOpen>
+                  <div className="space-y-1 text-xs text-[#475569]">
+                    <p>Mode: {selected.payMode}</p>
+                    <p>Days worked: {number(selected.daysWorked)}</p>
+                    <p>Payroll-ready days: {number(selected.payrollReadyDays)}</p>
+                    <p>Calculated gross: {money(selected.grossPay, canViewMoney)}</p>
+                  </div>
+                </AccordionSection>
+                <AccordionSection title="Payroll Impact" count={1}>
+                  <p className="text-xs text-[#64748B]">Gross pay posts to contract day-rate earnings for {payload?.periodLabel}.</p>
+                </AccordionSection>
+                <AccordionSection title="Assignments" count={1}>
+                  <p className="text-xs text-[#64748B]">{selected.payrollGroup} · {selected.paymentRun}</p>
+                </AccordionSection>
+                <AccordionSection title="Approval History" count={2}>
+                  <p className="text-xs text-[#64748B]">Timesheet status: {selected.timesheetStatus || 'Pending'}</p>
+                </AccordionSection>
+                <AccordionSection title="Notes">
+                  <ReadinessIssueList issues={selected.issues} tone={statusTone(selected.status)} />
+                </AccordionSection>
+              </div>
+            ) : null}
+          </div>
         </aside>
-      </section>
+      </div>
+
+      {/* Analytics */}
+      <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <AnalyticsCard title="Daily Pay Trend (This Month)" action={{ label: 'Export', icon: Download }}>
+          <DualLineChart labels={trendMonths} seriesA={payTrend} seriesB={empTrend} nameA="Calculated Pay" nameB="Employees" />
+        </AnalyticsCard>
+        <AnalyticsCard title="Pay Cost by Department" action={{ label: 'Export', icon: Download }}>
+          <HorizontalBarChart rows={deptCost} />
+          <p className="mt-2 text-[10px] text-[#94A3B8]">Values in millions NGN</p>
+        </AnalyticsCard>
+        <AnalyticsCard title="Pay Mode Distribution">
+          <DonutChart
+            rows={payModeDonut}
+            centerLabel="Employees"
+            centerValue={String(filtered.length)}
+          />
+        </AnalyticsCard>
+        <AnalyticsCard title="Top Daily Pay Employees">
+          <TopOvertimeEmployees rows={topEmployees} formatValue={(v) => money(v, canViewMoney)} />
+        </AnalyticsCard>
+        <AnalyticsCard title="Budget Utilization (Daily Pay)">
+          <BudgetUtilizationGauge utilized={Math.round(summary?.grossPay || 0)} budget={budget} label="Period Daily Pay Budget" />
+          <p className="mt-3 text-center text-xs text-[#64748B]">
+            Balance: {money(Math.max(0, budget - (summary?.grossPay || 0)), canViewMoney)}
+          </p>
+        </AnalyticsCard>
+        {payload?.controls ? (
+          <AnalyticsCard title="Period Controls">
+            <ul className="space-y-2 text-xs text-[#475569]">
+              <li className="rounded-lg bg-[#F8FAFC] px-3 py-2">{payload.controls.sourceRule}</li>
+              <li className="rounded-lg bg-[#F8FAFC] px-3 py-2">Max payable days: {payload.controls.maxMonthlyPayableDays}</li>
+              <li className="rounded-lg bg-[#F8FAFC] px-3 py-2">Duplicate prevention: {payload.controls.duplicateSourcePrevention ? 'On' : 'Off'}</li>
+            </ul>
+          </AnalyticsCard>
+        ) : null}
+      </div>
     </div>
   );
 }

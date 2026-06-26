@@ -8,6 +8,16 @@ import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeeKeys, type SagePayrollEmployee } from '@/lib/sage-people-payroll-store';
 import { approvedPaidLeaveForDate } from '@/lib/leave-management-store';
 import { readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
+import {
+  DAILY_BREAK_HOURS,
+  STANDARD_TIMESHEET_HOURS,
+  normalizeIdleAllocations,
+  normalizeProjectAllocations,
+  type TimesheetLine,
+} from '@/lib/timesheet-entry-shared';
+
+export type { TimesheetLine } from '@/lib/timesheet-entry-shared';
+export { DAILY_BREAK_HOURS, STANDARD_TIMESHEET_HOURS } from '@/lib/timesheet-entry-shared';
 
 export type TimesheetStatus =
   | 'Draft'
@@ -123,42 +133,6 @@ export type TimesheetPayrollUpdate = {
     bookedHours: number;
     idleHours: number;
   }>;
-};
-
-export type TimesheetLine = {
-  id: string;
-  headerId: string;
-  employeeId: string;
-  employeeNo: string;
-  employeeName: string;
-  biometricId: string;
-  attendanceId: string | null;
-  clockIn: string | null;
-  clockOut: string | null;
-  attendanceDuration: number;
-  projectAllocations: Array<{
-    projectId: string;
-    projectCode: string;
-    projectName: string;
-    taskId?: string;
-    taskName?: string;
-    activityId?: string;
-    hours: number;
-    remarks: string | null;
-  }>;
-  idleAllocations: Array<{
-    reasonId: string;
-    reasonName: string;
-    hours: number;
-    remarks: string | null;
-  }>;
-  usedHours: number;
-  idleHours: number;
-  totalHours: number;
-  variance: number; // Booked vs Attendance
-  remarks: string | null;
-  validationStatus: 'Valid' | 'Error' | 'Warning' | 'Incomplete';
-  validationMessage: string | null;
 };
 
 export type HourType =
@@ -345,8 +319,6 @@ const TIMESHEET_FILE_PATHS = uniquePaths([
   path.join(process.cwd(), 'apps', 'dashboard', 'data', 'hris', 'timesheet-entry.json'),
 ]);
 const TIMESHEET_DATE = '2026-06-03';
-export const STANDARD_TIMESHEET_HOURS = 8;
-export const DAILY_BREAK_HOURS = 1;
 export const normalizePaidWorkHours = (hours: number) => {
   const value = Number.isFinite(hours) ? hours : 0;
   if (value <= STANDARD_TIMESHEET_HOURS) return Math.max(0, Math.round(value * 10) / 10);
@@ -659,12 +631,12 @@ export const idleReasons: IdleReason[] = [
 export const defaultIdleReason = idleReasons.find((reason) => reason.code === 'BREAK') || idleReasons[0];
 
 export const withDefaultIdleReason = <T extends { reasonId: string; reasonName: string; hours: number; remarks: string | null }>(allocation: T): T => {
-  if (allocation.reasonId || allocation.hours <= 0) return allocation;
-  return {
-    ...allocation,
-    reasonId: defaultIdleReason.id,
-    reasonName: defaultIdleReason.name,
-  };
+  const withReason =
+    allocation.reasonId || allocation.hours <= 0
+      ? allocation
+      : { ...allocation, reasonId: defaultIdleReason.id, reasonName: defaultIdleReason.name };
+  const [normalized] = normalizeIdleAllocations([withReason]);
+  return normalized;
 };
 
 export const calculateTimesheetPeriod = (date: Date = new Date()): TimesheetPeriod => {
@@ -1333,7 +1305,20 @@ export async function generateProjectCode(): Promise<string> {
   return `${prefix}${nextSerial.toString().padStart(3, '0')}`;
 }
 
-export async function readTimesheetData(options?: { softFail?: boolean }) {
+const TIMESHEET_DATA_CACHE_MS = Number(process.env.HRIS_TIMESHEET_DATA_CACHE_MS || 60000);
+type TimesheetDataCache = {
+  value: { headers: TimesheetHeader[]; lines: TimesheetLine[] };
+  expiresAt: number;
+  pending?: Promise<{ headers: TimesheetHeader[]; lines: TimesheetLine[] }>;
+};
+
+let timesheetDataCache: TimesheetDataCache | null = null;
+
+export const invalidateTimesheetDataCache = () => {
+  timesheetDataCache = null;
+};
+
+async function readTimesheetDataUncached(options?: { softFail?: boolean }) {
   let pool: sql.ConnectionPool;
   try {
     pool = await db();
@@ -1409,7 +1394,7 @@ export async function readTimesheetData(options?: { softFail?: boolean }) {
     clockIn: row.ClockIn,
     clockOut: row.ClockOut,
     attendanceDuration: Number(row.AttendanceDuration || 0),
-    projectAllocations: projectByLine.get(row.Id) || [],
+    projectAllocations: normalizeProjectAllocations(projectByLine.get(row.Id) || []),
     idleAllocations: (idleByLine.get(row.Id) || []).map(withDefaultIdleReason),
     usedHours: Number(row.UsedHours || 0),
     idleHours: Number(row.IdleHours || 0),
@@ -1420,6 +1405,22 @@ export async function readTimesheetData(options?: { softFail?: boolean }) {
     validationMessage: row.ValidationMessage,
   }));
   return { headers, lines };
+}
+
+export async function readTimesheetData(options?: { softFail?: boolean }) {
+  const now = Date.now();
+  if (timesheetDataCache?.value && timesheetDataCache.expiresAt > now) return timesheetDataCache.value;
+  if (timesheetDataCache?.pending) return timesheetDataCache.pending;
+  const pending = readTimesheetDataUncached(options).then((value) => {
+    timesheetDataCache = { value, expiresAt: Date.now() + TIMESHEET_DATA_CACHE_MS };
+    return value;
+  });
+  timesheetDataCache = {
+    value: timesheetDataCache?.value ?? { headers: [], lines: [] },
+    expiresAt: 0,
+    pending,
+  };
+  return pending;
 }
 
 export type TimesheetApprovalListMode = 'all' | 'pending' | 'history';
@@ -1498,7 +1499,7 @@ const mapTimesheetLineRows = (
     clockIn: row.ClockIn,
     clockOut: row.ClockOut,
     attendanceDuration: Number(row.AttendanceDuration || 0),
-    projectAllocations: projectByLine.get(row.Id) || [],
+    projectAllocations: normalizeProjectAllocations(projectByLine.get(row.Id) || []),
     idleAllocations: (idleByLine.get(row.Id) || []).map(withDefaultIdleReason),
     usedHours: Number(row.UsedHours || 0),
     idleHours: Number(row.IdleHours || 0),
@@ -1845,7 +1846,7 @@ export async function readTimesheetApprovalData(options?: { softFail?: boolean }
     clockIn: row.ClockIn,
     clockOut: row.ClockOut,
     attendanceDuration: Number(row.AttendanceDuration || 0),
-    projectAllocations: projectByLine.get(row.Id) || [],
+    projectAllocations: normalizeProjectAllocations(projectByLine.get(row.Id) || []),
     idleAllocations: (idleByLine.get(row.Id) || []).map(withDefaultIdleReason),
     usedHours: Number(row.UsedHours || 0),
     idleHours: Number(row.IdleHours || 0),
@@ -1946,7 +1947,7 @@ WHEN MATCHED THEN UPDATE SET [HeaderId]=@HeaderId,[EmployeeId]=@EmployeeId,[Empl
 WHEN NOT MATCHED THEN INSERT ([Id],[HeaderId],[EmployeeId],[EmployeeNo],[EmployeeName],[BiometricId],[AttendanceId],[ClockIn],[ClockOut],[AttendanceDuration],[UsedHours],[IdleHours],[TotalHours],[Variance],[Remarks],[ValidationStatus],[ValidationMessage])
 VALUES (@Id,@HeaderId,@EmployeeId,@EmployeeNo,@EmployeeName,@BiometricId,@AttendanceId,@ClockIn,@ClockOut,@AttendanceDuration,@UsedHours,@IdleHours,@TotalHours,@Variance,@Remarks,@ValidationStatus,@ValidationMessage);`);
       await new sql.Request(tx).input('LineId', sql.NVarChar(220), line.id).query(`DELETE FROM [hris].[TimesheetProjectAllocations] WHERE [LineId]=@LineId; DELETE FROM [hris].[TimesheetIdleAllocations] WHERE [LineId]=@LineId;`);
-      for (const allocation of line.projectAllocations || []) {
+      for (const allocation of normalizeProjectAllocations(line.projectAllocations || [])) {
         await new sql.Request(tx)
           .input('LineId', sql.NVarChar(220), line.id)
           .input('ProjectId', sql.NVarChar(80), allocation.projectId)
@@ -1970,6 +1971,7 @@ VALUES (@Id,@HeaderId,@EmployeeId,@EmployeeNo,@EmployeeName,@BiometricId,@Attend
       }
     }
     await tx.commit();
+    invalidateTimesheetDataCache();
   } catch (error) {
     await tx.rollback();
     throw error;
@@ -2058,7 +2060,7 @@ WHEN NOT MATCHED THEN INSERT ([Id],[HeaderId],[EmployeeId],[EmployeeNo],[Employe
 VALUES (@Id,@HeaderId,@EmployeeId,@EmployeeNo,@EmployeeName,@BiometricId,@AttendanceId,@ClockIn,@ClockOut,@AttendanceDuration,@UsedHours,@IdleHours,@TotalHours,@Variance,@Remarks,@ValidationStatus,@ValidationMessage);`);
 
       await new sql.Request(tx).input('LineId', sql.NVarChar(220), line.id).query(`DELETE FROM [hris].[TimesheetProjectAllocations] WHERE [LineId]=@LineId; DELETE FROM [hris].[TimesheetIdleAllocations] WHERE [LineId]=@LineId;`);
-      for (const allocation of line.projectAllocations || []) {
+      for (const allocation of normalizeProjectAllocations(line.projectAllocations || [])) {
         await new sql.Request(tx)
           .input('LineId', sql.NVarChar(220), line.id)
           .input('ProjectId', sql.NVarChar(80), allocation.projectId)
@@ -2083,6 +2085,7 @@ VALUES (@Id,@HeaderId,@EmployeeId,@EmployeeNo,@EmployeeName,@BiometricId,@Attend
     }
 
     await tx.commit();
+    invalidateTimesheetDataCache();
   } catch (error) {
     await tx.rollback();
     throw error;
@@ -2215,6 +2218,90 @@ WHEN NOT MATCHED THEN INSERT ([Id],[PeriodId],[PeriodName],[AcknowledgedAt],[Ack
     await tx.rollback();
     throw error;
   }
+}
+
+const payrollRound = (value: number) => Math.round(value * 10) / 10;
+
+/** Rebuild period payroll attendance totals after overtime corrections on posted timesheets. */
+export async function refreshTimesheetPayrollUpdatesForHeaders(headerIds: string[], actor: string) {
+  const uniqueHeaderIds = Array.from(new Set(headerIds.filter(Boolean)));
+  if (!uniqueHeaderIds.length) return { processed: 0 };
+
+  const [{ headers, lines }, periods] = await Promise.all([readTimesheetData(), readTimesheetPeriods()]);
+  let updates = await readTimesheetPayrollUpdates();
+  const touchedHeaders: TimesheetHeader[] = [];
+  const groupedByPeriod = new Map<string, string[]>();
+
+  for (const headerId of uniqueHeaderIds) {
+    const header = headers.find((item) => item.id === headerId);
+    if (!header) throw new Error(`Timesheet ${headerId} was not found.`);
+    const status = normalizeTimesheetStatus(header.status);
+    if (!['HR_Acknowledged', 'Locked', 'Approved'].includes(status)) continue;
+    const existingPeriodUpdate = updates.find((update) => update.periodId === header.periodId);
+    const merged = Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), headerId]));
+    groupedByPeriod.set(header.periodId, merged);
+  }
+
+  for (const [periodId, mergedHeaderIds] of groupedByPeriod) {
+    const sampleHeader = headers.find((item) => item.id === mergedHeaderIds[0]);
+    if (!sampleHeader) continue;
+    const existingPeriodUpdate = updates.find((update) => update.periodId === periodId);
+    const totals = new Map<string, {
+      employeeId: string;
+      employeeName: string;
+      daysWorked: number;
+      attendanceHours: number;
+      bookedHours: number;
+      idleHours: number;
+    }>();
+
+    for (const line of lines.filter((item) => mergedHeaderIds.includes(item.headerId))) {
+      const current = totals.get(line.employeeId) || {
+        employeeId: line.employeeId,
+        employeeName: line.employeeName,
+        daysWorked: 0,
+        attendanceHours: 0,
+        bookedHours: 0,
+        idleHours: 0,
+      };
+      current.daysWorked += line.clockIn ? 1 : 0;
+      current.attendanceHours = payrollRound(current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration));
+      current.bookedHours = payrollRound(current.bookedHours + normalizePaidWorkHours(line.totalHours));
+      current.idleHours = payrollRound(current.idleHours + line.idleHours);
+      totals.set(line.employeeId, current);
+    }
+
+    const period =
+      periods.find((item) => item.id === periodId) ||
+      periods.find((item) => sampleHeader.timesheetDate >= item.startDate && sampleHeader.timesheetDate <= item.endDate);
+    if (!period) throw new Error(`Timesheet period ${periodId} was not found.`);
+
+    updates = [
+      {
+        id: existingPeriodUpdate?.id || `payroll-${periodId}-${Date.now()}`,
+        periodId,
+        periodName: period.name,
+        acknowledgedAt: new Date().toISOString(),
+        acknowledgedBy: actor,
+        headerIds: mergedHeaderIds,
+        employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+      },
+      ...updates.filter((update) => update.periodId !== periodId),
+    ];
+  }
+
+  for (const headerId of uniqueHeaderIds) {
+    const header = headers.find((item) => item.id === headerId);
+    if (!header) continue;
+    if (!['HR_Acknowledged', 'Locked', 'Approved'].includes(normalizeTimesheetStatus(header.status))) continue;
+    touchedHeaders.push(header);
+  }
+
+  if (touchedHeaders.length) {
+    await writeTimesheetPayrollUpdates(updates);
+  }
+
+  return { processed: touchedHeaders.length };
 }
 
 export async function readTimesheetWorkCenters(): Promise<TimesheetWorkCenter[]> {
@@ -2622,7 +2709,7 @@ export type ProjectTimesheetApproval = {
 export function buildProjectTimesheetApprovals(header: TimesheetHeader, lines: TimesheetLine[], projects: Project[], actor?: string | null): ProjectTimesheetApproval[] {
   const byProject = new Map<string, ProjectTimesheetApproval>();
   for (const line of lines) {
-    for (const allocation of line.projectAllocations || []) {
+    for (const allocation of normalizeProjectAllocations(line.projectAllocations || [])) {
       if (!allocation.projectCode || Number(allocation.hours || 0) <= 0) continue;
       const project = projects.find((item) => item.code.toLowerCase() === allocation.projectCode.toLowerCase());
       const existing = byProject.get(allocation.projectCode) || {

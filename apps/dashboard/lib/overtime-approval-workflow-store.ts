@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { approvedOvertimeStatuses } from '@/lib/timesheet-overtime-config';
 import sql from 'mssql';
 import { getDleEnterpriseDbPool } from '@/lib/dle-enterprise-db';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
@@ -411,12 +412,19 @@ export const actOnOvertimeAuthorizationToken = async (tokenValue: string) => {
   return updated;
 };
 
-export const listApprovedOvertimeForSupervisor = async (date: string, supervisorValue?: string | null) => {
+export const listApprovedOvertimeForSupervisor = async (
+  date: string,
+  supervisorValue?: string | null,
+  workCenter?: string | null,
+) => {
   const code = clean(supervisorValue).split(' - ')[0].toLowerCase();
+  const center = clean(workCenter).toLowerCase();
+  const statuses = approvedOvertimeStatuses();
   const rows = await listOvertimeAuthorizationRequests();
   return rows.filter((item) =>
-    item.status === 'MD Approved' &&
+    statuses.includes(item.status) &&
     item.workDate === dateOnly(date) &&
-    (!code || item.supervisorCode.toLowerCase() === code || item.supervisorName.toLowerCase().includes(code)),
+    (!code || item.supervisorCode.toLowerCase() === code || item.supervisorName.toLowerCase().includes(code)) &&
+    (!center || !clean(item.workCenter) || clean(item.workCenter).toLowerCase() === center || clean(item.workCenter).toLowerCase().includes(center)),
   );
 };

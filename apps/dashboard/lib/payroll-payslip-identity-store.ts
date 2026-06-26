@@ -148,11 +148,22 @@ const mergeIdentity = (current: PayslipEmployeeIdentity | undefined, incoming: P
   };
 };
 
+const IDENTITY_CACHE_MS = Number(process.env.HRIS_PAYSLIP_IDENTITY_CACHE_MS || 300000);
+let identityCache: { expiresAt: number; value: PayslipEmployeeIdentity[] } | null = null;
+
+export const invalidatePayslipIdentityCache = () => {
+  identityCache = null;
+};
+
 export const readPayslipEmployeeIdentities = async (): Promise<PayslipEmployeeIdentity[]> => {
+  const now = Date.now();
+  if (identityCache && identityCache.expiresAt > now) return identityCache.value;
   for (const identityPath of IDENTITY_PATHS) {
     try {
       const parsed = JSON.parse(await readFile(identityPath, 'utf8'));
-      return Array.isArray(parsed) ? parsed : [];
+      const value = Array.isArray(parsed) ? parsed : [];
+      identityCache = { value, expiresAt: Date.now() + IDENTITY_CACHE_MS };
+      return value;
     } catch {
       // Try the next configured/runtime location.
     }

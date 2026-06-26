@@ -6,5 +6,5 @@ export const metadata: Metadata = {
 };
 
 export default function OvertimePayPage() {
-  return <OvertimePayClient initialNow={new Date().toISOString()} />;
+  return <OvertimePayClient />;
 }

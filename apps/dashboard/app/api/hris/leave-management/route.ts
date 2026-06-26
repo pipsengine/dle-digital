@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       comments: body.comments ? String(body.comments) : undefined,
       reason: body.reason ? String(body.reason) : undefined,
     });
-    return jsonOk({ message: leaveAllowanceMessage || validation.message, payload: await readLeaveManagementPayload(section, role) });
+    return jsonOk({ message: leaveAllowanceMessage || validation.message, payload: await readLeaveManagementPayload(section, role, { forceSync: true }) });
   } catch (error) {
     return jsonErr(500, error instanceof Error ? error.message : 'Unable to process leave action.');
   }

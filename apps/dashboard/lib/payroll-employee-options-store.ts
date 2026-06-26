@@ -51,11 +51,22 @@ const OPTIONS_PATHS = resolveOptionsPaths();
 const compact = (value: unknown) => String(value || '').trim();
 const keyFor = (value: unknown) => compact(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
+const OPTIONS_CACHE_MS = Number(process.env.HRIS_PAYROLL_OPTIONS_CACHE_MS || 300000);
+let optionsCache: { expiresAt: number; value: PayrollEmployeeOption[] } | null = null;
+
+export const invalidatePayrollEmployeeOptionsCache = () => {
+  optionsCache = null;
+};
+
 export const readPayrollEmployeeOptions = async (): Promise<PayrollEmployeeOption[]> => {
+  const now = Date.now();
+  if (optionsCache && optionsCache.expiresAt > now) return optionsCache.value;
   for (const optionsPath of OPTIONS_PATHS) {
     try {
       const parsed = JSON.parse(await readFile(optionsPath, 'utf8'));
-      return Array.isArray(parsed) ? parsed : [];
+      const value = Array.isArray(parsed) ? parsed : [];
+      optionsCache = { value, expiresAt: Date.now() + OPTIONS_CACHE_MS };
+      return value;
     } catch {
       // Try the next configured/runtime location.
     }
@@ -80,6 +91,7 @@ export const writePayrollEmployeeOption = async (option: Omit<PayrollEmployeeOpt
     try {
       await mkdir(path.dirname(optionsPath), { recursive: true });
       await writeFile(optionsPath, payload, 'utf8');
+      optionsCache = { value: next, expiresAt: Date.now() + OPTIONS_CACHE_MS };
       return nextOption;
     } catch (error) {
       lastError = error;

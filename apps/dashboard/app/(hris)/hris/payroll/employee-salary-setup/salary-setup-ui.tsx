@@ -15,11 +15,13 @@ export const setupToneStyles: Record<SetupTone, { card: string; icon: string; ch
   slate: { card: 'border-[#E5E7EB] bg-white', icon: 'bg-slate-100 text-slate-700', chip: 'bg-slate-100 text-slate-700 border-slate-200', accent: '#64748B' },
 };
 
+const roundSparkPoint = (value: number) => Math.round(value * 100) / 100;
+
 export function Sparkline({ seed, tone }: { seed: number; tone: SetupTone }) {
   const points = Array.from({ length: 8 }, (_, index) => {
     const wave = Math.sin(seed * 0.7 + index * 0.9) * 12 + Math.cos(seed + index) * 6;
-    const y = 24 - (10 + wave + index * 1.2);
-    return `${index * 14},${Math.max(4, Math.min(28, y))}`;
+    const y = roundSparkPoint(Math.max(4, Math.min(28, 24 - (10 + wave + index * 1.2))));
+    return `${index * 14},${y}`;
   }).join(' ');
   const color = setupToneStyles[tone].accent;
   return (

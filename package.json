@@ -14,7 +14,8 @@
     "publish:iis": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Publish-DleDashboardIis.ps1",
     "start:iis": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" powershell -NoProfile -ExecutionPolicy Bypass -File deployment/iis/Start-DleDashboard.ps1",
     "lint": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" node node_modules/eslint/bin/eslint.js apps/dashboard --ignore-pattern **/.next --ignore-pattern **/node_modules",
-    "clean": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" node -e \"require('fs').rmSync('apps/dashboard/.next',{recursive:true,force:true}); console.log('Cleaned apps/dashboard/.next');\""
+    "clean": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" node -e \"require('fs').rmSync('apps/dashboard/.next',{recursive:true,force:true}); console.log('Cleaned apps/dashboard/.next');\"",
+    "export:sage-timesheet": "node scripts/database/export-sage-contract-timesheet.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

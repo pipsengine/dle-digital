@@ -40,7 +40,7 @@ const titleOverrides: Record<string, string> = {
   '/hris/employees/profile-management': 'Employee Profile Management',
   '/hris/employees/employee-profile-management': 'Employee Profile Management',
   '/hris/employees': 'Employee Directory',
-  '/hris/payroll/salary-structure': 'Salary Structure',
+  '/hris/payroll/salary-structure': 'Salary Structure Command Center',
 };
 
 const titleCase = (value: string) =>

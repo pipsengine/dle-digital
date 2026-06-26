@@ -984,26 +984,60 @@ const permissionsFor = (role: LeaveRole): LeavePayload['permissions'] => ({
 let lastSageLeaveSyncAt = 0;
 const sageLeaveSyncIntervalMs = () => Number(process.env.HRIS_SAGE_LEAVE_SYNC_MS || 900000);
 
+let lastLeaveTypePolicySyncAt = 0;
+const leaveTypePolicySyncIntervalMs = () => Number(process.env.HRIS_LEAVE_TYPE_POLICY_SYNC_MS || 3600000);
+
+let lastEssLeaveUpsertAt = 0;
+const essLeaveUpsertIntervalMs = () => Number(process.env.HRIS_ESS_LEAVE_SYNC_MS || 300000);
+
+let lastLeaveBalanceSyncAt = 0;
+const leaveBalanceSyncIntervalMs = () => Number(process.env.HRIS_LEAVE_BALANCE_SYNC_MS || 300000);
+
+const maybeSyncLeaveTypePolicies = async (pool: sql.ConnectionPool, force = false) => {
+  if (!force && Date.now() - lastLeaveTypePolicySyncAt < leaveTypePolicySyncIntervalMs()) return;
+  await syncLeaveTypePolicies(pool);
+  lastLeaveTypePolicySyncAt = Date.now();
+};
+
+const maybeUpsertEssLeaveRequests = async (pool: sql.ConnectionPool, employees: DleEmployeeDirectoryRow[], force = false) => {
+  if (!force && Date.now() - lastEssLeaveUpsertAt < essLeaveUpsertIntervalMs()) return;
+  await upsertEssLeaveRequests(pool, employees);
+  lastEssLeaveUpsertAt = Date.now();
+};
+
+const maybeSyncLeaveBalances = async (pool: sql.ConnectionPool, employees: DleEmployeeDirectoryRow[], force = false) => {
+  if (!force && Date.now() - lastLeaveBalanceSyncAt < leaveBalanceSyncIntervalMs()) return;
+  await syncLeaveBalances(pool, employees);
+  lastLeaveBalanceSyncAt = Date.now();
+};
+
 const maybeSyncSageLeave = async () => {
   if (Date.now() - lastSageLeaveSyncAt < sageLeaveSyncIntervalMs()) return;
   await syncSageLeaveToHris().catch(() => undefined);
   lastSageLeaveSyncAt = Date.now();
 };
 
-export async function readLeaveManagementPayload(section = 'dashboard', roleInput?: string | null): Promise<LeavePayload> {
+export async function readLeaveManagementPayload(
+  section = 'dashboard',
+  roleInput?: string | null,
+  options?: { forceSync?: boolean },
+): Promise<LeavePayload> {
+  const forceSync = options?.forceSync === true;
   const normalizedSection = normalizeSection(section);
   const role = normalizeRole(roleInput);
   const employeeSource = await readPayrollEmployees();
   const employees = employeeSource.employees;
   const pool = await ensureDb();
   await maybeSyncSageLeave();
-  await syncLeaveTypePolicies(pool);
-  await upsertEssLeaveRequests(pool, employees);
-  await syncLeaveBalances(pool, employees);
-  const applications = await readLeaveApplications(pool);
-  const balances = await readLeaveBalances(pool);
-  const leaveTypes = await readLeaveTypes(pool);
-  const auditTrail = await readLeaveAudit(pool);
+  await maybeSyncLeaveTypePolicies(pool, forceSync);
+  await maybeUpsertEssLeaveRequests(pool, employees, forceSync);
+  await maybeSyncLeaveBalances(pool, employees, forceSync);
+  const [applications, balances, leaveTypes, auditTrail] = await Promise.all([
+    readLeaveApplications(pool),
+    readLeaveBalances(pool),
+    readLeaveTypes(pool),
+    readLeaveAudit(pool),
+  ]);
   const pendingApplications = applications.filter((item) => ['Submitted', 'Under Review', 'Draft'].includes(item.status)).length;
   const pendingApprovals = applications.filter((item) => ['Supervisor', 'Manager', 'HR', 'Final Approval'].includes(item.stage) && !['Approved', 'Completed', 'Cancelled', 'Rejected'].includes(item.status)).length;
   const employeesOnLeave = employees.filter((employee) => String(employee.status || '').toLowerCase().includes('leave')).length + applications.filter((item) => item.status === 'Approved').length;

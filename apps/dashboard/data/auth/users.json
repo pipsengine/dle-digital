@@ -23646,9 +23646,9 @@
     "passwordResetRequired": false,
     "failedAttempts": 0,
     "lockedUntil": null,
-    "lastLoginAt": "2026-06-25T17:19:06.071Z",
+    "lastLoginAt": "2026-06-26T06:34:00.939Z",
     "createdAt": "2026-06-14T12:32:30.629Z",
-    "updatedAt": "2026-06-25T17:19:06.071Z",
+    "updatedAt": "2026-06-26T06:34:00.939Z",
     "disabledAt": null,
     "deleted": false
   },

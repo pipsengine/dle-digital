@@ -27,14 +27,21 @@ import {
   Info,
 } from 'lucide-react';
 import type { StructureInsight } from '@/lib/organization-data';
+import {
+  applyOvertimeBooking,
+  previewOvertimeBooking,
+  remainingOvertimePool,
+  remainingOvertimeSlots,
+  validateTimesheetLine,
+  type OvertimeAuthorization,
+} from '@/lib/timesheet-overtime-booking';
+import { OVERTIME_HOUR_OPTIONS, DAILY_BREAK_HOURS, DEFAULT_BREAK_IDLE_REASON_ID, DEFAULT_BREAK_IDLE_REASON_NAME, normalizeIdleAllocations, normalizeProjectAllocations, canonicalProjectCode, consolidateProjectAllocationsToPrimary, resolvePrimaryProjectCode, timesheetDayRulesForDate, attendanceDurationFromClock, capProductiveHoursToAttendance, reconcileTimesheetLineHours, sumProjectAllocationHours } from '@/lib/timesheet-entry-shared';
+import { applyTimesheetLineDefaults } from '@/lib/timesheet-line-defaults';
+import { canBookOvertimeOnTimesheet } from '@/lib/timesheet-overtime-config';
+import { TimesheetEntryEnterpriseView } from './TimesheetEntryEnterpriseView';
 
 type TimesheetStatus = 'Draft' | 'Submitted' | 'Supervisor_Reviewed' | 'Project_Manager_Reviewed' | 'Cost_Control_Reviewed' | 'HR_Acknowledged' | 'HR_Reviewed' | 'Project_Control_Reviewed' | 'Approved' | 'Locked' | 'Rejected' | 'Returned';
 type TimesheetWorkflowStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR';
-const STANDARD_TIMESHEET_HOURS = 8;
-const DAILY_BREAK_HOURS = 1;
-const GROSS_TIMESHEET_HOURS = STANDARD_TIMESHEET_HOURS + DAILY_BREAK_HOURS;
-const DEFAULT_IDLE_REASON_ID = 'idl-009';
-const DEFAULT_IDLE_REASON_NAME = 'Break Time';
 const editableTimesheetStatuses: TimesheetStatus[] = ['Draft', 'Returned', 'Rejected'];
 const payrollReadyStatuses: TimesheetStatus[] = ['HR_Acknowledged', 'Approved', 'Locked'];
 const EMPLOYEE_CARD_PAGE_SIZE = 12;
@@ -46,6 +53,14 @@ const readApiJson = async (response: Response) => {
   try {
     return JSON.parse(text);
   } catch {
+    const isHtml = /^\s*</.test(text);
+    if (isHtml) {
+      throw new Error(
+        response.status >= 500
+          ? 'The timesheet service encountered a server error. Refresh the page and try again.'
+          : `Unexpected server response (${response.status}). Refresh the page and try again.`,
+      );
+    }
     throw new Error(text.slice(0, 240) || `Invalid response from server (${response.status})`);
   }
 };
@@ -146,6 +161,7 @@ type Project = {
 type Payload = {
   generatedAt: string;
   timesheetDate: string;
+  holidayDates: string[];
   period: TimesheetPeriod;
   header: TimesheetHeader | null;
   lines: TimesheetLine[];
@@ -229,6 +245,13 @@ type Payload = {
     currentOwnerRole: string;
     currentOwnerName: string;
   }>;
+  overtimeBooking: {
+    enabled: boolean;
+    devRelaxed: boolean;
+    retroCorrection: boolean;
+    openBooking: boolean;
+  };
+  canBookOvertime?: boolean;
   permissions: {
     actor: string;
     role: string;
@@ -276,6 +299,9 @@ type SearchableOption = {
 };
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
+
+const isSuperAdministratorRole = (role: string) =>
+  role === 'Super Administrator' || role === 'Super Admin' || /\bsuper\b.*\badmin/i.test(role);
 
 const todayDateInputValue = () => {
   const now = new Date();
@@ -365,8 +391,22 @@ const workCenterNamesForLocation = (workCenters: Payload['workCenters'], locatio
   return matching.length ? matching : workCenters.map((workCenter) => workCenter.name);
 };
 
-export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 'admin' | 'workforce-supervisor' }) {
-  const isWorkforceSupervisor = variant === 'workforce-supervisor';
+type DailyRatePanelRow = {
+  employeeId: string;
+  payMode: string;
+  dayRate: number;
+  hourRate: number;
+  paidHoursPerDay: number;
+  payrollGroup: string;
+  location: string;
+  workCenter: string;
+  timesheetDays: number;
+  calculatedPay: number;
+};
+
+export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 'admin' | 'workforce-supervisor' | 'enterprise' }) {
+  const isEnterprise = variant === 'enterprise';
+  const isWorkforceSupervisor = variant === 'workforce-supervisor' || isEnterprise;
   const searchParams = useSearchParams();
   const dateParam = searchParams.get('date');
   const supervisorParam = searchParams.get('supervisorId');
@@ -409,6 +449,10 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const [workCenters, setWorkCenters] = useState<Payload['workCenters']>([]);
   const [workCenterDraft, setWorkCenterDraft] = useState('');
   const [editingWorkCenter, setEditingWorkCenter] = useState<Payload['workCenters'][number] | null>(null);
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [selectedShift, setSelectedShift] = useState('01 (Day)');
+  const [rightPanelTab, setRightPanelTab] = useState<'details' | 'history' | 'alerts'>('details');
+  const [dailyPayPanel, setDailyPayPanel] = useState<DailyRatePanelRow | null>(null);
   const loadRequestRef = useRef(0);
   const autoSyncKeyRef = useRef<string | null>(null);
   const hasPayloadRef = useRef(false);
@@ -497,6 +541,16 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   }, [load, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter]);
 
   const handleSyncAttendance = useCallback(async (source: 'manual' | 'auto' = 'manual') => {
+    const headerStatus = payload?.header?.status ?? 'Draft';
+    const retroBooking = payload?.overtimeBooking?.retroCorrection;
+    const postedTimesheet = !editableTimesheetStatuses.includes(headerStatus);
+    if (retroBooking && postedTimesheet) {
+      if (source === 'manual') {
+        setError(null);
+        setNotice('Attendance sync is locked on posted timesheets. Use the overtime booking bar to add corrections.');
+      }
+      return;
+    }
     if (payload?.period.status !== 'Open') {
       if (source === 'manual') setError('This timesheet period is closed. Reopen it before syncing attendance.');
       return;
@@ -529,10 +583,13 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     } finally {
       setSubmitting(false);
     }
-  }, [isWorkforceSupervisor, payload?.period.status, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter]);
+  }, [isWorkforceSupervisor, payload?.header?.status, payload?.overtimeBooking?.retroCorrection, payload?.period.status, selectedDate, selectedSupervisor, selectedLocation, selectedWorkCenter]);
 
   useEffect(() => {
     if (!payload || loading || refreshing || submitting) return;
+    const headerStatus = payload.header?.status ?? 'Draft';
+    const postedTimesheet = !editableTimesheetStatuses.includes(headerStatus);
+    if (payload.overtimeBooking?.retroCorrection && postedTimesheet) return;
     if (payload.period.status !== 'Open') return;
     if (!selectedDate || !selectedSupervisor || !selectedLocation || !selectedWorkCenter) return;
 
@@ -638,39 +695,203 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     if (isAbsentLine) {
       line.projectAllocations = line.projectAllocations.map((allocation) => ({ ...allocation, hours: 0 }));
     }
-    line.idleAllocations = line.idleAllocations.map((allocation) =>
-      allocation.reasonId || allocation.hours <= 0
-        ? allocation
-        : { ...allocation, reasonId: DEFAULT_IDLE_REASON_ID, reasonName: DEFAULT_IDLE_REASON_NAME },
+    const primaryCode = resolvePrimaryProjectCode(
+      matrixColumns.map((col) => col.code),
+      line.projectAllocations,
     );
-    
-    line.usedHours = round1(line.projectAllocations.reduce((sum, p) => sum + p.hours, 0));
-    line.idleHours = round1(line.idleAllocations.reduce((sum, i) => sum + i.hours, 0));
-    line.totalHours = round1(line.usedHours + line.idleHours);
-    line.variance = round1(line.totalHours - GROSS_TIMESHEET_HOURS);
-    
-    if (isAbsentLine && line.usedHours > 0.001) {
-      line.validationStatus = 'Error';
-      line.validationMessage = 'Absent employees cannot receive project/productive hours.';
-    } else if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
-      line.validationStatus = 'Error';
-      line.validationMessage = `Productive/payroll hours cannot exceed ${STANDARD_TIMESHEET_HOURS} hours per day.`;
-    } else if (line.totalHours > GROSS_TIMESHEET_HOURS + 0.001) {
-      line.validationStatus = 'Error';
-      line.validationMessage = `Total timesheet hours cannot exceed ${GROSS_TIMESHEET_HOURS} hours including break time.`;
-    } else if (line.totalHours === GROSS_TIMESHEET_HOURS && line.usedHours === STANDARD_TIMESHEET_HOURS) {
-      line.validationStatus = 'Valid';
-      line.validationMessage = null;
-    } else if (line.idleHours > 0 && line.idleAllocations.some(a => a.hours > 0 && !a.reasonId)) {
-      line.validationStatus = 'Warning';
-      line.validationMessage = 'Idle time requires a valid reason.';
-    } else {
-      line.validationStatus = 'Incomplete';
-      line.validationMessage = `Awaiting full ${GROSS_TIMESHEET_HOURS}-hour allocation including ${DAILY_BREAK_HOURS}h break. Current: ${line.totalHours} hrs.`;
+    const primaryLabel = matrixColumns.find((col) => canonicalProjectCode(col.code) === primaryCode)?.label;
+    line.projectAllocations = consolidateProjectAllocationsToPrimary(
+      normalizeProjectAllocations(line.projectAllocations || []),
+      primaryCode,
+      primaryLabel,
+    );
+    line.idleAllocations = normalizeIdleAllocations(
+      line.idleAllocations.map((allocation) =>
+        allocation.reasonId || allocation.hours <= 0
+          ? allocation
+          : { ...allocation, reasonId: DEFAULT_BREAK_IDLE_REASON_ID, reasonName: DEFAULT_BREAK_IDLE_REASON_NAME },
+      ),
+    );
+    const idleHoursForCap = round1(line.idleAllocations.reduce((sum, item) => sum + Number(item.hours || 0), 0));
+    if (line.clockIn && line.projectAllocations.length > 0) {
+      line.projectAllocations = line.projectAllocations.map((allocation) => ({
+        ...allocation,
+        hours: capProductiveHoursToAttendance(Number(allocation.hours || 0), line, idleHoursForCap),
+      }));
     }
 
-    next[index] = line;
+    const dayContext = { date: selectedDate, holidayDates: payload?.holidayDates ?? [] };
+    const authorizations = (payload?.approvedOvertimeAuthorizations ?? []) as OvertimeAuthorization[];
+    const bookingOptions = payload?.overtimeBooking ?? { enabled: false, devRelaxed: false, retroCorrection: false, openBooking: false };
+    const validated = validateTimesheetLine(
+      line,
+      authorizations,
+      next.map((item, itemIndex) => (itemIndex === index ? line : item)),
+      selectedWorkCenter,
+      bookingOptions,
+      dayContext,
+    );
+    let attendanceDuration = line.attendanceDuration;
+    const clockDuration = attendanceDurationFromClock(line.clockIn, line.clockOut);
+    if (clockDuration !== null && clockDuration > 0) {
+      attendanceDuration = clockDuration;
+    } else if (
+      line.clockIn &&
+      (bookingOptions.openBooking || bookingOptions.retroCorrection) &&
+      validated.totalHours > attendanceDuration + 0.001
+    ) {
+      attendanceDuration = round1(validated.totalHours);
+    }
+    next[index] = {
+      ...line,
+      projectAllocations: normalizeProjectAllocations(line.projectAllocations),
+      attendanceDuration,
+      usedHours: validated.usedHours,
+      idleHours: validated.idleHours,
+      totalHours: validated.totalHours,
+      variance: validated.variance,
+      validationStatus: validated.validationStatus,
+      validationMessage: validated.validationMessage,
+    };
     setLocalLines(next);
+  };
+
+  const handleBookApprovedOvertime = async (authorizationId: string, otHours: number) => {
+    const auth = (payload?.approvedOvertimeAuthorizations ?? []).find((item) => item.id === authorizationId);
+    const booking = payload?.overtimeBooking ?? { enabled: false, devRelaxed: false, retroCorrection: false, openBooking: false };
+    const header = payload?.header;
+    const retro = booking.retroCorrection;
+    const headerStatus = header?.status ?? 'Draft';
+    const periodIsOpen = payload?.period.status === 'Open';
+    const timesheetEditable = periodIsOpen && editableTimesheetStatuses.includes(headerStatus);
+    const payrollReady = payrollReadyStatuses.includes(headerStatus);
+    const canBook =
+      booking.enabled &&
+      header &&
+      (payload?.canBookOvertime ?? canBookOvertimeOnTimesheet(header, payload?.period, booking));
+
+    if (!auth || !canBook) {
+      setError(retro ? 'Overtime booking is not available for this timesheet.' : 'This timesheet must be open for editing before booking overtime.');
+      return;
+    }
+    if (!booking.enabled) {
+      setError('Overtime booking is disabled in this environment.');
+      return;
+    }
+    if (!retro && !periodIsOpen) {
+      setError('Reopen the timesheet period before booking overtime.');
+      return;
+    }
+
+    if (!matrixColumns.some((column) => column.code === auth.projectCode)) {
+      setMatrixColumns((current) => [
+        ...current,
+        { code: auth.projectCode, label: auth.projectName || auth.projectCode, kind: 'project' as const },
+      ]);
+    }
+
+    const targets = selectedEmployees.length
+      ? localLines.filter((line) => selectedEmployees.includes(line.employeeId) && line.clockIn)
+      : localLines.filter((line) => line.clockIn);
+    if (!targets.length) {
+      setError('Select present employees to book approved overtime.');
+      return;
+    }
+
+    const persistViaApi = retro || !timesheetEditable || payrollReady;
+    if (persistViaApi) {
+      setSubmitting(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/hris/time-and-logs/timesheet-entry', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'BOOK_OVERTIME',
+            headerId: header.id,
+            authorizationId,
+            otHours,
+            employeeIds: selectedEmployees.length ? selectedEmployees : undefined,
+            postToPayroll: retro || payrollReady,
+            date: selectedDate,
+            supervisorId: selectedSupervisor,
+            locationName: selectedLocation,
+            workCenterName: selectedWorkCenter,
+            mode: isWorkforceSupervisor ? 'supervisor' : undefined,
+          }),
+        });
+        const json = await readApiJson(res);
+        if (!res.ok || json?.status !== 'success') throw new Error(json?.error || 'Overtime booking failed.');
+        setPayload(json.data);
+        setLocalLines(json.data.lines || []);
+        setNotice(
+          `Booked ${otHours}h overtime on ${auth.projectCode} for ${targets.length} employee${targets.length === 1 ? '' : 's'}${
+            retro || payrollReady ? ' and refreshed payroll feed' : ''
+          }.`,
+        );
+        setSelectedEmployees([]);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'Overtime booking failed.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    let next = [...localLines];
+    let bookedCount = 0;
+    const denials: string[] = [];
+    const partials: string[] = [];
+    const dayContext = { date: selectedDate, holidayDates: payload?.holidayDates ?? [] };
+    for (const line of targets) {
+      const index = next.findIndex((item) => item.id === line.id);
+      if (index < 0) continue;
+      const preview = previewOvertimeBooking(line, otHours, dayContext);
+      if (!preview.canApply) {
+        denials.push(`${line.employeeName}: ${preview.denialReason}`);
+        next[index] = {
+          ...next[index],
+          validationStatus: 'Error',
+          validationMessage: preview.denialReason,
+        };
+        continue;
+      }
+      const beforeUsed = sumProjectAllocationHours(next[index].projectAllocations);
+      next[index] = applyOvertimeBooking(
+        next[index],
+        auth as OvertimeAuthorization,
+        otHours,
+        next,
+        selectedWorkCenter,
+        booking,
+        dayContext,
+        resolvePrimaryProjectCode(matrixColumns.map((col) => col.code), next[index].projectAllocations),
+      );
+      const afterUsed = sumProjectAllocationHours(next[index].projectAllocations);
+      if (Math.abs(afterUsed - beforeUsed) > 0.001) {
+        bookedCount += 1;
+        if (preview.denialReason) partials.push(`${line.employeeName}: ${preview.denialReason}`);
+      } else {
+        denials.push(
+          `${line.employeeName}: ${preview.denialReason || next[index].validationMessage || 'No overtime headroom on biometric log.'}`,
+        );
+      }
+    }
+    setLocalLines(next);
+    if (bookedCount === 0) {
+      setError(
+        denials.length
+          ? `Overtime denied — productive hours must equal biometric duration minus 1h break (8h + OT = DUR − 1):\n${denials.join('\n')}`
+          : 'Overtime could not be booked for the selected employees.',
+      );
+      return;
+    }
+    setNotice(
+      `Booked overtime on ${auth.projectCode} for ${bookedCount} employee${bookedCount === 1 ? '' : 's'}. Save draft to persist.` +
+        (partials.length ? ` Partial bookings:\n${partials.join('\n')}` : '') +
+        (denials.length ? ` Denied:\n${denials.join('\n')}` : ''),
+    );
+    setSelectedEmployees([]);
   };
 
   const handleCopyPrevious = async () => {
@@ -726,7 +947,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           mode: isWorkforceSupervisor ? 'supervisor' : undefined,
           locationName: selectedLocation,
           headerId: payload?.header?.id,
-          lines: localLines,
+          lines: localLines.map(reconcileTimesheetLineHours),
         }),
       });
       const json = await readApiJson(res);
@@ -738,7 +959,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
         setSelectedEmployees([]);
         setQuery('');
         setBulkProject('');
-        setBulkHours(STANDARD_TIMESHEET_HOURS);
+        setBulkHours(timesheetDayRulesForDate(selectedDate, payload?.holidayDates ?? []).standardProductiveHours);
         setNotice('Timesheet submitted for supervisor review. Capture fields are now locked until the sheet is returned or rejected.');
       } else if (saveAsDraft) {
         setNotice('Draft saved. You can continue editing this timesheet before submission.');
@@ -899,8 +1120,83 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     setMatrixColumns(next);
   };
 
+  const moveProjectColumn = (colIdx: number, direction: -1 | 1) => {
+    const target = colIdx + direction;
+    if (target < 0 || target >= matrixColumns.length) return;
+    const next = [...matrixColumns];
+    const [item] = next.splice(colIdx, 1);
+    next.splice(target, 0, item);
+    setMatrixColumns(next);
+  };
+
+  const handleAutoDistribute = () => {
+    if (!payload || payload.period.status !== 'Open' || !editableTimesheetStatuses.includes(payload.header?.status ?? 'Draft') || matrixColumns.length === 0) return;
+    const dayRules = timesheetDayRulesForDate(selectedDate, payload.holidayDates ?? []);
+    const dayContext = { date: selectedDate, holidayDates: payload.holidayDates ?? [] };
+    const primaryCol = matrixColumns[0];
+    const primaryCode = resolvePrimaryProjectCode(matrixColumns.map((col) => col.code));
+    const next = localLines.map((line) => {
+      if (!line.clockIn) return line;
+      const projectAllocations = consolidateProjectAllocationsToPrimary(
+        [{
+          projectId: primaryCode,
+          projectCode: primaryCode,
+          projectName: primaryCol?.label || primaryCode,
+          hours: dayRules.standardProductiveHours,
+          remarks: null,
+        }],
+        primaryCode,
+        primaryCol?.label,
+      );
+      const usedHours = round1(projectAllocations.reduce((sum, item) => sum + item.hours, 0));
+      const idleAllocations = [{ reasonId: DEFAULT_BREAK_IDLE_REASON_ID, reasonName: DEFAULT_BREAK_IDLE_REASON_NAME, hours: DAILY_BREAK_HOURS, remarks: null }];
+      const idleHours = DAILY_BREAK_HOURS;
+      const totalHours = round1(usedHours + idleHours);
+      const draft = applyTimesheetLineDefaults(
+        {
+          ...line,
+          projectAllocations,
+          idleAllocations,
+          usedHours,
+          idleHours,
+          totalHours,
+          variance: round1(totalHours - dayRules.grossHours),
+          validationStatus: 'Incomplete',
+          validationMessage: null,
+        } as TimesheetLine,
+        dayContext,
+        matrixColumns.map((col) => col.code),
+      );
+      return draft;
+    });
+    setLocalLines(next);
+    setNotice(`Hours auto-distributed across active project columns (${dayRules.standardProductiveHours}h standard).`);
+  };
+
+  const handleClearAllProjects = () => {
+    if (!payload || payload.period.status !== 'Open' || !editableTimesheetStatuses.includes(payload.header?.status ?? 'Draft')) return;
+    const dayRules = timesheetDayRulesForDate(selectedDate, payload.holidayDates ?? []);
+    const next = localLines.map((line) => {
+      const projectAllocations = line.projectAllocations.map((item) => ({ ...item, hours: 0 }));
+      const usedHours = 0;
+      const totalHours = round1(usedHours + line.idleHours);
+      return {
+        ...line,
+        projectAllocations,
+        usedHours,
+        totalHours,
+        variance: round1(totalHours - dayRules.grossHours),
+        validationStatus: 'Incomplete',
+        validationMessage: `Awaiting full ${dayRules.grossHours}-hour allocation including ${DAILY_BREAK_HOURS}h break.`,
+      } as TimesheetLine;
+    });
+    setLocalLines(next);
+    setNotice('Project allocations cleared for all employees.');
+  };
+
   const removeProjectColumn = (colIdx: number) => {
     const colToRemove = matrixColumns[colIdx];
+    const dayRules = timesheetDayRulesForDate(selectedDate, payload?.holidayDates ?? []);
     const nextCols = matrixColumns.filter((_, idx) => idx !== colIdx);
     setMatrixColumns(nextCols);
 
@@ -913,8 +1209,8 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
         projectAllocations: nextAllocations,
         usedHours,
         totalHours,
-        variance: round1(totalHours - GROSS_TIMESHEET_HOURS),
-        validationStatus: usedHours > STANDARD_TIMESHEET_HOURS + 0.001 || totalHours > GROSS_TIMESHEET_HOURS + 0.001 ? 'Error' : (totalHours === GROSS_TIMESHEET_HOURS && usedHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : 'Incomplete')
+        variance: round1(totalHours - dayRules.grossHours),
+        validationStatus: usedHours > dayRules.standardProductiveHours + 0.001 || totalHours > dayRules.grossHours + 0.001 ? 'Error' : (totalHours === dayRules.grossHours && usedHours === dayRules.standardProductiveHours ? 'Valid' : 'Incomplete')
       } as TimesheetLine;
     });
     setLocalLines(nextLines);
@@ -941,7 +1237,66 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
     if (employeeCardPage > totalEmployeeCardPages) setEmployeeCardPage(totalEmployeeCardPages);
   }, [employeeCardPage, totalEmployeeCardPages]);
 
+  useEffect(() => {
+    if (!isEnterprise || localLines.length === 0) return;
+    setSelectedLineId((current) => current && localLines.some((line) => line.id === current) ? current : localLines[0]?.id || null);
+  }, [isEnterprise, localLines]);
+
+  const isSuperAdministrator = isSuperAdministratorRole(payload?.permissions.role ?? '');
+
+  useEffect(() => {
+    if (!isEnterprise || !isSuperAdministrator) {
+      setDailyPayPanel(null);
+      return;
+    }
+    const line = localLines.find((item) => item.id === selectedLineId) || localLines[0];
+    if (!line || !/^C/i.test(line.employeeNo)) {
+      setDailyPayPanel(null);
+      return;
+    }
+    void fetch('/api/hris/payroll/daily-rate-pay', { headers: { 'x-hris-role': 'Payroll Officer' }, cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        const row = json.data?.records?.find((item: { employeeId: string }) => item.employeeId === line.employeeNo) || null;
+        if (!row) {
+          setDailyPayPanel({
+            employeeId: line.employeeNo,
+            payMode: 'Daily',
+            dayRate: 0,
+            hourRate: 0,
+            paidHoursPerDay: 8,
+            payrollGroup: 'DLE',
+            location: selectedLocation,
+            workCenter: selectedWorkCenter,
+            timesheetDays: 0,
+            calculatedPay: 0,
+          });
+          return;
+        }
+        setDailyPayPanel({
+          employeeId: row.employeeId,
+          payMode: row.payMode || 'Daily',
+          dayRate: Number(row.dayRate || row.ratePerDay || 0),
+          hourRate: Number(row.hourRate || row.ratePerHour || 0),
+          paidHoursPerDay: Number(row.paidHoursPerDay || row.hoursPerDay || 8),
+          payrollGroup: row.payrollGroup || 'DLE',
+          location: row.location || selectedLocation,
+          workCenter: row.workCenter || selectedWorkCenter,
+          timesheetDays: Number(row.timesheetDays || row.daysWorked || 0),
+          calculatedPay: Number(row.calculatedPay || row.periodPay || 0),
+        });
+      })
+      .catch(() => setDailyPayPanel(null));
+  }, [isEnterprise, isSuperAdministrator, localLines, selectedLineId, selectedLocation, selectedWorkCenter]);
+
   if (loading && !payload) {
+    if (isEnterprise) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+          <RefreshCcw className="h-8 w-8 animate-spin text-[#94A3B8]" />
+        </div>
+      );
+    }
     return (
       <PageTemplate 
         title="Timesheet Entry" 
@@ -979,12 +1334,27 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const pctOfCrew = (value: number) => (summary.totalEmployees > 0 ? (value / summary.totalEmployees) * 100 : 0);
   const periodStatus = payload?.period.status ?? 'Open';
   const displayPeriod = payload?.period.startDate && payload.period.endDate ? payload.period : fallbackPeriodForDate(selectedDate);
+  const dayRules = timesheetDayRulesForDate(selectedDate, payload?.holidayDates ?? []);
+  const grossTimesheetHours = dayRules.grossHours;
+  const standardTimesheetHours = dayRules.standardProductiveHours;
   const periodLabel = `${formatPeriodDate(displayPeriod.startDate)} to ${formatPeriodDate(displayPeriod.endDate)}`;
   const periodIsOpen = periodStatus === 'Open';
   const headerStatus = payload?.header?.status ?? 'Draft';
   const isPayrollReady = payrollReadyStatuses.includes(headerStatus);
+  const overtimeBooking = payload?.overtimeBooking ?? { enabled: false, devRelaxed: false, retroCorrection: false, openBooking: false };
+  const approvedOvertimeAuthorizations = overtimeBooking.enabled ? (payload?.approvedOvertimeAuthorizations ?? []) : [];
   const canEditTimesheet = periodIsOpen && editableTimesheetStatuses.includes(headerStatus);
-  const showCaptureMatrix = canEditTimesheet;
+  const canBookOvertime =
+    payload?.canBookOvertime ??
+    canBookOvertimeOnTimesheet(payload?.header, payload?.period, overtimeBooking);
+  const showCaptureMatrix = canEditTimesheet || canBookOvertime;
+  const payrollLockMessage = /payroll-ready|cannot be edited/i;
+  const displayError = error && canBookOvertime && payrollLockMessage.test(error) ? null : error;
+  const displayNotice =
+    notice ||
+    (error && canBookOvertime && payrollLockMessage.test(error)
+      ? 'Timesheet is posted to payroll. Use the overtime booking bar below to add 2h, 3h, 4h corrections, then re-run payroll.'
+      : null);
   const activeSiteDevices = payload?.attendanceWorkCenters.filter((workCenter) => workCenter.location === selectedLocation || workCenter.site === selectedLocation) ?? [];
   const onlineSiteDevices = activeSiteDevices;
   const primarySiteDevice = [...activeSiteDevices].sort((a, b) => {
@@ -1001,7 +1371,6 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const supervisorDirectoryItem = supervisorDirectory.find((item) => item.value === selectedSupervisor);
   const supervisorLabel = supervisorDirectoryItem?.label || selectedSupervisor || payload?.permissions.actor || 'Select supervisor';
   const supervisorProfile = payload?.supervisorProfile ?? null;
-  const approvedOvertimeAuthorizations = payload?.approvedOvertimeAuthorizations ?? [];
   const supervisorJobTitle = supervisorProfile?.jobTitle || supervisorDirectoryItem?.jobTitle || '';
   const supervisorDepartment = supervisorProfile?.department || supervisorDirectoryItem?.department || '';
   const supervisorEmployees = payload?.supervisorEmployees ?? [];
@@ -1037,7 +1406,136 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
       ? 'Biometric Attention'
       : 'No Site Device';
 
+  const bookedHoursTotal = round1(localLines.reduce((sum, line) => sum + line.totalHours, 0));
+  const capacityHours = round1(summary.presentEmployees * grossTimesheetHours);
+  const remainingHours = round1(Math.max(0, capacityHours - bookedHoursTotal));
+  const exceptionCount = localLines.filter((line) => line.validationStatus === 'Error' || line.validationStatus === 'Warning').length;
+  const submittedCount = localLines.filter((line) => line.validationStatus === 'Valid').length;
+  const footerTotals = {
+    duration: round1(localLines.reduce((sum, line) => sum + line.attendanceDuration, 0)),
+    projectTotals: matrixColumns.map((col) => round1(localLines.reduce((sum, line) => sum + (line.projectAllocations.find((p) => p.projectCode === col.code)?.hours || 0), 0))),
+    used: round1(localLines.reduce((sum, line) => sum + line.usedHours, 0)),
+    idle: round1(localLines.reduce((sum, line) => sum + line.idleHours, 0)),
+    total: bookedHoursTotal,
+    variance: round1(localLines.reduce((sum, line) => sum + line.variance, 0)),
+  };
+  const readinessScore = summary.totalEmployees > 0 ? Math.round((submittedCount / summary.totalEmployees) * 100) : 0;
+
   return (
+    <>
+      {isEnterprise ? (
+        <TimesheetEntryEnterpriseView
+          periodLabel={periodLabel}
+          periodIsOpen={periodIsOpen}
+          selectedDate={selectedDate}
+          selectedShift={selectedShift}
+          shiftOptions={payload?.filterOptions.shifts ?? []}
+          supervisorLabel={supervisorLabel}
+          supervisorOptions={(payload?.filterOptions.supervisors || []).map((value) => {
+            const item = supervisorDirectory.find((entry) => entry.value === value);
+            return {
+              value,
+              label: item?.label || value,
+              searchText: `${value} ${item?.label || ''} ${item?.employeeCode || ''} ${item?.fullName || ''}`,
+            };
+          })}
+          locationOptions={locationOptions}
+          workCenterOptions={workCenterOptions}
+          selectedSupervisor={selectedSupervisor}
+          selectedLocation={selectedLocation}
+          selectedWorkCenter={selectedWorkCenter}
+          onSupervisorChange={(value) => {
+            setSelectedSupervisor(value);
+            setSelectedEmployees([]);
+            setQuery('');
+          }}
+          onLocationChange={(value) => {
+            setSelectedLocation(value);
+            setSelectedEmployees([]);
+            setQuery('');
+          }}
+          onWorkCenterChange={(value) => {
+            setSelectedWorkCenter(value);
+            setSelectedEmployees([]);
+            setQuery('');
+          }}
+          onDateChange={setSelectedDate}
+          onShiftChange={setSelectedShift}
+          canManagePeriod={canManageTimesheetSetup}
+          canEditTimesheet={canEditTimesheet}
+          canBookOvertime={canBookOvertime}
+          showCaptureMatrix={showCaptureMatrix}
+          submitting={submitting}
+          refreshing={refreshing}
+          error={displayError}
+          notice={displayNotice}
+          query={query}
+          onQueryChange={setQuery}
+          filteredLines={filteredLines}
+          localLines={localLines}
+          matrixColumns={matrixColumns}
+          projects={payload?.projects ?? []}
+          payloadProjects={payload?.projects ?? []}
+          idleReasons={payload?.idleReasons ?? []}
+          selectedEmployees={selectedEmployees}
+          onToggleAllEmployees={(checked) => {
+            if (checked) setSelectedEmployees(filteredLines.map((line) => line.employeeId));
+            else setSelectedEmployees([]);
+          }}
+          onToggleEmployee={(employeeId, checked) => {
+            if (checked) setSelectedEmployees([...selectedEmployees, employeeId]);
+            else setSelectedEmployees(selectedEmployees.filter((id) => id !== employeeId));
+          }}
+          selectedLineId={selectedLineId}
+          onSelectLine={setSelectedLineId}
+          onUpdateLine={(index, updates) => handleUpdateLine(index, updates as Partial<TimesheetLine>)}
+          onAddProjectColumn={addProjectColumn}
+          onMoveProjectColumn={moveProjectColumn}
+          onRemoveProjectColumn={removeProjectColumn}
+          onSelectColumnProject={updateColumnProject}
+          onAutoDistribute={handleAutoDistribute}
+          onClearAllProjects={handleClearAllProjects}
+          onOpenProjectSettings={() => setShowProjectModal(true)}
+          onSyncAttendance={() => handleSyncAttendance('manual')}
+          onCopyPrevious={handleCopyPrevious}
+          onSaveDraft={() => handleSave(false, true)}
+          onOpenSubmitReview={() => setShowSubmitReview(true)}
+          onBulkOpen={() => setShowBulkModal(true)}
+          canOpenSubmitReview={canOpenSubmitReview}
+          showEmployeeDetailsPanel={isSuperAdministrator}
+          approvedOvertimeAuthorizations={approvedOvertimeAuthorizations}
+          overtimeDevRelaxed={overtimeBooking.devRelaxed}
+          overtimeRetroCorrection={overtimeBooking.retroCorrection}
+          overtimeOpenBooking={overtimeBooking.openBooking}
+          onBookApprovedOvertime={handleBookApprovedOvertime}
+          summary={{
+            totalEmployees: summary.totalEmployees,
+            bookedHours: bookedHoursTotal,
+            usedHours: summary.usedHours,
+            idleHours: summary.idleHours,
+            productivityPct: summary.productivityPct,
+          }}
+          exceptionCount={exceptionCount}
+          submittedCount={submittedCount}
+          remainingHours={remainingHours}
+          capacityHours={capacityHours}
+          rightPanelTab={rightPanelTab}
+          onRightPanelTabChange={setRightPanelTab}
+          dailyPay={dailyPayPanel}
+          readiness={{
+            score: readinessScore,
+            readyDays: submittedCount,
+            issuesFound: exceptionCount,
+            blockingIssues: reviewErrorCount,
+          }}
+          onSaveTimesheetSetup={() => handleSave(false, true)}
+          defaultIdleReasonId={DEFAULT_BREAK_IDLE_REASON_ID}
+          defaultIdleReasonName={DEFAULT_BREAK_IDLE_REASON_NAME}
+          grossTimesheetHours={grossTimesheetHours}
+          standardTimesheetHours={standardTimesheetHours}
+          footerTotals={footerTotals}
+        />
+      ) : (
     <PageTemplate
       title={pageTitle}
       description={pageDescription}
@@ -1180,7 +1678,21 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           </div>
         )}
 
-        {periodIsOpen && !canEditTimesheet && payload?.header && (
+        {canBookOvertime && !canEditTimesheet && payload?.header ? (
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-sky-600 p-2 text-white"><Info className="h-4 w-4" /></div>
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-sky-900">Overtime Correction Mode</h3>
+                <p className="mt-1 text-xs font-semibold text-sky-800">
+                  This timesheet is approved or posted to payroll. Use the overtime bar to book 2h, 3h, 4h, etc. for selected employees — changes save immediately and refresh the payroll feed for reprocessing.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {periodIsOpen && !canEditTimesheet && !canBookOvertime && payload?.header && (
           <div className={`rounded-2xl border p-5 ${isPayrollReady ? 'border-emerald-200 bg-emerald-50' : 'border-indigo-200 bg-indigo-50'}`}>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-start gap-3">
@@ -1295,9 +1807,26 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
             <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
               {approvedOvertimeAuthorizations.map((item) => (
                 <div key={item.id} className="rounded-xl border border-emerald-200 bg-white p-3">
-                  <div className="text-xs font-black text-slate-950">{item.projectCode} - {item.projectName}</div>
-                  <div className="mt-1 text-[11px] font-semibold text-slate-600">{round1(item.requestedHours)}h approved / {item.requestedHeadcount} people</div>
-                  <div className="mt-1 text-[11px] font-semibold text-slate-500">{item.reason}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-black text-slate-950">{item.projectCode} - {item.projectName}</div>
+                      <div className="mt-1 text-[11px] font-semibold text-slate-600">{round1(item.requestedHours)}h approved / {item.requestedHeadcount} people</div>
+                      <div className="mt-1 text-[11px] font-semibold text-slate-500">{item.reason}</div>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-1">
+                      {OVERTIME_HOUR_OPTIONS.map((hours) => (
+                        <button
+                          key={hours}
+                          type="button"
+                          onClick={() => void handleBookApprovedOvertime(item.id, hours)}
+                          disabled={submitting || !canBookOvertime}
+                          className="rounded-lg bg-emerald-700 px-2.5 py-1.5 text-[10px] font-black text-white hover:bg-emerald-800 disabled:opacity-50"
+                        >
+                          {hours}h
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1507,24 +2036,24 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                         ))}
                         <td className="px-4 py-4 border-l border-slate-100"></td>
                         <td className="px-4 py-4 text-center font-black text-blue-700 bg-blue-50/20">{line.usedHours}</td>
-                        <td className="px-4 py-4 bg-amber-50/20 border-l border-slate-100"><div className="flex flex-col gap-2">{(line.idleAllocations.length === 0 ? [{ reasonId: DEFAULT_IDLE_REASON_ID, reasonName: DEFAULT_IDLE_REASON_NAME, hours: 0, remarks: null }] : line.idleAllocations).map((alloc, iIdx) => (
+                        <td className="px-4 py-4 bg-amber-50/20 border-l border-slate-100"><div className="flex flex-col gap-2">{(line.idleAllocations.length === 0 ? [{ reasonId: DEFAULT_BREAK_IDLE_REASON_ID, reasonName: DEFAULT_BREAK_IDLE_REASON_NAME, hours: 0, remarks: null }] : line.idleAllocations).map((alloc, iIdx) => (
                           <div key={iIdx} className="flex items-center gap-1.5"><input type="number" step="0.5" placeholder="Hrs" disabled={!canEditTimesheet} value={alloc.hours || ''} onChange={(e) => {
                             const next = [...line.idleAllocations];
                             if (next[iIdx]) next[iIdx].hours = parseFloat(e.target.value) || 0;
-                            else next.push({ reasonId: DEFAULT_IDLE_REASON_ID, reasonName: DEFAULT_IDLE_REASON_NAME, hours: parseFloat(e.target.value) || 0, remarks: null });
+                            else next.push({ reasonId: DEFAULT_BREAK_IDLE_REASON_ID, reasonName: DEFAULT_BREAK_IDLE_REASON_NAME, hours: parseFloat(e.target.value) || 0, remarks: null });
                             handleUpdateLine(originalIdx, { idleAllocations: next });
                           }} className="w-12 rounded-lg border border-slate-200 py-1 text-center text-[10px] font-black" />
-                          <select value={alloc.reasonId || DEFAULT_IDLE_REASON_ID} disabled={!canEditTimesheet} onChange={(e) => {
+                          <select value={alloc.reasonId || DEFAULT_BREAK_IDLE_REASON_ID} disabled={!canEditTimesheet} onChange={(e) => {
                             const reason = payload?.idleReasons.find((item) => item.id === e.target.value);
                             const next = [...line.idleAllocations];
-                            if (next[iIdx]) next[iIdx] = { ...next[iIdx], reasonId: e.target.value, reasonName: reason?.name || DEFAULT_IDLE_REASON_NAME };
+                            if (next[iIdx]) next[iIdx] = { ...next[iIdx], reasonId: e.target.value, reasonName: reason?.name || DEFAULT_BREAK_IDLE_REASON_NAME };
                             handleUpdateLine(originalIdx, { idleAllocations: next });
                           }} className="flex-1 rounded-lg border border-slate-200 py-1 text-[9px] font-bold">
                             {payload?.idleReasons.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                           </select>
-                          {iIdx === line.idleAllocations.length - 1 && canEditTimesheet && <button onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: DEFAULT_IDLE_REASON_ID, reasonName: DEFAULT_IDLE_REASON_NAME, hours: 0, remarks: null }] })} className="p-1 text-slate-400 hover:text-indigo-600"><Plus className="h-3 w-3" /></button>}</div>
+                          {iIdx === line.idleAllocations.length - 1 && canEditTimesheet && <button onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: DEFAULT_BREAK_IDLE_REASON_ID, reasonName: DEFAULT_BREAK_IDLE_REASON_NAME, hours: 0, remarks: null }] })} className="p-1 text-slate-400 hover:text-indigo-600"><Plus className="h-3 w-3" /></button>}</div>
                         ))}</div></td>
-                        <td className="px-4 py-4 text-center bg-indigo-50/20"><span className={`font-black ${line.totalHours === GROSS_TIMESHEET_HOURS ? 'text-emerald-600' : 'text-indigo-600'}`}>{line.totalHours}</span></td>
+                        <td className="px-4 py-4 text-center bg-indigo-50/20"><span className={`font-black ${line.totalHours === grossTimesheetHours ? 'text-emerald-600' : 'text-indigo-600'}`}>{line.totalHours}</span></td>
                         <td className="px-4 py-4 text-center"><span className={`text-[10px] font-black ${line.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>{line.variance > 0 ? `+${line.variance}` : line.variance}</span></td>
                         <td className="px-4 py-4 text-center"><div className="flex flex-col items-center gap-1 group relative">
                           {line.validationStatus === 'Valid' ? <><CheckCircle2 className="h-5 w-5 text-emerald-500" /><span className="text-[9px] font-black text-emerald-600">COMPLETE</span></> : <><AlertTriangle className={`h-5 w-5 ${line.validationStatus === 'Error' ? 'text-red-500' : 'text-amber-500'}`} /><span className={`text-[9px] font-black ${line.validationStatus === 'Error' ? 'text-red-600' : 'text-amber-600'}`}>{line.validationStatus}</span></>}
@@ -1616,12 +2145,12 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                       {line.idleAllocations.map((alloc, iIdx) => (
                         <div key={iIdx} className="flex items-center gap-2">
                           <select 
-                            value={alloc.reasonId || DEFAULT_IDLE_REASON_ID} 
+                            value={alloc.reasonId || DEFAULT_BREAK_IDLE_REASON_ID} 
                             disabled={!canEditTimesheet}
                             onChange={(e) => {
                               const reason = payload?.idleReasons.find((item) => item.id === e.target.value);
                               const next = [...line.idleAllocations];
-                              next[iIdx] = { ...next[iIdx], reasonId: e.target.value, reasonName: reason?.name || DEFAULT_IDLE_REASON_NAME };
+                              next[iIdx] = { ...next[iIdx], reasonId: e.target.value, reasonName: reason?.name || DEFAULT_BREAK_IDLE_REASON_NAME };
                               handleUpdateLine(originalIdx, { idleAllocations: next });
                             }}
                             className="flex-1 rounded-lg border border-slate-200 py-1.5 text-[10px] font-bold bg-amber-50/30"
@@ -1644,7 +2173,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                       ))}
                       {canEditTimesheet && (
                         <button 
-                          onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: DEFAULT_IDLE_REASON_ID, reasonName: DEFAULT_IDLE_REASON_NAME, hours: 0, remarks: null }] })}
+                          onClick={() => handleUpdateLine(originalIdx, { idleAllocations: [...line.idleAllocations, { reasonId: DEFAULT_BREAK_IDLE_REASON_ID, reasonName: DEFAULT_BREAK_IDLE_REASON_NAME, hours: 0, remarks: null }] })}
                           className="w-full rounded-lg border border-dashed border-slate-200 py-1.5 text-[10px] font-black text-slate-400 hover:border-indigo-300 hover:text-indigo-600 transition-all"
                         >
                           + ADD IDLE REASON
@@ -1654,7 +2183,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
                     <div className="flex justify-between border-t border-slate-100 pt-4 text-center font-black">
                       <div><p className="text-[8px] text-slate-400">USED</p><p className="text-blue-700">{line.usedHours}h</p></div>
                       <div><p className="text-[8px] text-slate-400">IDLE</p><p className="text-amber-700">{line.idleHours}h</p></div>
-                      <div><p className="text-[8px] text-slate-400">TOTAL</p><p className={line.totalHours === GROSS_TIMESHEET_HOURS ? 'text-emerald-600' : 'text-indigo-600'}>{line.totalHours}h</p></div>
+                      <div><p className="text-[8px] text-slate-400">TOTAL</p><p className={line.totalHours === grossTimesheetHours ? 'text-emerald-600' : 'text-indigo-600'}>{line.totalHours}h</p></div>
                     </div>
                   </div>
                 </div>
@@ -1696,6 +2225,8 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           ))}
         </div>
       </div>
+      </PageTemplate>
+      )}
 
       {showSubmitReview && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
@@ -1958,7 +2489,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
           </div>
         </div>
       )}
-    </PageTemplate>
+    </>
   );
 }
 

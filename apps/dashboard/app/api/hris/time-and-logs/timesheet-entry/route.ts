@@ -27,6 +27,7 @@ import {
   deactivateTimesheetWorkCenter,
   upsertProject,
   writeTimesheetHeaderLines,
+  refreshTimesheetPayrollUpdatesForHeaders,
   workflowStages,
   type TimesheetHeader,
   type TimesheetLine,
@@ -51,6 +52,21 @@ import type { StructureInsight } from '@/lib/organization-data';
 import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
 import { listApprovedOvertimeForSupervisor, type OvertimeAuthorizationRequest } from '@/lib/overtime-approval-workflow-store';
+import {
+  applyOvertimeBooking,
+  validateTimesheetLine,
+  type OvertimeAuthorization,
+} from '@/lib/timesheet-overtime-booking';
+import {
+  canBookOvertimeOnTimesheet,
+  isRetroOvertimeTimesheetStatus,
+  resolveOvertimeAuthorizationsForBooking,
+  resolveOvertimeBookingOptions,
+} from '@/lib/timesheet-overtime-config';
+import { applyTimesheetLineDefaults } from '@/lib/timesheet-line-defaults';
+import { normalizeIdleAllocations, normalizeProjectAllocations, reconcileTimesheetLineHours, resolvePrimaryProjectCode, type TimesheetDayContext } from '@/lib/timesheet-entry-shared';
+
+const dayContextFor = (date: string, holidayDates: string[]): TimesheetDayContext => ({ date, holidayDates });
 
 type ProjectManagerOption = {
   employeeId: string;
@@ -65,6 +81,7 @@ type ProjectManagerOption = {
 type TimesheetPayload = {
   generatedAt: string;
   timesheetDate: string;
+  holidayDates: string[];
   period: TimesheetPeriod;
   header: TimesheetHeader | null;
   lines: TimesheetLine[];
@@ -103,6 +120,13 @@ type TimesheetPayload = {
     status: string;
   } | null;
   approvedOvertimeAuthorizations: OvertimeAuthorizationRequest[];
+  overtimeBooking: {
+    enabled: boolean;
+    devRelaxed: boolean;
+    retroCorrection: boolean;
+    openBooking: boolean;
+  };
+  canBookOvertime: boolean;
   permissions: {
     actor: string;
     role: string;
@@ -156,7 +180,8 @@ type UpdatePayload = {
     | 'UPSERT_WORK_CENTER'
     | 'DELETE_WORK_CENTER'
     | 'COPY_PREVIOUS_DAY'
-    | 'BULK_APPLY';
+    | 'BULK_APPLY'
+    | 'BOOK_OVERTIME';
   date?: string;
   supervisorId?: string;
   locationName?: string;
@@ -164,6 +189,11 @@ type UpdatePayload = {
   headerId?: string;
   lines?: TimesheetLine[];
   reviewerNote?: string;
+  authorizationId?: string;
+  otHours?: number;
+  employeeIds?: string[];
+  postToPayroll?: boolean;
+  projectCode?: string;
   project?: Partial<Project> & Pick<Project, 'code' | 'name' | 'site' | 'projectManager'>;
   workCenter?: Partial<TimesheetWorkCenter> & { name: string };
   mode?: 'supervisor';
@@ -173,6 +203,47 @@ type UpdatePayload = {
     hours: number;
   };
 };
+
+const projectsFromTimesheetLines = (lines: TimesheetLine[]) =>
+  Array.from(
+    new Map(
+      lines
+        .flatMap((line) =>
+          line.projectAllocations.map((alloc) => {
+            const code = String(alloc.projectCode || '').trim().toUpperCase();
+            if (!code) return null;
+            return [code, { code, name: alloc.projectName || code }] as const;
+          }),
+        )
+        .filter((entry): entry is readonly [string, { code: string; name: string }] => Boolean(entry)),
+    ).values(),
+  );
+
+async function loadOvertimeAuthorizationsForBooking(
+  header: TimesheetHeader | null,
+  headerLines: TimesheetLine[],
+  activeProjects: Project[],
+  overtimeBooking: ReturnType<typeof resolveOvertimeBookingOptions>,
+) {
+  const crewSize = Math.max(headerLines.filter((line) => line.clockIn).length, 1);
+  const catalog = activeProjects.map((project) => ({ code: project.code, name: project.name }));
+  const lineProjects = projectsFromTimesheetLines(headerLines);
+  let workflowAuthorizations: OvertimeAuthorization[] = [];
+  if (overtimeBooking.enabled && !overtimeBooking.openBooking && header) {
+    workflowAuthorizations = (await listApprovedOvertimeForSupervisor(
+      header.timesheetDate,
+      header.supervisorId,
+      header.workCenterName,
+    ).catch(() => [])) as OvertimeAuthorization[];
+  }
+  return resolveOvertimeAuthorizationsForBooking(
+    workflowAuthorizations,
+    catalog,
+    crewSize,
+    overtimeBooking,
+    lineProjects,
+  );
+}
 
 async function handleBulkApply(request: Request, payload: UpdatePayload) {
   if (!payload.bulkAllocation || !payload.headerId) {
@@ -185,6 +256,16 @@ async function handleBulkApply(request: Request, payload: UpdatePayload) {
   if (!header) throw new Error('Header not found');
 
   const currentLines = allLines.filter(l => l.headerId === header.id);
+  const overtimeBooking = resolveOvertimeBookingOptions();
+  const projects = await readProjects();
+  const approvedOvertimeAuthorizations = await loadOvertimeAuthorizationsForBooking(
+    header,
+    currentLines,
+    projects.filter((project) => ['Active', 'Approved', 'Open'].includes(project.status)),
+    overtimeBooking,
+  );
+  const holidayDates = await readPublicHolidayDates();
+  const dayContext = dayContextFor(header.timesheetDate, holidayDates);
 
   const updatedLines = currentLines.map(line => {
     if (!employeeIds.includes(line.employeeId)) return line;
@@ -203,17 +284,24 @@ async function handleBulkApply(request: Request, payload: UpdatePayload) {
       });
     }
 
-    const usedHours = round1(allocations.reduce((sum, p) => sum + p.hours, 0));
-    const totalHours = round1(usedHours + line.idleHours);
+    const draft = { ...line, projectAllocations: allocations, idleAllocations: line.idleAllocations.map(withDefaultIdleReason) };
+    const validated = validateTimesheetLine(
+      draft,
+      approvedOvertimeAuthorizations as OvertimeAuthorization[],
+      currentLines.map((item) => (item.id === line.id ? draft : item)),
+      header.workCenterName,
+      overtimeBooking,
+      dayContext,
+    );
 
     return {
-      ...line,
-      projectAllocations: allocations,
-      idleAllocations: line.idleAllocations.map(withDefaultIdleReason),
-      usedHours,
-      totalHours,
-      variance: round1(totalHours - GROSS_TIMESHEET_HOURS),
-      validationStatus: usedHours > STANDARD_TIMESHEET_HOURS || totalHours > GROSS_TIMESHEET_HOURS ? 'Error' : (totalHours === GROSS_TIMESHEET_HOURS && usedHours === STANDARD_TIMESHEET_HOURS ? 'Valid' : 'Incomplete'),
+      ...draft,
+      usedHours: validated.usedHours,
+      idleHours: validated.idleHours,
+      totalHours: validated.totalHours,
+      variance: validated.variance,
+      validationStatus: validated.validationStatus,
+      validationMessage: validated.validationMessage,
     } as TimesheetLine;
   });
 
@@ -422,28 +510,30 @@ const findSupervisorEmployee = <T extends SupervisorSourceEmployee>(
   return candidates.find((employee) => clean(employee.jobTitle).toLowerCase().includes('supervisor')) || candidates[0] || null;
 };
 
-const normalizeLineForGrossDay = (line: TimesheetLine): TimesheetLine => {
-  const usedHours = round1(line.projectAllocations.reduce((sum, item) => sum + Number(item.hours || 0), 0));
-  const idleHours = round1((line.idleAllocations || []).reduce((sum, item) => sum + Number(item.hours || 0), 0));
-  const totalHours = round1(usedHours + idleHours);
-  const variance = round1(totalHours - GROSS_TIMESHEET_HOURS);
-  const validationStatus =
-    usedHours > STANDARD_TIMESHEET_HOURS + 0.001 || totalHours > GROSS_TIMESHEET_HOURS + 0.001
-      ? 'Error'
-      : totalHours === GROSS_TIMESHEET_HOURS && usedHours === STANDARD_TIMESHEET_HOURS
-        ? 'Valid'
-        : line.validationStatus === 'Warning'
-          ? 'Warning'
-          : 'Incomplete';
-  const validationMessage =
-    validationStatus === 'Valid'
-      ? null
-      : validationStatus === 'Error'
-        ? usedHours > STANDARD_TIMESHEET_HOURS + 0.001
-          ? `Productive/payroll hours cannot exceed ${STANDARD_TIMESHEET_HOURS} hours per day.`
-          : `Total timesheet hours cannot exceed ${GROSS_TIMESHEET_HOURS} hours including break time.`
-        : line.validationMessage;
-  return { ...line, idleAllocations: line.idleAllocations.map(withDefaultIdleReason), usedHours, idleHours, totalHours, variance, validationStatus, validationMessage };
+const normalizeLineForGrossDay = (
+  line: TimesheetLine,
+  authorizations: OvertimeAuthorization[],
+  allLines: TimesheetLine[],
+  workCenter?: string | null,
+  bookingOptions?: ReturnType<typeof resolveOvertimeBookingOptions>,
+  dayContext?: TimesheetDayContext,
+  projectCodes: string[] = [],
+): TimesheetLine => {
+  const withDefaults = dayContext?.date
+    ? applyTimesheetLineDefaults(line, dayContext, projectCodes)
+    : { ...line, idleAllocations: normalizeIdleAllocations(line.idleAllocations.map(withDefaultIdleReason)) };
+  const validated = validateTimesheetLine(withDefaults, authorizations, allLines, workCenter, bookingOptions, dayContext);
+  return {
+    ...withDefaults,
+    projectAllocations: normalizeProjectAllocations(withDefaults.projectAllocations || []),
+    idleAllocations: withDefaults.idleAllocations.map(withDefaultIdleReason),
+    usedHours: validated.usedHours,
+    idleHours: validated.idleHours,
+    totalHours: validated.totalHours,
+    variance: validated.variance,
+    validationStatus: validated.validationStatus,
+    validationMessage: validated.validationMessage,
+  };
 };
 
 const employeeDisplay = (employee: { employeeCode?: string | null; fullName?: string | null }) => {
@@ -545,6 +635,19 @@ const resolveDashboardRoot = () => {
   const cwd = process.cwd();
   const dashboardSuffix = path.join('apps', 'dashboard');
   return cwd.endsWith(dashboardSuffix) ? cwd : path.join(cwd, dashboardSuffix);
+};
+
+const HOLIDAY_PATH = path.join(resolveDashboardRoot(), 'data', 'hris', 'payroll-public-holidays.json');
+
+const readPublicHolidayDates = async (): Promise<string[]> => {
+  try {
+    const raw = await readFile(HOLIDAY_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.dates)) return parsed.dates.map(String).filter(Boolean);
+  } catch {
+    return [];
+  }
+  return [];
 };
 
 const activeText = (value: unknown) => clean(value).toLowerCase();
@@ -744,6 +847,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     timesheetRecords,
     payrollEmployeeSource,
     assignmentRows,
+    holidayDates,
   ] = await Promise.all([
     readTimesheetData(),
     readSystemTimesheetDepartments(),
@@ -755,6 +859,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     readTimesheetRecords(),
     readPayrollEmployees(),
     readSupervisorAssignments().catch(() => []),
+    readPublicHolidayDates(),
   ]);
   const { headers, lines: allLines } = timesheetData;
   const employees = payrollEmployeeSource.employees;
@@ -764,6 +869,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
 
   const requestedHeader = requestedHeaderId ? headers.find((item) => item.id === requestedHeaderId) : null;
   const targetDate = requestedHeader?.timesheetDate || date || todayDateInputValue();
+  const dayContext = dayContextFor(targetDate, holidayDates);
   if (supervisorMode && !session) throw new Error('Authenticated supervisor session is required.');
   let requestedSupervisor = clean(requestedHeader?.supervisorId || supervisorId);
   let targetWorkCenter = clean(requestedHeader?.workCenterName || workCenterName);
@@ -913,7 +1019,9 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     .map(timesheetRecordEmployeeSummary)
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
   const selectedSupervisorEmployees = selectedSupervisorEmployeesFromDirectory.length ? selectedSupervisorEmployeesFromDirectory : selectedSupervisorEmployeesFromRecords;
-  const approvedOvertimeAuthorizations = await listApprovedOvertimeForSupervisor(targetDate, targetSupervisor).catch(() => []);
+  const overtimeBooking = resolveOvertimeBookingOptions();
+  const activeProjects = projects.filter((project) => ['Active', 'Approved', 'Open'].includes(project.status));
+  let approvedOvertimeAuthorizations: OvertimeAuthorizationRequest[] = [];
   const attendanceWorkCenters = workCenters.map((workCenter) => ({
     location: workCenter.location || workCenter.name,
     site: workCenter.site || workCenter.location || workCenter.name,
@@ -932,17 +1040,30 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
       ? matchKeys(line.employeeNo, line.employeeId, line.employeeName).some((key) => selectedEmployeeKeys.has(key))
       : !supervisorMode;
   const selectedHeaderId = header?.id;
-  let lines = selectedHeaderId
-    ? allLines
-        .filter((l) => l.headerId === selectedHeaderId)
-        .map(normalizeLineForGrossDay)
-        .filter(lineBelongsToSelectedCrew)
-    : [];
+  const headerLines = selectedHeaderId ? allLines.filter((line) => line.headerId === selectedHeaderId) : [];
+  approvedOvertimeAuthorizations = (await loadOvertimeAuthorizationsForBooking(
+    header,
+    headerLines,
+    activeProjects,
+    overtimeBooking,
+  )) as OvertimeAuthorizationRequest[];
+  let lines = headerLines
+    .map((line) =>
+      normalizeLineForGrossDay(
+        line,
+        approvedOvertimeAuthorizations as OvertimeAuthorization[],
+        headerLines,
+        targetWorkCenter,
+        overtimeBooking,
+        dayContext,
+        activeProjects.map((project) => project.code),
+      ),
+    )
+    .filter(lineBelongsToSelectedCrew);
 
   // Keep the initial page load lightweight. Attendance sync can involve biometric
   // and Sage enrichment calls, so it is only run from the explicit Fetch Punches action.
 
-  const activeProjects = projects.filter(p => ['Active', 'Approved', 'Open'].includes(p.status));
   const projectSiteOptions = Array.from(
     new Set(
       locations
@@ -982,6 +1103,7 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
   return {
     generatedAt: new Date().toISOString(),
     timesheetDate: targetDate,
+    holidayDates,
     period,
     header,
     lines,
@@ -998,6 +1120,8 @@ const buildPayload = async (request: Request, date?: string, supervisorId?: stri
     supervisorEmployees: selectedSupervisorEmployees,
     supervisorProfile: selectedSupervisorProfile ? employeeSummary(selectedSupervisorProfile) : null,
     approvedOvertimeAuthorizations,
+    overtimeBooking,
+    canBookOvertime: canBookOvertimeOnTimesheet(header, period, overtimeBooking),
     permissions: {
       actor: session?.fullName || uiPermissions.actor,
       role: uiPermissions.role,
@@ -1104,12 +1228,21 @@ export async function PATCH(request: Request) {
   const access = resolveAccessContext(request);
   const session = await sessionFrom(request);
   const actor = session?.fullName || access.actor;
-  const payload = (await request.json()) as UpdatePayload;
-  const { action, date, supervisorId, locationName, workCenterName, headerId, lines: updatedLines } = payload;
-  const mode = payload.mode === 'supervisor' ? 'supervisor' : undefined;
-  const isSupervisorMode = mode === 'supervisor';
 
   try {
+    let payload: UpdatePayload;
+    try {
+      const raw = await request.text();
+      if (!raw.trim()) return err(400, 'Request body is required.');
+      payload = JSON.parse(raw) as UpdatePayload;
+    } catch {
+      return err(400, 'Invalid JSON in request body.');
+    }
+
+    const { action, date, supervisorId, locationName, workCenterName, headerId, lines: updatedLines } = payload;
+    const mode = payload.mode === 'supervisor' ? 'supervisor' : undefined;
+    const isSupervisorMode = mode === 'supervisor';
+
     if (action === 'CREATE_PROJECT' || action === 'UPSERT_PROJECT') {
       if (!payload.project) return err(400, 'Project details are required.');
       const projectCode = payload.project.code?.trim().toUpperCase();
@@ -1177,6 +1310,135 @@ export async function PATCH(request: Request) {
       return ok(await buildPayload(request, header.timesheetDate, header.supervisorId, header.workCenterName, locationName, mode));
     }
 
+    if (action === 'BOOK_OVERTIME') {
+      const overtimeBooking = resolveOvertimeBookingOptions();
+      if (!overtimeBooking.enabled) return err(400, 'Overtime booking is disabled in this environment.');
+
+      const { headerId, authorizationId, otHours, employeeIds, postToPayroll } = payload;
+      if (!headerId || !authorizationId || !otHours || otHours <= 0) {
+        return err(400, 'Header ID, authorization ID, and overtime hours are required.');
+      }
+
+      const { headers, lines: allLines } = await readTimesheetData();
+      const header = headers.find((item) => item.id === headerId);
+      if (!header) return err(404, 'Timesheet header not found.');
+
+      const retro = overtimeBooking.retroCorrection;
+      if (retro) {
+        if (!isTimesheetEditableStatus(header.status) && !isRetroOvertimeTimesheetStatus(header.status)) {
+          return err(400, 'This timesheet cannot receive overtime corrections in its current status.');
+        }
+      } else {
+        await requireOpenPeriod(header.timesheetDate);
+        requireEditableTimesheet(header);
+      }
+
+      const projects = await readProjects();
+      const currentLines = allLines.filter((line) => line.headerId === header.id);
+      const authorizations = await loadOvertimeAuthorizationsForBooking(
+        header,
+        currentLines,
+        projects.filter((project) => ['Active', 'Approved', 'Open'].includes(project.status)),
+        overtimeBooking,
+      );
+      const auth =
+        authorizations.find((item) => item.id === authorizationId) ||
+        authorizations.find((item) => item.projectCode === payload.projectCode) ||
+        authorizations[0];
+      if (!auth) return err(404, 'No project is available for overtime booking on this timesheet.');
+
+      const targets = employeeIds?.length
+        ? currentLines.filter((line) => employeeIds.includes(line.employeeId) && line.clockIn)
+        : currentLines.filter((line) => line.clockIn);
+      if (!targets.length) return err(400, 'Select present employees to book approved overtime.');
+
+      const holidayDates = await readPublicHolidayDates();
+      const dayContext = dayContextFor(header.timesheetDate, holidayDates);
+      const saveProjects = await readProjects();
+      const primaryProjectCode = resolvePrimaryProjectCode(
+        saveProjects.filter((project) => ['Active', 'Approved', 'Open'].includes(project.status)).map((project) => project.code),
+      );
+
+      let nextLines = [...currentLines];
+      for (const line of targets) {
+        const index = nextLines.findIndex((item) => item.id === line.id);
+        if (index < 0) continue;
+        nextLines[index] = applyOvertimeBooking(
+          nextLines[index],
+          auth,
+          otHours,
+          nextLines,
+          header.workCenterName,
+          overtimeBooking,
+          dayContext,
+          primaryProjectCode,
+        );
+        const validated = validateTimesheetLine(
+          nextLines[index],
+          authorizations,
+          nextLines,
+          header.workCenterName,
+          overtimeBooking,
+          dayContext,
+        );
+        if (validated.validationStatus === 'Error') {
+          return err(400, validated.validationMessage || `Invalid overtime booking for ${line.employeeName}.`);
+        }
+        nextLines[index] = {
+          ...nextLines[index],
+          usedHours: validated.usedHours,
+          idleHours: validated.idleHours,
+          totalHours: validated.totalHours,
+          variance: validated.variance,
+          validationStatus: validated.validationStatus,
+          validationMessage: validated.validationMessage,
+        };
+      }
+
+      const preservedHeader = { ...header };
+      if (retro && !isTimesheetEditableStatus(header.status)) {
+        preservedHeader.workflowHistory = [
+          ...(header.workflowHistory || []),
+          {
+            stage: 'Supervisor',
+            decision: 'Overtime Booked',
+            by: actor,
+            actedAt: new Date().toISOString(),
+            comment: `Retroactive ${otHours}h overtime booked on ${auth.projectCode} for ${targets.length} employee(s).`,
+          },
+        ];
+      }
+
+      await writeTimesheetHeaderLines(preservedHeader, nextLines.map((line) => ({
+        ...line,
+        idleAllocations: line.idleAllocations.map(withDefaultIdleReason),
+      })));
+
+      const shouldPost = Boolean(postToPayroll) || (retro && isTimesheetPayrollReadyStatus(header.status));
+      if (shouldPost && isTimesheetPayrollReadyStatus(header.status)) {
+        const payrollHeader = {
+          ...preservedHeader,
+          workflowHistory: [
+            ...(preservedHeader.workflowHistory || []),
+            {
+              stage: 'Payroll',
+              decision: 'Overtime Correction Posted',
+              by: actor,
+              actedAt: new Date().toISOString(),
+              comment: `Payroll feed refreshed after ${otHours}h overtime booking on ${auth.projectCode}.`,
+            },
+          ],
+        };
+        await writeTimesheetHeaderLines(payrollHeader, nextLines.map((line) => ({
+          ...line,
+          idleAllocations: line.idleAllocations.map(withDefaultIdleReason),
+        })));
+        await refreshTimesheetPayrollUpdatesForHeaders([header.id], actor);
+      }
+
+      return ok(await buildPayload(request, header.timesheetDate, header.supervisorId, header.workCenterName, locationName, mode));
+    }
+
     const { headers, lines: allLines } = await readTimesheetData();
 
     if (action === 'SYNC_ATTENDANCE') {
@@ -1208,23 +1470,41 @@ export async function PATCH(request: Request) {
       requireEditableTimesheet(header);
 
       // Validate gross day separately from payroll/productive hours.
-      for (const line of updatedLines) {
+      const overtimeBooking = resolveOvertimeBookingOptions();
+      const saveProjects = await readProjects();
+      const approvedOvertimeAuthorizations = overtimeBooking.enabled
+        ? await loadOvertimeAuthorizationsForBooking(
+            header,
+            updatedLines,
+            saveProjects.filter((project) => ['Active', 'Approved', 'Open'].includes(project.status)),
+            overtimeBooking,
+          )
+        : [];
+      const holidayDates = await readPublicHolidayDates();
+      const dayContext = dayContextFor(header.timesheetDate, holidayDates);
+      const reconciledLines = updatedLines.map(reconcileTimesheetLineHours);
+      for (const line of reconciledLines) {
         const projectHours = (line.projectAllocations || []).reduce((sum, allocation) => sum + Number(allocation.hours || 0), 0);
         if (!line.clockIn && projectHours > 0.001) {
           return err(400, `Absent employee ${line.employeeName} cannot receive project/productive hours.`);
         }
-        if (line.usedHours > STANDARD_TIMESHEET_HOURS + 0.001) {
-          return err(400, `Productive/payroll hours for ${line.employeeName} cannot exceed ${STANDARD_TIMESHEET_HOURS} hours.`);
-        }
-        if (line.totalHours > GROSS_TIMESHEET_HOURS + 0.001) {
-          return err(400, `Total timesheet hours for ${line.employeeName} cannot exceed ${GROSS_TIMESHEET_HOURS} hours including break time.`);
+        const validated = validateTimesheetLine(
+          line,
+          approvedOvertimeAuthorizations as OvertimeAuthorization[],
+          reconciledLines,
+          header.workCenterName,
+          overtimeBooking,
+          dayContext,
+        );
+        if (validated.validationStatus === 'Error') {
+          return err(400, validated.validationMessage || `Invalid timesheet line for ${line.employeeName}.`);
         }
         if (Math.abs(line.usedHours + line.idleHours - line.totalHours) > 0.01) {
           return err(400, `Hours mismatch for ${line.employeeName}: Used + Idle must equal Total.`);
         }
       }
 
-      const normalizedLines = updatedLines.map((line) => ({
+      const normalizedLines = reconciledLines.map((line) => ({
         ...line,
         idleAllocations: line.idleAllocations.map(withDefaultIdleReason),
       }));

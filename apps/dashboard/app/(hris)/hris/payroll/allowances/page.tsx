@@ -6,5 +6,5 @@ export const metadata: Metadata = {
 };
 
 export default function AllowancesPage() {
-  return <AllowancesClient initialNow={new Date().toISOString()} />;
+  return <AllowancesClient />;
 }
