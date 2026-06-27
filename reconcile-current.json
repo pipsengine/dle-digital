@@ -1,0 +1,176 @@
+﻿{
+  "mode": "individual-check-report",
+  "tolerance": 10,
+  "totalChecked": 139,
+  "byCategory": {
+    "permanent": {
+      "checked": 72,
+      "matched": 66,
+      "variances": 6,
+      "mismatchEmployees": [
+        {
+          "employee": "P0013",
+          "payeVar": 3515.87,
+          "totalVar": 3515.87
+        },
+        {
+          "employee": "P0420",
+          "payeVar": 45401.67,
+          "totalVar": 45401.67
+        },
+        {
+          "employee": "P0425",
+          "payeVar": 32187.05,
+          "totalVar": 32187.05
+        },
+        {
+          "employee": "P0442",
+          "payeVar": -982,
+          "totalVar": -1056.1
+        },
+        {
+          "employee": "P0446",
+          "payeVar": -20742.18,
+          "totalVar": -20742.18
+        },
+        {
+          "employee": "P0458",
+          "payeVar": -956,
+          "totalVar": -1026.71
+        }
+      ]
+    },
+    "lumpsum": {
+      "checked": 67,
+      "matched": 43,
+      "variances": 24,
+      "mismatchEmployees": [
+        {
+          "employee": "L0297",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L1090",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L1204",
+          "payeVar": 267.3,
+          "totalVar": 267.3
+        },
+        {
+          "employee": "L1618",
+          "payeVar": 496.36,
+          "totalVar": 496.36
+        },
+        {
+          "employee": "L1687",
+          "payeVar": 606.38,
+          "totalVar": 606.38
+        },
+        {
+          "employee": "L1868",
+          "payeVar": 5065.81,
+          "totalVar": 5065.81
+        },
+        {
+          "employee": "L1925",
+          "payeVar": 185.64,
+          "totalVar": 185.64
+        },
+        {
+          "employee": "L1963",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L1986",
+          "payeVar": 536.25,
+          "totalVar": 536.25
+        },
+        {
+          "employee": "L2125",
+          "payeVar": 387.75,
+          "totalVar": 387.75
+        },
+        {
+          "employee": "L2142",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2216",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2289",
+          "payeVar": 243.38,
+          "totalVar": 243.38
+        },
+        {
+          "employee": "L2331",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2347",
+          "payeVar": -98.5,
+          "totalVar": -98.5
+        },
+        {
+          "employee": "L2374",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2578",
+          "payeVar": 4455,
+          "totalVar": 4455
+        },
+        {
+          "employee": "L2580",
+          "payeVar": 61.87,
+          "totalVar": 61.87
+        },
+        {
+          "employee": "L2773",
+          "payeVar": 610.81,
+          "totalVar": 610.81
+        },
+        {
+          "employee": "L2774",
+          "payeVar": 274.74,
+          "totalVar": 274.74
+        },
+        {
+          "employee": "L2775",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2776",
+          "payeVar": 128.91,
+          "totalVar": 128.91
+        },
+        {
+          "employee": "L2777",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2779",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        }
+      ]
+    }
+  },
+  "overall": {
+    "matched": 109,
+    "variances": 30
+  },
+  "note": "HRIS Sage-aligned formulas vs June 2026 migration snapshot for permanent and lumpsum staff only."
+}

@@ -98,6 +98,8 @@ const resolveLookupKeys = (employee: string | DleEmployeeDirectoryRow) => {
     const value = clean(key);
     if (value) keys.add(value);
   }
+  const legacyMatch = clean(employee.jobTitle).match(/^([A-Z]{2,5}\d{2,5})\s*-/i);
+  if (legacyMatch?.[1]) keys.add(legacyMatch[1].toUpperCase());
   if (Number.isFinite(employee.employeeDbId) && employee.employeeDbId > 0) keys.add(String(employee.employeeDbId));
   return [...keys];
 };
@@ -578,11 +580,13 @@ export async function syncSageLeaveToHris(options: { employeeCodes?: string[]; l
 export async function ensureEmployeeLeaveFromSage(employee: DleEmployeeDirectoryRow) {
   await remapLegacyLeaveEmployeeIds().catch(() => undefined);
   let summary = await readEmployeeLeaveSummary(employee);
-  const hasSageData = summary.sourceSystem === SOURCE_SYSTEM
-    && (summary.balanceDetails.some((item) => item.available > 0 || item.entitlement > 0 || item.used > 0) || summary.history.length > 0);
-  if (hasSageData) return summary;
-  if (!employee.sourceEmployeeId) return summary;
-  await syncSageLeaveToHris({ employeeCodes: [employee.employeeCode] });
+  const hasLeaveData = summary.balanceDetails.some((item) =>
+    item.available > 0 || item.entitlement > 0 || item.used > 0 || item.pending > 0 || item.carryForward > 0,
+  ) || summary.history.length > 0;
+  if (hasLeaveData) return summary;
+  const employeeCode = clean(employee.employeeCode || employee.employeeId);
+  if (!employeeCode) return summary;
+  await syncSageLeaveToHris({ employeeCodes: [employeeCode] }).catch(() => undefined);
   summary = await readEmployeeLeaveSummary(employee);
   return summary;
 }

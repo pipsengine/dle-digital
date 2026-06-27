@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { calculatePayrollEarnings, calculatePermanentUnionDues, resolvePayrollEarningProfile, taxablePayrollInputFromEmployee, type PayrollEarningsOptions, type PayrollEarningsResult } from '@/lib/payroll-earnings-engine';
+import { hrisPayeFromEmployee, resolveSageAlignedAnnualRentRelief } from '@/lib/payroll-sage-pay-rules';
 
 export type TaxBand = { id: string; sequence: number; label: string; bandAmount: number | null; rate: number };
 export type ConfigStatus = 'Draft' | 'Active' | 'Retired';
@@ -45,6 +46,7 @@ export type PayrollTaxConfig = {
 };
 export type PayrollTaxInput = {
   employee?: DleEmployeeDirectoryRow;
+  earnings?: Pick<PayrollEarningsResult, 'paidEarningLines' | 'earningLines' | 'profileId'>;
   monthlyBasicPay?: number;
   monthlyBasePay: number;
   monthlyAllowances: number;
@@ -84,13 +86,27 @@ const isNhfExcludedGrade = (employee?: DleEmployeeDirectoryRow) => {
   if (!employee) return false;
   return [employee.salaryGrade, employee.jobGrade].map(normalizedTextKey).some((grade) => NHF_EXCLUDED_GRADES.has(grade));
 };
+const employeeGradeKey = (employee?: DleEmployeeDirectoryRow) =>
+  normalizedTextKey(employee?.salaryGrade || employee?.jobGrade || '');
+
+/** Sage-aligned NHF: per-employee flag when set; otherwise junior grades default on, senior/management default off. */
+export const defaultNhfApplicableForEmployee = (employee?: DleEmployeeDirectoryRow) => {
+  if (!employee) return false;
+  if (employee.nhfApplicable === true) return true;
+  if (employee.nhfApplicable === false) return false;
+  if (isNhfExcludedGrade(employee)) return false;
+  const grade = employeeGradeKey(employee);
+  if (/^(JS|JNR|JR)/.test(grade)) return true;
+  if (/^(SS|SNR|MGT|SMGT|MGTCOLA|EXP)/.test(grade)) return false;
+  return false;
+};
 
 export const defaultAnnualRentReliefForEmployee = (employee?: DleEmployeeDirectoryRow) => {
   if (!employee) return 0;
   const explicit = Number(employee.annualRentRelief);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
   const profileId = resolvePayrollEarningProfile(employee);
-  if (profileId === 'stipend-non-taxable' || String(profileId).startsWith('contract-')) return 0;
+  if (profileId === 'stipend-non-taxable' || profileId === 'contract-day-rate') return 0;
   return DEFAULT_ANNUAL_RENT_RELIEF;
 };
 
@@ -100,7 +116,17 @@ const resolveAnnualRentRelief = (component: TaxComponentConfig, input: PayrollTa
   const statutoryCap = Number(component.annualCap || DEFAULT_ANNUAL_RENT_RELIEF);
   if (Number.isFinite(employeeRelief) && employeeRelief > 0) return employeeRelief;
   if (annualRentPaid > 0) return annualRentPaid * Number(component.rate || 0);
-  if (component.requiresEmployeeEvidence === false) return statutoryCap;
+  if (component.requiresEmployeeEvidence === false) {
+    const profileId = input.employee ? resolvePayrollEarningProfile(input.employee) : 'fallback';
+    const monthlyTaxable = Math.max(0, Number(input.monthlyTaxablePay ?? (Number(input.monthlyBasePay || 0) + Number(input.monthlyAllowances || 0))));
+    const category = profileId === 'contract-lumpsum' ? 'lumpsum' : String(profileId).startsWith('contract-') ? 'contract' : 'permanent';
+    return resolveSageAlignedAnnualRentRelief({
+      employee: input.employee,
+      category,
+      monthlyTaxable,
+      payeRules: input.employee?.payeCalculation || null,
+    });
+  }
   return defaultAnnualRentReliefForEmployee(input.employee);
 };
 
@@ -151,9 +177,7 @@ const calculateComponent = (component: TaxComponentConfig, input: PayrollTaxInpu
   const profileId = input.employee ? resolvePayrollEarningProfile(input.employee) : 'fallback';
   if (!appliesToEmployee(component, input)) return 0;
   if ((component.id === 'pension' || component.id === 'nhf') && String(profileId).startsWith('contract-')) return 0;
-  if (component.id === 'nhf' && input.employee?.nhfApplicable === false) return 0;
-  if (component.id === 'nhf' && input.employee?.nhfApplicable !== true && isNhfExcludedGrade(input.employee)) return 0;
-  if (component.id === 'nhf' && input.employee?.nhfApplicable !== true && profileId === 'senior-permanent') return 0;
+  if (component.id === 'nhf' && !defaultNhfApplicableForEmployee(input.employee)) return 0;
   if (component.id === 'union-dues' && input.employee) return calculatePermanentUnionDues(input.employee).amount * 12;
   const monthlyBasic = Math.max(0, Number(input.monthlyBasicPay || 0));
   const monthlyBase = Math.max(0, Number(input.monthlyBasePay || 0));
@@ -206,13 +230,22 @@ export const calculatePayrollTax = (input: PayrollTaxInput, version: PayrollTaxV
     });
   const annualPaye = roundMoney(bandResults.reduce((sum, band) => sum + band.tax, 0));
   const postTaxDeductions = roundMoney(statutoryItems.filter((item) => !item.preTax).reduce((sum, item) => sum + item.amount, 0));
+  const enterprisePaye =
+    input.employee && input.earnings
+      ? hrisPayeFromEmployee({
+          employee: input.employee,
+          earnings: input.earnings,
+          nhfApplicable: defaultNhfApplicableForEmployee(input.employee),
+        }).paye
+      : null;
+  const monthlyPaye = enterprisePaye ?? roundMoney(annualPaye / 12);
   return {
     annualGrossIncome,
     annualPreTaxDeductions,
     annualReliefs,
     annualChargeableIncome,
-    annualPaye,
-    monthlyPaye: roundMoney(annualPaye / 12),
+    annualPaye: roundMoney(monthlyPaye * 12),
+    monthlyPaye,
     annualPostTaxDeductions: postTaxDeductions,
     monthlyPostTaxDeductions: roundMoney(postTaxDeductions / 12),
     statutoryItems,
@@ -227,6 +260,7 @@ export const payrollInputFromEmployee = (employee: DleEmployeeDirectoryRow, opti
   const annualRentRelief = defaultAnnualRentReliefForEmployee(employee);
   return {
     ...taxInput,
+    earnings,
     employee: {
       ...employee,
       annualRentRelief: annualRentRelief > 0 ? annualRentRelief : employee.annualRentRelief,

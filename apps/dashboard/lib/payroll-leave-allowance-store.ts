@@ -3,6 +3,19 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sql from 'mssql';
 import { loadWorkspaceEnv, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
+import {
+  approvedAnnualLeaveDaysForYear,
+  employeeMatchKeys,
+  isCountableLeaveAllowanceEvent,
+  isLeaveAllowanceEligibleForYear,
+  isLeaveAllowancePaymentCode,
+  primaryAnnualLeaveApplicationForAllowance,
+  LEAVE_ALLOWANCE_MINIMUM_ANNUAL_DAYS,
+  type LeaveApplicationLike,
+} from '@/lib/leave-allowance-policy';
+import { calculateAnnualLeaveAllowanceAmount, calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
+import { isEnterprisePayrollPeriod } from '@/lib/payroll-enterprise-source';
+import { syncSageSupplementalEarningAdjustments } from '@/lib/payroll-period-earning-adjustments-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 
 export type PayrollLeaveAllowanceEvent = {
@@ -102,7 +115,7 @@ export const leaveAllowanceEventsForEmployeePeriod = (employee: DleEmployeeDirec
     employee.sourceEmployeeId,
   ].map(normalizePayrollMatchKey).filter(Boolean);
   return readPayrollLeaveAllowanceEventsSync().filter((event) => {
-    if (!['Approved', 'Posted', 'Paid'].includes(event.status)) return false;
+    if (!isCountableLeaveAllowanceEvent(event)) return false;
     if (event.period !== normalizedPeriod) return false;
     const eventKeys = [event.employeeId, event.employeeCode].map(normalizePayrollMatchKey).filter(Boolean);
     return eventKeys.some((key) => employeeKeys.includes(key));
@@ -110,15 +123,11 @@ export const leaveAllowanceEventsForEmployeePeriod = (employee: DleEmployeeDirec
 };
 
 export const hasLeaveAllowanceInYear = async (employee: DleEmployeeDirectoryRow, leaveYear: number, excludeRequestId?: string) => {
-  const employeeKeys = [
-    employee.employeeId,
-    employee.employeeCode,
-    employee.sourceEmployeeId,
-  ].map(normalizePayrollMatchKey).filter(Boolean);
+  const employeeKeys = employeeMatchKeys(employee.employeeId, employee.employeeCode || employee.sourceEmployeeId);
   return (await readPayrollLeaveAllowanceEvents()).some((event) => {
     if (event.leaveYear !== leaveYear || event.leaveType !== 'Annual Leave') return false;
     if (excludeRequestId && event.requestId === excludeRequestId) return false;
-    if (!['Approved', 'Posted', 'Paid'].includes(event.status)) return false;
+    if (!isCountableLeaveAllowanceEvent(event)) return false;
     const eventKeys = [event.employeeId, event.employeeCode].map(normalizePayrollMatchKey).filter(Boolean);
     return eventKeys.some((key) => employeeKeys.includes(key));
   });
@@ -190,7 +199,7 @@ export const readSageLeaveAllowanceEvents = async (): Promise<PayrollLeaveAllowa
         period,
         leaveYear: Number(row.calendarYear || period.slice(0, 4)),
         leaveType: 'Annual Leave' as const,
-        days: 10,
+        days: 0,
         code,
         description: compact(row.description) || 'Leave Allowance',
         amount: roundMoney(Number(row.amount || 0)),
@@ -202,13 +211,76 @@ export const readSageLeaveAllowanceEvents = async (): Promise<PayrollLeaveAllowa
         updatedAt: now,
         audit: [{ at: now, actor: 'Sage Payroll Migration', action: 'Imported paid leave allowance', note: `${code} ${period}` }],
       };
-    }).filter((event) => event.employeeCode && event.amount !== 0);
+    }).filter((event) => event.employeeCode && isLeaveAllowancePaymentCode(event.code) && event.amount > 0);
   } finally {
     await pool.close();
   }
 };
 
-export const syncSageLeaveAllowanceEvents = async () => {
+export const reconcilePayrollLeaveAllowanceEvents = async (applications: LeaveApplicationLike[] = []) => {
+  const events = await readPayrollLeaveAllowanceEvents();
+  if (!applications.length) return events;
+
+  const now = new Date().toISOString();
+  let changed = false;
+  const reconciled = events.map((event) => {
+    if (!isLeaveAllowancePaymentCode(event.code) || Number(event.amount || 0) <= 0) return event;
+    const keys = [event.employeeId, event.employeeCode].map(normalizePayrollMatchKey).filter(Boolean);
+    const approvedDays = approvedAnnualLeaveDaysForYear(applications, keys, event.leaveYear);
+    const eligible = isLeaveAllowanceEligibleForYear(applications, keys, event.leaveYear);
+    const linkedApplication = primaryAnnualLeaveApplicationForAllowance(applications, keys, event.leaveYear);
+
+    if (eligible) {
+      const next = {
+        ...event,
+        days: approvedDays,
+        requestId: linkedApplication?.id || event.requestId,
+        updatedAt: now,
+        status: event.status === 'Reversed' ? 'Paid' as const : event.status,
+      };
+      if (next.days !== event.days || next.requestId !== event.requestId || next.status !== event.status) changed = true;
+      return next;
+    }
+
+    if (['Approved', 'Posted', 'Paid'].includes(event.status)) {
+      changed = true;
+      return {
+        ...event,
+        days: approvedDays,
+        status: 'Reversed' as const,
+        requestId: linkedApplication?.id || event.requestId,
+        updatedAt: now,
+        audit: [
+          ...(event.audit || []),
+          {
+            at: now,
+            actor: 'Leave Allowance Policy',
+            action: 'Reversed ineligible leave allowance',
+            note: `Only ${approvedDays} approved annual leave day(s) recorded for ${event.leaveYear}; minimum 10 working days required.`,
+          },
+        ],
+      };
+    }
+
+    if (event.days !== approvedDays) {
+      changed = true;
+      return { ...event, days: approvedDays, updatedAt: now };
+    }
+
+    return event;
+  });
+
+  if (changed) await writePayrollLeaveAllowanceEvents(reconciled);
+  return reconciled;
+};
+
+const loadLeaveApplicationsForReconciliation = async () => {
+  const { readLeaveApplicationsForReconciliation } = await import('@/lib/leave-management-store');
+  return readLeaveApplicationsForReconciliation();
+};
+
+export const syncSageLeaveAllowanceEvents = async (applications?: LeaveApplicationLike[]) => {
+  const resolvedApplications = applications ?? await loadLeaveApplicationsForReconciliation();
   try {
     const [current, sageEvents] = await Promise.all([readPayrollLeaveAllowanceEvents(), readSageLeaveAllowanceEvents()]);
     const byId = new Map(current.map((event) => [event.id, event]));
@@ -216,11 +288,83 @@ export const syncSageLeaveAllowanceEvents = async () => {
       const existing = byId.get(sageEvent.id);
       byId.set(sageEvent.id, existing ? { ...existing, ...sageEvent, createdAt: existing.createdAt, audit: existing.audit?.length ? existing.audit : sageEvent.audit } : sageEvent);
     }
-    const events = Array.from(byId.values());
-    await writePayrollLeaveAllowanceEvents(events);
-    return events;
+    await writePayrollLeaveAllowanceEvents(Array.from(byId.values()));
+    return reconcilePayrollLeaveAllowanceEvents(resolvedApplications);
   } catch {
-    return readPayrollLeaveAllowanceEvents();
+    return reconcilePayrollLeaveAllowanceEvents(resolvedApplications);
+  }
+};
+
+export const syncLeaveAllowanceEventsForPayroll = async (period?: string) => {
+  const applications = await loadLeaveApplicationsForReconciliation();
+  try {
+    await syncSageSupplementalEarningAdjustments(period);
+  } catch (error) {
+    console.warn('[Payroll] Sage supplemental earning sync skipped:', error instanceof Error ? error.message : error);
+  }
+  if (period && isEnterprisePayrollPeriod(period)) {
+    return reconcilePayrollLeaveAllowanceEvents(applications);
+  }
+  return syncSageLeaveAllowanceEvents(applications);
+};
+
+export type PostLeaveAllowanceResult = {
+  posted: boolean;
+  message: string;
+  event?: PayrollLeaveAllowanceEvent;
+};
+
+export const postLeaveAllowanceOnAnnualLeaveApproval = async (input: {
+  employee: DleEmployeeDirectoryRow;
+  applications: LeaveApplicationLike[];
+  leaveType: string;
+  days: number;
+  startDate: string;
+  period?: string;
+  leaveYear?: number;
+  requestId?: string;
+  source: PayrollLeaveAllowanceEvent['source'];
+  actor: string;
+}): Promise<PostLeaveAllowanceResult> => {
+  const leaveType = compact(input.leaveType);
+  const days = Number(input.days || 0);
+  if (leaveType !== 'Annual Leave' || days < LEAVE_ALLOWANCE_MINIMUM_ANNUAL_DAYS) {
+    return { posted: false, message: 'Annual leave allowance not applicable for this request.' };
+  }
+  const startDate = compact(input.startDate);
+  const period = normalizePayrollPeriod(input.period || activePayrollPeriod() || startDate.slice(0, 7));
+  const leaveYear = Number(input.leaveYear || startDate.slice(0, 4) || new Date().getFullYear());
+  const employeeKeys = employeeMatchKeys(input.employee.employeeId, input.employee.employeeCode || input.employee.sourceEmployeeId);
+  const approvedDays = approvedAnnualLeaveDaysForYear(input.applications, employeeKeys, leaveYear);
+  if (!isLeaveAllowanceEligibleForYear(input.applications, employeeKeys, leaveYear)) {
+    return {
+      posted: false,
+      message: `Leave allowance not posted: only ${approvedDays} approved annual leave day(s) recorded for ${leaveYear}; minimum ${LEAVE_ALLOWANCE_MINIMUM_ANNUAL_DAYS} required.`,
+    };
+  }
+  const annualBenefit = calculatePayrollEarnings(input.employee).annualBenefitLines.find(
+    (line) => line.name.toLowerCase().includes('leave') || line.code.toUpperCase().includes('LEAVE'),
+  );
+  const allowanceAmount = Number(annualBenefit?.amount || 0) || calculateAnnualLeaveAllowanceAmount(input.employee);
+  if (allowanceAmount <= 0) {
+    return { posted: false, message: 'Leave allowance amount could not be calculated for this employee profile.' };
+  }
+  try {
+    const event = await upsertApprovedLeaveAllowanceEvent({
+      employee: input.employee,
+      period,
+      leaveYear,
+      days: approvedDays || days,
+      amount: allowanceAmount,
+      taxableAmount: annualBenefit?.taxable === false ? 0 : allowanceAmount,
+      source: input.source,
+      requestId: input.requestId,
+      actor: input.actor,
+      note: `Approved ${approvedDays || days} days Annual Leave; payable once for ${leaveYear}.`,
+    });
+    return { posted: true, message: `Leave allowance ${event.code} posted to ${event.period} payroll.`, event };
+  } catch (error) {
+    return { posted: false, message: error instanceof Error ? error.message : 'Leave allowance was not posted.' };
   }
 };
 
@@ -238,6 +382,9 @@ export const upsertApprovedLeaveAllowanceEvent = async (input: {
 }) => {
   const period = normalizePayrollPeriod(input.period);
   if (!period) throw new Error('Payroll period is required for leave allowance posting.');
+  if (Number(input.days || 0) < LEAVE_ALLOWANCE_MINIMUM_ANNUAL_DAYS) {
+    throw new Error(`Leave allowance requires at least ${LEAVE_ALLOWANCE_MINIMUM_ANNUAL_DAYS} approved annual leave working days.`);
+  }
   if (await hasLeaveAllowanceInYear(input.employee, input.leaveYear, input.requestId)) {
     throw new Error(`Leave allowance has already been paid or approved for ${input.leaveYear}.`);
   }

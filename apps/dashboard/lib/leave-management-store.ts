@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import sql from 'mssql';
+import { buildLeaveAllowanceApplicationStatus, buildLeaveAllowanceExceptions, type LeaveAllowanceExceptionRow, type LeaveApplicationLike } from '@/lib/leave-allowance-policy';
+import { reconcilePayrollLeaveAllowanceEvents, syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
 import { getDleEnterpriseDbPool, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { syncSageLeaveToHris } from '@/lib/sage-leave-sync';
@@ -91,6 +93,10 @@ export type LeaveApplicationRecord = {
   auditCount: number;
   createdAt: string;
   updatedAt: string;
+  allowanceStatus?: string;
+  allowanceEligible?: boolean;
+  allowancePaid?: boolean;
+  approvedAnnualLeaveDays?: number;
 };
 
 export type LeaveBalanceRecord = {
@@ -128,6 +134,20 @@ export type LeaveTypeRule = {
   allowanceRule: string;
 };
 
+export type LeaveDrilldownRow = {
+  employeeId: string;
+  fullName: string;
+  department: string;
+  leaveType?: string;
+  startDate?: string;
+  endDate?: string;
+  days?: number;
+  status?: string;
+  stage?: string;
+  metricLabel?: string;
+  metricValue?: string | number;
+};
+
 export type LeavePayload = {
   generatedAt: string;
   source: string;
@@ -153,7 +173,8 @@ export type LeavePayload = {
     encashmentRequests: number;
     recallRequests: number;
     cancellationRequests: number;
-    exceptionCount: number;
+    allowanceExceptionCount: number;
+    allowancePendingPayrollCount: number;
   };
   current: {
     leaveStatus: string;
@@ -169,6 +190,7 @@ export type LeavePayload = {
   actions: LeaveAction[];
   applications: LeaveApplicationRecord[];
   balances: LeaveBalanceRecord[];
+  allowanceExceptions: LeaveAllowanceExceptionRow[];
   leaveTypes: LeaveTypeRule[];
   calendar: Array<Record<string, string | number>>;
   blockedPeriods: Array<Record<string, string>>;
@@ -178,6 +200,18 @@ export type LeavePayload = {
   auditTrail: LeaveAuditEntry[];
   integrations: Array<Record<string, string>>;
   operationalSections: Array<{ id: string; label: string; area: 'Dashboard' | 'Transactions' | 'Planning & Balances' | 'Administration' | 'Reports & Analytics'; description: string; actions: LeaveActionId[]; controls: string[]; reports?: string[] }>;
+  drilldowns: {
+    totalEmployees: LeaveDrilldownRow[];
+    onLeaveToday: LeaveDrilldownRow[];
+    returningToday: LeaveDrilldownRow[];
+    pendingApprovals: LeaveDrilldownRow[];
+    upcomingLeave: LeaveDrilldownRow[];
+    leaveUtilization: LeaveDrilldownRow[];
+    leaveLiability: LeaveDrilldownRow[];
+    carryForwardProcessing: LeaveDrilldownRow[];
+    cancellationRequests: LeaveDrilldownRow[];
+    leaveAllowanceExceptions: LeaveDrilldownRow[];
+  };
 };
 
 const nowIso = () => new Date().toISOString();
@@ -252,6 +286,132 @@ const isWorkingDate = (date: string) => {
 
 const dateInRange = (date: string, startDate: string, endDate: string) =>
   date >= startDate && date <= endDate;
+
+const isAnnualLeaveType = (leaveType: string) => /annual/i.test(String(leaveType || ''));
+
+const appToDrilldownRow = (item: LeaveApplicationRecord): LeaveDrilldownRow => ({
+  employeeId: item.employeeId,
+  fullName: item.fullName,
+  department: item.department,
+  leaveType: item.leaveType,
+  startDate: item.startDate,
+  endDate: item.endDate,
+  days: item.days,
+  status: item.status,
+  stage: item.stage,
+});
+
+const buildLeaveDrilldowns = (
+  employees: DleEmployeeDirectoryRow[],
+  applications: LeaveApplicationRecord[],
+  balances: LeaveBalanceRecord[],
+) => {
+  const today = dateAdd(0);
+  const activeLeaveStatuses = ['Approved', 'Completed'] as const;
+  const pendingStatuses = ['Submitted', 'Under Review', 'Draft'] as const;
+
+  const onLeaveTodayApps = applications.filter(
+    (item) => activeLeaveStatuses.includes(item.status as typeof activeLeaveStatuses[number]) && dateInRange(today, item.startDate, item.endDate),
+  );
+  const onLeaveStatusEmployees = employees.filter((employee) => String(employee.status || '').toLowerCase().includes('on leave'));
+  const onLeaveTodayKeys = new Set(onLeaveTodayApps.map((item) => item.employeeId.toUpperCase()));
+  const onLeaveToday = [
+    ...onLeaveTodayApps.map(appToDrilldownRow),
+    ...onLeaveStatusEmployees
+      .filter((employee) => !onLeaveTodayKeys.has(String(employee.employeeId || employee.employeeCode).toUpperCase()))
+      .map((employee) => ({
+        employeeId: employee.employeeId,
+        fullName: employee.fullName,
+        department: employee.department || 'Unassigned',
+        status: employee.status,
+        metricLabel: 'HRIS status',
+        metricValue: 'On Leave',
+      })),
+  ];
+
+  const returningToday = applications
+    .filter((item) => activeLeaveStatuses.includes(item.status as typeof activeLeaveStatuses[number]) && item.endDate === today)
+    .map(appToDrilldownRow);
+
+  const pendingApprovals = applications
+    .filter((item) => pendingStatuses.includes(item.status as typeof pendingStatuses[number]))
+    .map(appToDrilldownRow);
+
+  const upcomingLeave = applications
+    .filter((item) => item.startDate > today && ['Approved', 'Submitted', 'Under Review'].includes(item.status))
+    .map(appToDrilldownRow);
+
+  const totalEmployees = employees
+    .filter((employee) => activeStatus(employee.status))
+    .map((employee) => ({
+      employeeId: employee.employeeId,
+      fullName: employee.fullName,
+      department: employee.department || 'Unassigned',
+      status: employee.status,
+      metricLabel: 'Job title',
+      metricValue: employee.jobTitle || employee.designation || '—',
+    }));
+
+  const annualBalances = balances.filter((item) => isAnnualLeaveType(item.leaveType));
+  const leaveUtilization = annualBalances.map((item) => ({
+    employeeId: item.employeeId,
+    fullName: item.fullName,
+    department: item.department,
+    leaveType: item.leaveType,
+    status: item.status,
+    metricLabel: 'Used / Accrued',
+    metricValue: `${item.usedBalance} / ${item.accruedBalance}`,
+    days: item.usedBalance,
+  }));
+
+  const leaveLiability = annualBalances
+    .filter((item) => item.liabilityValue > 0)
+    .map((item) => ({
+      employeeId: item.employeeId,
+      fullName: item.fullName,
+      department: item.department,
+      leaveType: item.leaveType,
+      status: item.status,
+      metricLabel: 'Liability',
+      metricValue: moneyFmt.format(item.liabilityValue),
+      days: item.currentBalance,
+    }))
+    .sort((a, b) => Number(String(b.metricValue).replace(/[^\d.-]/g, '') || 0) - Number(String(a.metricValue).replace(/[^\d.-]/g, '') || 0));
+
+  const carryForwardByEmployee = new Map<string, LeaveDrilldownRow>();
+  for (const item of balances) {
+    if (item.carryForwardBalance <= 0) continue;
+    const existing = carryForwardByEmployee.get(item.employeeId);
+    if (!existing || item.carryForwardBalance > Number(existing.days || 0)) {
+      carryForwardByEmployee.set(item.employeeId, {
+        employeeId: item.employeeId,
+        fullName: item.fullName,
+        department: item.department,
+        leaveType: item.leaveType,
+        status: item.status,
+        metricLabel: 'Carry forward days',
+        metricValue: item.carryForwardBalance,
+        days: item.carryForwardBalance,
+      });
+    }
+  }
+
+  const cancellationRequests = applications
+    .filter((item) => item.status === 'Cancelled')
+    .map(appToDrilldownRow);
+
+  return {
+    totalEmployees,
+    onLeaveToday,
+    returningToday,
+    pendingApprovals,
+    upcomingLeave,
+    leaveUtilization,
+    leaveLiability,
+    carryForwardProcessing: [...carryForwardByEmployee.values()].sort((a, b) => Number(b.days || 0) - Number(a.days || 0)),
+    cancellationRequests,
+  };
+};
 
 const currentYear = new Date().getFullYear();
 export const dormantLongPolicy = {
@@ -424,6 +584,7 @@ const normalizeLeaveStatus = (status: string): LeaveStatus => {
   const normalized = clean(status).toLowerCase();
   if (['approved', 'closed'].includes(normalized)) return normalized === 'closed' ? 'Completed' : 'Approved';
   if (['submitted', 'pending'].includes(normalized)) return 'Submitted';
+  if (['line manager review', 'hr review', 'finance review'].includes(normalized)) return 'Under Review';
   if (['under review', 'review'].includes(normalized)) return 'Under Review';
   if (['rejected', 'declined'].includes(normalized)) return 'Rejected';
   if (['withdrawn'].includes(normalized)) return 'Withdrawn';
@@ -875,6 +1036,28 @@ VALUES
   }
 };
 
+export async function readEmployeeLeaveSnapshot(employee: DleEmployeeDirectoryRow, employees: DleEmployeeDirectoryRow[]) {
+  const pool = await ensureDb();
+  await maybeSyncSageLeave();
+  await maybeSyncLeaveTypePolicies(pool, false);
+  await maybeUpsertEssLeaveRequests(pool, employees, true);
+  await maybeSyncLeaveBalances(pool, employees, true);
+  const keys = employeeMatchKeys(employee);
+  const belongs = (employeeId: string) => keys.has(String(employeeId || '').trim().toUpperCase());
+  const [applications, balances] = await Promise.all([readLeaveApplications(pool), readLeaveBalances(pool)]);
+  return {
+    applications: applications.filter((item) => belongs(item.employeeId)),
+    balances: balances.filter((item) => belongs(item.employeeId)),
+  };
+}
+
+const employeeMatchKeys = (employee: DleEmployeeDirectoryRow) =>
+  new Set(
+    [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId]
+      .map((value) => String(value || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+
 export async function approvedPaidLeaveForDate(date: string): Promise<ApprovedPaidLeaveDay[]> {
   if (!date || !isWorkingDate(date)) return [];
   const employeeSource = await readPayrollEmployees();
@@ -927,7 +1110,8 @@ const sectionConfig: LeavePayload['operationalSections'] = [
   { id: 'carry-forward-processing', label: 'Carry Forward Processing', area: 'Administration', description: 'Every 1 January, unused Annual Leave rolls over to Carry Forward Leave capped at 7 working days and expiring on 31 March.', actions: ['process-carry-forward', 'approve', 'reject', 'view-history', 'generate-report'], controls: ['7 working day cap', '31 March expiry', 'Forfeiture calculation', 'Approval requirement', 'Balance posting'] },
   { id: 'balance-adjustments', label: 'Balance Adjustments', area: 'Administration', description: 'Controlled manual balance corrections with RBAC, approval, evidence, audit, and rollback governance.', actions: ['adjust-balance', 'approve', 'reject', 'view-audit-trail', 'export'], controls: ['Adjustment reason', 'Evidence attachment', 'Approval workflow', 'Segregation of duties', 'Audit trail'] },
   { id: 'leave-year-end-processing', label: 'Leave Year-End Processing', area: 'Administration', description: 'Year-end close, 1 January entitlement grant, carry-forward posting, 31 March expiry handling, forfeiture, liability reporting, archive, and payroll handoff.', actions: ['close-year', 'process-carry-forward', 'process-accrual', 'post-to-payroll', 'archive', 'generate-report'], controls: ['Open transaction checks', '1 January annual grant', 'Carry-forward posting', '31 March expiry posting', 'Liability snapshot', 'Archive controls'] },
-  { id: 'leave-reports', label: 'Leave Reports', area: 'Reports & Analytics', description: 'Executive leave report catalogue for Dorman Long utilization, balances, liability, approvals, allowance eligibility, carry-forward, history, departments, and absenteeism.', actions: ['generate-report', 'export', 'view-history'], controls: ['Schedule report', 'Email report', 'Save report view', 'Dashboard analytics'], reports: ['Leave Utilization Report', 'Leave Balance Report', 'Leave Liability Report', 'Leave Allowance Eligibility Report', 'Carry Forward Expiry Report', 'Leave Approval Report', 'Employee Leave History', 'Department Leave Report', 'Absenteeism Report'] },
+  { id: 'leave-allowance-exceptions', label: 'Leave Allowance Exceptions', area: 'Reports & Analytics', description: 'Payroll leave allowance policy exceptions, reversed payments, ineligible postings, and eligible requests awaiting payroll posting.', actions: ['generate-report', 'export', 'post-to-payroll', 'view-audit-trail'], controls: ['10-day annual leave threshold', 'Approved leave day validation', 'Reversed payroll events', 'Pending payroll posting queue', 'Linked leave transaction'], reports: ['Leave Allowance Exceptions Report', 'Leave Allowance Eligibility Report'] },
+  { id: 'leave-reports', label: 'Leave Reports', area: 'Reports & Analytics', description: 'Executive leave report catalogue for Dorman Long utilization, balances, liability, approvals, allowance eligibility, carry-forward, history, departments, and absenteeism.', actions: ['generate-report', 'export', 'view-history'], controls: ['Schedule report', 'Email report', 'Save report view', 'Dashboard analytics'], reports: ['Leave Utilization Report', 'Leave Balance Report', 'Leave Liability Report', 'Leave Allowance Eligibility Report', 'Leave Allowance Exceptions Report', 'Carry Forward Expiry Report', 'Leave Approval Report', 'Employee Leave History', 'Department Leave Report', 'Absenteeism Report'] },
   { id: 'leave-utilization', label: 'Leave Utilization', area: 'Reports & Analytics', description: 'Utilization analytics by employee, department, location, grade, category, period, and leave type.', actions: ['generate-report', 'export', 'view-history'], controls: ['Utilization rate', 'Absence frequency', 'Department comparison', 'Leave type mix', 'Seasonality analysis'] },
   { id: 'leave-liability', label: 'Leave Liability', area: 'Reports & Analytics', description: 'Financial liability tracking for accrued, carried, pending, forfeited, and encashable balances with payroll and finance integration.', actions: ['generate-report', 'export', 'post-to-payroll', 'view-history'], controls: ['Liability valuation', 'Payroll posting readiness', 'Finance export', 'Encashment exposure', 'Year-end liability snapshot'] },
   { id: 'leave-trends', label: 'Leave Trends', area: 'Reports & Analytics', description: 'Trend analytics for leave demand, absence patterns, recurring exceptions, approval SLA, coverage risk, and workforce planning signals.', actions: ['generate-report', 'export', 'view-history'], controls: ['Monthly trend', 'Department trend', 'Exception trend', 'Approval SLA trend', 'Coverage risk trend'] },
@@ -959,7 +1143,7 @@ const sectionAliases: Record<string, string> = {
 
 const normalizeSection = (section = 'dashboard') => sectionAliases[section] || section;
 
-const reportList = ['Executive Leave Policy Dashboard', 'Leave Utilization Report', 'Leave Balance Report', 'Leave Liability Report', 'Leave Allowance Eligibility Report', 'Carry Forward Expiry Report', 'Leave Approval Report', 'Leave Recall Report', 'Leave Cancellation Report', 'Leave Trend Analysis', 'Employee Leave History', 'Department Leave Report', 'Absenteeism Report'].map((name, index) => ({
+const reportList = ['Executive Leave Policy Dashboard', 'Leave Utilization Report', 'Leave Balance Report', 'Leave Liability Report', 'Leave Allowance Eligibility Report', 'Leave Allowance Exceptions Report', 'Carry Forward Expiry Report', 'Leave Approval Report', 'Leave Recall Report', 'Leave Cancellation Report', 'Leave Trend Analysis', 'Employee Leave History', 'Department Leave Report', 'Absenteeism Report'].map((name, index) => ({
   id: `rpt-${index + 1}`,
   name,
   status: 'Available',
@@ -1017,6 +1201,26 @@ const maybeSyncSageLeave = async () => {
   lastSageLeaveSyncAt = Date.now();
 };
 
+export async function readLeaveApplicationsForReconciliation(options?: { syncEss?: boolean }): Promise<LeaveApplicationLike[]> {
+  const pool = await ensureDb();
+  if (options?.syncEss !== false) {
+    const employeeSource = await readPayrollEmployees();
+    await upsertEssLeaveRequests(pool, employeeSource.employees);
+  }
+  const applications = await readLeaveApplications(pool);
+  return applications.map((application) => ({
+    id: application.id,
+    employeeId: application.employeeId,
+    fullName: application.fullName,
+    department: application.department,
+    leaveType: application.leaveType,
+    startDate: application.startDate,
+    endDate: application.endDate,
+    days: application.days,
+    status: application.status,
+  }));
+}
+
 export async function readLeaveManagementPayload(
   section = 'dashboard',
   roleInput?: string | null,
@@ -1032,21 +1236,78 @@ export async function readLeaveManagementPayload(
   await maybeSyncLeaveTypePolicies(pool, forceSync);
   await maybeUpsertEssLeaveRequests(pool, employees, forceSync);
   await maybeSyncLeaveBalances(pool, employees, forceSync);
-  const [applications, balances, leaveTypes, auditTrail] = await Promise.all([
+  const [applicationsRaw, balances, leaveTypes, auditTrail] = await Promise.all([
     readLeaveApplications(pool),
     readLeaveBalances(pool),
     readLeaveTypes(pool),
     readLeaveAudit(pool),
   ]);
+  const allowanceEvents = forceSync
+    ? await syncSageLeaveAllowanceEvents(applicationsRaw)
+    : await reconcilePayrollLeaveAllowanceEvents(applicationsRaw);
+  const applications = applicationsRaw.map((application) => {
+    const allowance = buildLeaveAllowanceApplicationStatus(application, applicationsRaw, allowanceEvents);
+    return {
+      ...application,
+      ...allowance,
+      exceptions: [
+        ...application.exceptions,
+        ...(application.leaveType === 'Annual Leave'
+          && Number(application.days || 0) >= dormantLongPolicy.allowanceMinimumAnnualDays
+          && allowance.allowanceStatus.startsWith('Policy exception')
+          ? ['Leave allowance payroll exception – review required']
+          : []),
+      ],
+    };
+  });
+  const allowanceExceptions = buildLeaveAllowanceExceptions(applications, allowanceEvents);
+  const allowanceExceptionCount = allowanceExceptions.filter((item) => item.severity === 'Critical').length;
+  const allowancePendingPayrollCount = allowanceExceptions.filter((item) => item.severity === 'Pending').length;
   const pendingApplications = applications.filter((item) => ['Submitted', 'Under Review', 'Draft'].includes(item.status)).length;
-  const pendingApprovals = applications.filter((item) => ['Supervisor', 'Manager', 'HR', 'Final Approval'].includes(item.stage) && !['Approved', 'Completed', 'Cancelled', 'Rejected'].includes(item.status)).length;
-  const employeesOnLeave = employees.filter((employee) => String(employee.status || '').toLowerCase().includes('leave')).length + applications.filter((item) => item.status === 'Approved').length;
+  const pendingApprovals = applications.filter((item) => ['Submitted', 'Under Review', 'Draft'].includes(item.status)).length;
+  const today = dateAdd(0);
+  const activeLeaveStatuses = ['Approved', 'Completed'];
+  const onLeaveTodayKeys = new Set(
+    applications
+      .filter((item) => activeLeaveStatuses.includes(item.status) && dateInRange(today, item.startDate, item.endDate))
+      .map((item) => item.employeeId.toUpperCase()),
+  );
+  employees
+    .filter((employee) => String(employee.status || '').toLowerCase().includes('on leave'))
+    .forEach((employee) => onLeaveTodayKeys.add(String(employee.employeeId || employee.employeeCode).toUpperCase()));
+  const employeesOnLeave = onLeaveTodayKeys.size;
   const exceptionCount = applications.reduce((sum, item) => sum + item.exceptions.length, 0) + balances.reduce((sum, item) => sum + item.exceptions.length, 0);
-  const leaveLiability = balances.reduce((sum, item) => sum + item.liabilityValue, 0);
+  const annualBalances = balances.filter((item) => isAnnualLeaveType(item.leaveType));
+  const leaveLiability = annualBalances.reduce((sum, item) => sum + item.liabilityValue, 0);
+  const totalAnnualAccrued = annualBalances.reduce((sum, item) => sum + item.accruedBalance, 0);
+  const totalAnnualUsed = annualBalances.reduce((sum, item) => sum + item.usedBalance, 0);
+  const drilldowns = {
+    ...buildLeaveDrilldowns(employees, applications, balances),
+    leaveAllowanceExceptions: allowanceExceptions.map((item) => ({
+      employeeId: item.employeeId,
+      fullName: item.fullName,
+      department: item.department,
+      leaveType: 'Annual Leave',
+      startDate: item.payrollPeriod,
+      endDate: String(item.leaveYear),
+      days: item.requestDays,
+      status: item.eventStatus,
+      stage: item.severity,
+      metricLabel: item.allowanceStatus,
+      metricValue: item.recommendation,
+    })),
+  };
+  const activeEmployeeCount = drilldowns.totalEmployees.length;
   const currentSection = sectionConfig.find((item) => item.id === normalizedSection) || sectionConfig[0];
   const availableActions = leaveActions.filter((item) => currentSection.actions.includes(item.id) && item.roles.includes(role));
   const blocked = applications.filter((item) => item.policyComplianceStatus === 'Blocked');
-  const nextRequiredAction = blocked.length ? 'Resolve leave validation exceptions' : pendingApprovals ? 'Approve pending leave requests' : 'Run monthly accrual and publish calendar';
+  const nextRequiredAction = blocked.length
+    ? 'Resolve leave validation exceptions'
+    : allowanceExceptionCount
+      ? 'Review leave allowance payroll exceptions'
+      : pendingApprovals
+        ? 'Approve pending leave requests'
+        : 'Run monthly accrual and publish calendar';
 
   return {
     generatedAt: nowIso(),
@@ -1055,17 +1316,19 @@ export async function readLeaveManagementPayload(
     section: currentSection.id,
     permissions: permissionsFor(role),
     summary: {
-      totalEmployees: employees.length,
+      totalEmployees: activeEmployeeCount,
       employeesOnLeave,
-      returningToday: Math.max(0, applications.filter((item) => item.endDate === dateAdd(0)).length),
+      returningToday: drilldowns.returningToday.length,
       pendingApplications,
       pendingApprovals,
-      leaveUtilizationPct: balances.length ? Math.round((balances.reduce((sum, item) => sum + item.usedBalance, 0) / Math.max(1, balances.reduce((sum, item) => sum + item.accruedBalance, 0))) * 100) : 0,
+      leaveUtilizationPct: totalAnnualAccrued > 0 ? Math.round((totalAnnualUsed / totalAnnualAccrued) * 100) : 0,
       leaveLiability,
       encashmentRequests: 0,
       recallRequests: 0,
-      cancellationRequests: applications.filter((item) => item.status === 'Cancelled').length,
+      cancellationRequests: drilldowns.cancellationRequests.length,
       exceptionCount,
+      allowanceExceptionCount,
+      allowancePendingPayrollCount,
     },
     current: {
       leaveStatus: pendingApplications ? 'Operational queues active' : 'No pending employee leave queue',
@@ -1076,11 +1339,15 @@ export async function readLeaveManagementPayload(
       leaveBalanceImpact: `${balances.reduce((sum, item) => sum + item.pendingBalance, 0)} pending days reserved`,
       auditHistory: `${auditTrail.length} persisted audit actions available`,
       workflowProgress: pendingApprovals ? 'Employee -> Supervisor -> Manager -> HR -> Final Approval' : 'Workflow clear',
-      exceptionIndicators: blocked.slice(0, 4).flatMap((item) => item.exceptions).slice(0, 5),
+      exceptionIndicators: [
+        ...blocked.slice(0, 4).flatMap((item) => item.exceptions).slice(0, 5),
+        ...(allowanceExceptionCount ? [`${allowanceExceptionCount} leave allowance payroll exception(s) require review`] : []),
+      ],
     },
     actions: availableActions,
     applications,
     balances,
+    allowanceExceptions,
     leaveTypes,
     calendar: applications.slice(0, 10).map((item) => ({ id: item.id, label: `${item.fullName} - ${item.leaveType}`, from: item.startDate, to: item.endDate, status: item.status, department: item.department, location: item.location })),
     blockedPeriods: [],
@@ -1102,6 +1369,7 @@ export async function readLeaveManagementPayload(
       { system: 'Finance', status: 'Ready', purpose: `Leave liability ${moneyFmt.format(leaveLiability)} export/posting with carry-forward and allowance exposure` },
     ],
     operationalSections: sectionConfig,
+    drilldowns,
   };
 }
 
@@ -1129,7 +1397,17 @@ export function validateLeaveAction(actionId: LeaveActionId, roleInput: string |
   if (!actionDef.roles.includes(role)) return { ok: false, status: 403, message: `${role} is not permitted to perform ${actionDef.label}.` };
   if (actionDef.requiresReason && !String(body.reason || '').trim()) return { ok: false, status: 400, message: 'Reason is required for this leave action.' };
   if (actionId === 'approve' && body.employeeId && String(body.actor || '').toLowerCase() === String(body.employeeId || '').toLowerCase()) return { ok: false, status: 409, message: 'Self-approval is not permitted.' };
-  if (['approve', 'bulk-approve'].includes(actionId) && payload.applications.some((item) => item.policyComplianceStatus === 'Blocked')) return { ok: false, status: 409, message: 'Resolve blocked leave exceptions before approval.' };
+  if (['approve', 'bulk-approve'].includes(actionId)) {
+    const targetIds = body.record
+      ? [String(body.record)]
+      : Array.isArray(body.records)
+        ? body.records.map(String)
+        : [];
+    const blockedTargets = targetIds.length
+      ? payload.applications.filter((item) => targetIds.includes(item.id) && item.policyComplianceStatus === 'Blocked')
+      : payload.applications.filter((item) => item.policyComplianceStatus === 'Blocked');
+    if (blockedTargets.length) return { ok: false, status: 409, message: 'Resolve blocked leave exceptions before approval.' };
+  }
   if (actionId === 'apply' || actionId === 'submit') {
     const requestedDays = Number(body.days || 0);
     const leaveType = String(body.leaveType || 'Annual Leave');

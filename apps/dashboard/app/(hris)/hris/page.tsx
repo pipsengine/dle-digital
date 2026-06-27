@@ -7,6 +7,7 @@ import {
   Building2,
   CalendarCheck,
   Clock3,
+  Gift,
   FileText,
   Link2,
   Search,
@@ -28,6 +29,7 @@ const quickLinks = [
   { title: 'Attendance Register', href: '/hris/attendance/attendance-register', icon: CalendarCheck, detail: 'Daily attendance, review status, payroll readiness and exceptions', permissions: ['attendance.view', 'attendance.*'], tone: 'green' },
   { title: 'Timesheet Entry', href: '/hris/time-and-logs/timesheet-entry', icon: Clock3, detail: 'Project time, overtime, employee self-service entries and approvals', permissions: ['timesheet.submit', 'timesheet.approve', 'timesheet.view'], tone: 'violet' },
   { title: 'Payroll Dashboard', href: '/hris/payroll/payroll-dashboard', icon: Banknote, detail: 'Payroll setup, processing, approvals, payslips, tax and deductions', permissions: ['payroll.view', 'payroll.*'], tone: 'green' },
+  { title: 'Benefits Management', href: '/hris/benefits/overview', icon: Gift, detail: 'Medical, insurance, pension, welfare, enrollment, claims, and compliance', permissions: ['hris.view', 'payroll.view', 'employees.view'], tone: 'violet' },
   { title: 'Workforce Portal', href: '/workforce-portal', icon: UserCircle2, detail: 'Employee self-service dashboard, profile, leave, attendance, payroll and documents', permissions: ['ess.view', 'profile.view'], tone: 'orange' },
   { title: 'Documents', href: '/hris/employees/employee-documents', icon: FileText, detail: 'Employee documents, expiries, evidence and controlled records', permissions: ['documents.view', 'employees.view'], tone: 'blue' },
 ];

@@ -30,6 +30,8 @@ type Summary = {
   encashmentRequests: number;
   recallRequests: number;
   cancellationRequests: number;
+  allowanceExceptionCount?: number;
+  allowancePendingPayrollCount?: number;
 };
 
 type AppRecord = {
@@ -64,6 +66,33 @@ type PayloadSlice = {
   leaveTypes: LeaveTypeRule[];
   calendar: Array<Record<string, string | number>>;
   current: { policyComplianceStatus: string };
+  drilldowns?: {
+    onLeaveToday: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; startDate?: string; endDate?: string; days?: number; status?: string; stage?: string; metricLabel?: string; metricValue?: string | number }>;
+    upcomingLeave: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; startDate?: string; endDate?: string; days?: number; status?: string; stage?: string }>;
+    pendingApprovals: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; startDate?: string; endDate?: string; days?: number; status?: string; stage?: string }>;
+    carryForwardProcessing: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; days?: number; metricLabel?: string; metricValue?: string | number }>;
+    cancellationRequests: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; startDate?: string; endDate?: string; days?: number; status?: string }>;
+    returningToday: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; startDate?: string; endDate?: string; days?: number; status?: string }>;
+    leaveAllowanceExceptions?: Array<{ employeeId: string; fullName: string; department: string; leaveType?: string; startDate?: string; endDate?: string; days?: number; status?: string; stage?: string; metricLabel?: string; metricValue?: string | number }>;
+  };
+};
+
+type DrilldownPanel = {
+  title: string;
+  note: string;
+  rows: Array<{
+    employeeId: string;
+    fullName: string;
+    department: string;
+    leaveType?: string;
+    startDate?: string;
+    endDate?: string;
+    days?: number;
+    status?: string;
+    stage?: string;
+    metricLabel?: string;
+    metricValue?: string | number;
+  }>;
 };
 
 const numberFmt = new Intl.NumberFormat('en-GB');
@@ -86,18 +115,21 @@ export default function LeaveCommandCenter({
   payload,
   onNavigate,
   onAction,
+  onOpenDrilldown,
 }: {
   payload: PayloadSlice | null;
   onNavigate: (section: string) => void;
   onAction: (actionId: string) => void;
+  onOpenDrilldown: (panel: DrilldownPanel) => void;
 }) {
   const summary = payload?.summary;
   const applications = payload?.applications || [];
   const balances = payload?.balances || [];
   const calendar = payload?.calendar || [];
   const leaveTypes = payload?.leaveTypes || [];
+  const drilldowns = payload?.drilldowns;
 
-  const upcomingCount = calendar.filter((item) => String(item.status || '').toLowerCase().includes('upcoming') || String(item.status || '').toLowerCase().includes('approved')).length;
+  const upcomingCount = drilldowns?.upcomingLeave.length ?? calendar.filter((item) => String(item.status || '').toLowerCase().includes('upcoming') || String(item.status || '').toLowerCase().includes('approved')).length;
   const availableEmployees = Math.max((summary?.totalEmployees || 0) - (summary?.employeesOnLeave || 0), 0);
 
   const usageByType = useMemoFromBalances(balances);
@@ -142,16 +174,66 @@ export default function LeaveCommandCenter({
     <div className="space-y-5">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {[
-          { label: 'Employees On Leave', count: summary?.employeesOnLeave || 0, status: statusLabel(summary?.employeesOnLeave || 0, 'Clear'), section: 'leave-calendar' },
-          { label: 'Upcoming Leave', count: upcomingCount || applications.filter((item) => item.status === 'Approved').length, status: 'Scheduled', section: 'leave-calendar' },
-          { label: 'Leave Requests Awaiting Approval', count: summary?.pendingApprovals || 0, status: statusLabel(summary?.pendingApprovals || 0), section: 'approvals' },
-          { label: 'Leave Recall Requests', count: summary?.recallRequests || 0, status: statusLabel(summary?.recallRequests || 0), section: 'recalls' },
-          { label: 'Leave Cancellation Requests', count: summary?.cancellationRequests || 0, status: statusLabel(summary?.cancellationRequests || 0), section: 'cancellations' },
+          {
+            label: 'Employees On Leave',
+            count: summary?.employeesOnLeave || 0,
+            status: statusLabel(summary?.employeesOnLeave || 0, 'Clear'),
+            section: 'leave-calendar',
+            drilldown: {
+              title: 'Employees On Leave Today',
+              note: 'Approved leave covering today from DLE_Enterprise leave applications.',
+              rows: drilldowns?.onLeaveToday || [],
+            },
+          },
+          {
+            label: 'Upcoming Leave',
+            count: upcomingCount,
+            status: 'Scheduled',
+            section: 'leave-calendar',
+            drilldown: {
+              title: 'Upcoming Leave',
+              note: 'Future-dated leave applications that are approved or awaiting approval.',
+              rows: drilldowns?.upcomingLeave || [],
+            },
+          },
+          {
+            label: 'Leave Requests Awaiting Approval',
+            count: summary?.pendingApprovals || 0,
+            status: statusLabel(summary?.pendingApprovals || 0),
+            section: 'approvals',
+            drilldown: {
+              title: 'Leave Requests Awaiting Approval',
+              note: 'Submitted, under review, or draft leave applications.',
+              rows: drilldowns?.pendingApprovals || [],
+            },
+          },
+          {
+            label: 'Leave Recall Requests',
+            count: summary?.recallRequests || 0,
+            status: statusLabel(summary?.recallRequests || 0),
+            section: 'recalls',
+            drilldown: {
+              title: 'Leave Recall Requests',
+              note: 'Recall workflow records from DLE_Enterprise.',
+              rows: [],
+            },
+          },
+          {
+            label: 'Leave Cancellation Requests',
+            count: summary?.cancellationRequests || 0,
+            status: statusLabel(summary?.cancellationRequests || 0),
+            section: 'cancellations',
+            drilldown: {
+              title: 'Leave Cancellation Requests',
+              note: 'Cancelled leave applications in DLE_Enterprise.',
+              rows: drilldowns?.cancellationRequests || [],
+            },
+          },
         ].map((item) => (
           <button
             key={item.label}
             type="button"
-            onClick={() => onNavigate(item.section)}
+            onClick={() => onOpenDrilldown(item.drilldown)}
             className="rounded-xl border border-[#E5E7EB] bg-white p-4 text-left shadow-sm transition-colors hover:border-[#2563EB]/30 hover:bg-blue-50/30"
           >
             <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">{item.label}</p>
@@ -169,16 +251,71 @@ export default function LeaveCommandCenter({
         <h2 className="text-lg font-semibold">Action Center</h2>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {[
-            { label: 'Pending Approvals', count: summary?.pendingApprovals || 0, section: 'approvals', tone: 'amber' },
-            { label: 'Recall Requests', count: summary?.recallRequests || 0, section: 'recalls', tone: 'orange' },
-            { label: 'Cancellation Requests', count: summary?.cancellationRequests || 0, section: 'cancellations', tone: 'red' },
-            { label: 'Carry Forward Processing', count: balances.filter((row) => row.carryForwardBalance > 0).length, section: 'carry-forward-processing', tone: 'blue' },
-            { label: 'Leave Encashment Requests', count: summary?.encashmentRequests || 0, section: 'encashments', tone: 'violet' },
+            {
+              label: 'Pending Approvals',
+              count: summary?.pendingApprovals || 0,
+              section: 'approvals',
+              drilldown: {
+                title: 'Pending Approvals',
+                note: 'Leave applications awaiting supervisor or HR approval.',
+                rows: drilldowns?.pendingApprovals || [],
+              },
+            },
+            {
+              label: 'Recall Requests',
+              count: summary?.recallRequests || 0,
+              section: 'recalls',
+              drilldown: {
+                title: 'Recall Requests',
+                note: 'Recall workflow records from DLE_Enterprise.',
+                rows: [],
+              },
+            },
+            {
+              label: 'Cancellation Requests',
+              count: summary?.cancellationRequests || 0,
+              section: 'cancellations',
+              drilldown: {
+                title: 'Cancellation Requests',
+                note: 'Cancelled leave applications.',
+                rows: drilldowns?.cancellationRequests || [],
+              },
+            },
+            {
+              label: 'Carry Forward Processing',
+              count: drilldowns?.carryForwardProcessing.length ?? balances.filter((row) => row.carryForwardBalance > 0).length,
+              section: 'carry-forward-processing',
+              drilldown: {
+                title: 'Carry Forward Processing',
+                note: 'Unique employees with carry-forward leave balance in DLE_Enterprise.',
+                rows: drilldowns?.carryForwardProcessing || [],
+              },
+            },
+            {
+              label: 'Leave Allowance Exceptions',
+              count: summary?.allowanceExceptionCount || 0,
+              section: 'leave-allowance-exceptions',
+              drilldown: {
+                title: 'Leave Allowance Exceptions',
+                note: 'Reversed or ineligible payroll leave allowance postings requiring review.',
+                rows: drilldowns?.leaveAllowanceExceptions || [],
+              },
+            },
+            {
+              label: 'Leave Encashment Requests',
+              count: summary?.encashmentRequests || 0,
+              section: 'encashments',
+              drilldown: {
+                title: 'Leave Encashment Requests',
+                note: 'Encashment workflow records from DLE_Enterprise.',
+                rows: [],
+              },
+            },
           ].map((item) => (
             <button
               key={item.label}
               type="button"
-              onClick={() => onNavigate(item.section)}
+              onClick={() => onOpenDrilldown(item.drilldown)}
               className="rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] p-4 text-left hover:bg-white"
             >
               <p className="text-xs font-semibold text-slate-700">{item.label}</p>

@@ -1,0 +1,1274 @@
+﻿{
+  "mode": "individual-check-report",
+  "tolerance": 10,
+  "totalChecked": 303,
+  "byCategory": {
+    "permanent": {
+      "checked": 72,
+      "matched": 1,
+      "variances": 71,
+      "mismatchEmployees": [
+        {
+          "employee": "P0013",
+          "payeVar": 5101.62,
+          "totalVar": 14085.45
+        },
+        {
+          "employee": "P0027",
+          "payeVar": -3384,
+          "totalVar": -4168.13
+        },
+        {
+          "employee": "P0033",
+          "payeVar": -7942.5,
+          "totalVar": -817.8
+        },
+        {
+          "employee": "P0040",
+          "payeVar": -7354.54,
+          "totalVar": -3496.05
+        },
+        {
+          "employee": "P0043",
+          "payeVar": -7044.62,
+          "totalVar": -3175.37
+        },
+        {
+          "employee": "P0044",
+          "payeVar": -8049.21,
+          "totalVar": -331.43
+        },
+        {
+          "employee": "P0045",
+          "payeVar": -8100.5,
+          "totalVar": -97.77
+        },
+        {
+          "employee": "P0050",
+          "payeVar": -7860.05,
+          "totalVar": -1193.15
+        },
+        {
+          "employee": "P0051",
+          "payeVar": 703.29,
+          "totalVar": 9314.97
+        },
+        {
+          "employee": "P0059",
+          "payeVar": -7831.92,
+          "totalVar": -1321.28
+        },
+        {
+          "employee": "P0060",
+          "payeVar": -7803.5,
+          "totalVar": -1450.77
+        },
+        {
+          "employee": "P0061",
+          "payeVar": -7870.33,
+          "totalVar": -1146.31
+        },
+        {
+          "employee": "P0072",
+          "payeVar": -8210.47,
+          "totalVar": 403.25
+        },
+        {
+          "employee": "P0076",
+          "payeVar": -7876.29,
+          "totalVar": -1119.1
+        },
+        {
+          "employee": "P0080",
+          "payeVar": -3990.54,
+          "totalVar": 91.19
+        },
+        {
+          "employee": "P0092",
+          "payeVar": -1737.32,
+          "totalVar": 14808.58
+        },
+        {
+          "employee": "P0146",
+          "payeVar": 469.35,
+          "totalVar": 7174.35
+        },
+        {
+          "employee": "P0182",
+          "payeVar": -7548.04,
+          "totalVar": -2614.52
+        },
+        {
+          "employee": "P0185",
+          "payeVar": -8074.25,
+          "totalVar": -217.27
+        },
+        {
+          "employee": "P0194",
+          "payeVar": -7606.42,
+          "totalVar": -2348.54
+        },
+        {
+          "employee": "P0268",
+          "payeVar": -6213.69,
+          "totalVar": -773.15
+        },
+        {
+          "employee": "P0272",
+          "payeVar": 1747.74,
+          "totalVar": -376.25
+        },
+        {
+          "employee": "P0277",
+          "payeVar": -6426.48,
+          "totalVar": 196.23
+        },
+        {
+          "employee": "P0279",
+          "payeVar": -6660,
+          "totalVar": -6660
+        },
+        {
+          "employee": "P0289",
+          "payeVar": -6660,
+          "totalVar": -6660
+        },
+        {
+          "employee": "P0290",
+          "payeVar": -7660.8,
+          "totalVar": -2100.81
+        },
+        {
+          "employee": "P0295",
+          "payeVar": -3663,
+          "totalVar": -1193.11
+        },
+        {
+          "employee": "P0309",
+          "payeVar": -2613.75,
+          "totalVar": -3096.45
+        },
+        {
+          "employee": "P0315",
+          "payeVar": -3670.54,
+          "totalVar": 1721.36
+        },
+        {
+          "employee": "P0316",
+          "payeVar": -2820,
+          "totalVar": -3409.19
+        },
+        {
+          "employee": "P0318",
+          "payeVar": -4002.8,
+          "totalVar": -1252.58
+        },
+        {
+          "employee": "P0320",
+          "payeVar": -6426.49,
+          "totalVar": 196.22
+        },
+        {
+          "employee": "P0321",
+          "payeVar": -4013.81,
+          "totalVar": -1214.63
+        },
+        {
+          "employee": "P0330",
+          "payeVar": -7852.08,
+          "totalVar": -1229.37
+        },
+        {
+          "employee": "P0334",
+          "payeVar": 527.02,
+          "totalVar": 8055.86
+        },
+        {
+          "employee": "P0364",
+          "payeVar": 24675.86,
+          "totalVar": -82610.46
+        },
+        {
+          "employee": "P0366",
+          "payeVar": -2613.75,
+          "totalVar": -2967.63
+        },
+        {
+          "employee": "P0370",
+          "payeVar": -1914.32,
+          "totalVar": 16317.24
+        },
+        {
+          "employee": "P0380",
+          "payeVar": -7620.08,
+          "totalVar": -2286.33
+        },
+        {
+          "employee": "P0384",
+          "payeVar": -6660,
+          "totalVar": -6660
+        },
+        {
+          "employee": "P0385",
+          "payeVar": -1551.69,
+          "totalVar": 13226.25
+        },
+        {
+          "employee": "P0387",
+          "payeVar": -7291.84,
+          "totalVar": -2956.64
+        },
+        {
+          "employee": "P0388",
+          "payeVar": 2176.54,
+          "totalVar": -468.57
+        },
+        {
+          "employee": "P0392",
+          "payeVar": 3052.84,
+          "totalVar": -150.05
+        },
+        {
+          "employee": "P0399",
+          "payeVar": 9178.57,
+          "totalVar": 13015.42
+        },
+        {
+          "employee": "P0420",
+          "payeVar": 61001.52,
+          "totalVar": -1696.02
+        },
+        {
+          "employee": "P0425",
+          "payeVar": 81341.86,
+          "totalVar": 115119.24
+        },
+        {
+          "employee": "P0429",
+          "payeVar": 15376.82,
+          "totalVar": 23888.93
+        },
+        {
+          "employee": "P0432",
+          "payeVar": -1597.64,
+          "totalVar": 13617.98
+        },
+        {
+          "employee": "P0433",
+          "payeVar": 0,
+          "totalVar": 7218.04
+        },
+        {
+          "employee": "P0436",
+          "payeVar": 5340.36,
+          "totalVar": -222.51
+        },
+        {
+          "employee": "P0438",
+          "payeVar": 4735.11,
+          "totalVar": -197.29
+        },
+        {
+          "employee": "P0442",
+          "payeVar": -982,
+          "totalVar": -1056.1
+        },
+        {
+          "employee": "P0443",
+          "payeVar": -7864.46,
+          "totalVar": -1173.04
+        },
+        {
+          "employee": "P0445",
+          "payeVar": -7245.9,
+          "totalVar": -2258.39
+        },
+        {
+          "employee": "P0446",
+          "payeVar": -17637.07,
+          "totalVar": -15047.13
+        },
+        {
+          "employee": "P0447",
+          "payeVar": -7887.72,
+          "totalVar": -1067.03
+        },
+        {
+          "employee": "P0448",
+          "payeVar": 952.49,
+          "totalVar": 4460.3
+        },
+        {
+          "employee": "P0449",
+          "payeVar": -3823.77,
+          "totalVar": 29426.33
+        },
+        {
+          "employee": "P0450",
+          "payeVar": -8377.61,
+          "totalVar": 1989.68
+        },
+        {
+          "employee": "P0452",
+          "payeVar": -1245.44,
+          "totalVar": 12592.72
+        },
+        {
+          "employee": "P0453",
+          "payeVar": -7720.9,
+          "totalVar": -1827.02
+        },
+        {
+          "employee": "P0454",
+          "payeVar": -0.01,
+          "totalVar": 6333.62
+        },
+        {
+          "employee": "P0455",
+          "payeVar": -3823.77,
+          "totalVar": 29426.33
+        },
+        {
+          "employee": "P0458",
+          "payeVar": -956,
+          "totalVar": -1026.71
+        },
+        {
+          "employee": "P0459",
+          "payeVar": 489.71,
+          "totalVar": 8499.45
+        },
+        {
+          "employee": "P0460",
+          "payeVar": 21869.53,
+          "totalVar": 41172.27
+        },
+        {
+          "employee": "P0461",
+          "payeVar": -7580.91,
+          "totalVar": -2464.75
+        },
+        {
+          "employee": "P0462",
+          "payeVar": -7927.35,
+          "totalVar": -886.53
+        },
+        {
+          "employee": "P0463",
+          "payeVar": 38627.51,
+          "totalVar": -109495.1
+        },
+        {
+          "employee": "P0464",
+          "payeVar": -6660,
+          "totalVar": -6660
+        }
+      ]
+    },
+    "lumpsum": {
+      "checked": 67,
+      "matched": 12,
+      "variances": 55,
+      "mismatchEmployees": [
+        {
+          "employee": "L0191",
+          "payeVar": -1658.02,
+          "totalVar": -1658.02
+        },
+        {
+          "employee": "L0263",
+          "payeVar": -698.44,
+          "totalVar": -698.44
+        },
+        {
+          "employee": "L0297",
+          "payeVar": -408.37,
+          "totalVar": -408.37
+        },
+        {
+          "employee": "L0862",
+          "payeVar": -1758.03,
+          "totalVar": -1758.03
+        },
+        {
+          "employee": "L1047",
+          "payeVar": -3289.86,
+          "totalVar": -3289.86
+        },
+        {
+          "employee": "L1050",
+          "payeVar": -1535.03,
+          "totalVar": -1535.03
+        },
+        {
+          "employee": "L1090",
+          "payeVar": -352.5,
+          "totalVar": -352.5
+        },
+        {
+          "employee": "L1204",
+          "payeVar": -2314.12,
+          "totalVar": -2314.12
+        },
+        {
+          "employee": "L1547",
+          "payeVar": -3581.73,
+          "totalVar": -3581.73
+        },
+        {
+          "employee": "L1615",
+          "payeVar": -4012.1,
+          "totalVar": -4012.1
+        },
+        {
+          "employee": "L1618",
+          "payeVar": -62.39,
+          "totalVar": -62.39
+        },
+        {
+          "employee": "L1687",
+          "payeVar": -6358.54,
+          "totalVar": -6358.54
+        },
+        {
+          "employee": "L1714",
+          "payeVar": -698.44,
+          "totalVar": -698.44
+        },
+        {
+          "employee": "L1868",
+          "payeVar": 3162.57,
+          "totalVar": 3162.57
+        },
+        {
+          "employee": "L1925",
+          "payeVar": -1344.78,
+          "totalVar": -1344.78
+        },
+        {
+          "employee": "L1939",
+          "payeVar": -1965.94,
+          "totalVar": -1965.94
+        },
+        {
+          "employee": "L1940",
+          "payeVar": -962.02,
+          "totalVar": -962.02
+        },
+        {
+          "employee": "L1963",
+          "payeVar": -352.5,
+          "totalVar": -352.5
+        },
+        {
+          "employee": "L1968",
+          "payeVar": -5906.25,
+          "totalVar": -5906.25
+        },
+        {
+          "employee": "L1986",
+          "payeVar": -162.19,
+          "totalVar": -162.19
+        },
+        {
+          "employee": "L2020",
+          "payeVar": -1750.28,
+          "totalVar": -1750.28
+        },
+        {
+          "employee": "L2067",
+          "payeVar": -6453.56,
+          "totalVar": -6453.56
+        },
+        {
+          "employee": "L2123",
+          "payeVar": -768.28,
+          "totalVar": -768.28
+        },
+        {
+          "employee": "L2125",
+          "payeVar": -171,
+          "totalVar": -171
+        },
+        {
+          "employee": "L2142",
+          "payeVar": -352.5,
+          "totalVar": -352.5
+        },
+        {
+          "employee": "L2144",
+          "payeVar": -714.14,
+          "totalVar": -714.14
+        },
+        {
+          "employee": "L2191",
+          "payeVar": -698.44,
+          "totalVar": -698.44
+        },
+        {
+          "employee": "L2214",
+          "payeVar": -964.55,
+          "totalVar": -964.55
+        },
+        {
+          "employee": "L2216",
+          "payeVar": -352.5,
+          "totalVar": -352.5
+        },
+        {
+          "employee": "L2237",
+          "payeVar": -1125,
+          "totalVar": -1125
+        },
+        {
+          "employee": "L2289",
+          "payeVar": -741,
+          "totalVar": -741
+        },
+        {
+          "employee": "L2330",
+          "payeVar": -1927.69,
+          "totalVar": -1927.69
+        },
+        {
+          "employee": "L2331",
+          "payeVar": -492.19,
+          "totalVar": -492.19
+        },
+        {
+          "employee": "L2336",
+          "payeVar": -964.55,
+          "totalVar": -964.55
+        },
+        {
+          "employee": "L2347",
+          "payeVar": -1060.5,
+          "totalVar": -1060.5
+        },
+        {
+          "employee": "L2374",
+          "payeVar": -464.25,
+          "totalVar": -464.25
+        },
+        {
+          "employee": "L2375",
+          "payeVar": -3332.31,
+          "totalVar": -3332.31
+        },
+        {
+          "employee": "L2578",
+          "payeVar": 2359.69,
+          "totalVar": 2359.69
+        },
+        {
+          "employee": "L2580",
+          "payeVar": -917.03,
+          "totalVar": -917.03
+        },
+        {
+          "employee": "L2581",
+          "payeVar": -3047.5,
+          "totalVar": -3047.5
+        },
+        {
+          "employee": "L2611",
+          "payeVar": -609.37,
+          "totalVar": -609.37
+        },
+        {
+          "employee": "L2631",
+          "payeVar": -3363.19,
+          "totalVar": -3363.19
+        },
+        {
+          "employee": "L2635",
+          "payeVar": -876.56,
+          "totalVar": -876.56
+        },
+        {
+          "employee": "L2644",
+          "payeVar": -6146.17,
+          "totalVar": -6146.17
+        },
+        {
+          "employee": "L2718",
+          "payeVar": -1486.57,
+          "totalVar": -1486.57
+        },
+        {
+          "employee": "L2719",
+          "payeVar": -3047.5,
+          "totalVar": -3047.5
+        },
+        {
+          "employee": "L2729",
+          "payeVar": -834.37,
+          "totalVar": -834.37
+        },
+        {
+          "employee": "L2753",
+          "payeVar": -3188.74,
+          "totalVar": -3188.74
+        },
+        {
+          "employee": "L2754",
+          "payeVar": -1428.11,
+          "totalVar": -1428.11
+        },
+        {
+          "employee": "L2773",
+          "payeVar": 610.81,
+          "totalVar": 610.81
+        },
+        {
+          "employee": "L2774",
+          "payeVar": 274.74,
+          "totalVar": 274.74
+        },
+        {
+          "employee": "L2775",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2776",
+          "payeVar": 128.91,
+          "totalVar": 128.91
+        },
+        {
+          "employee": "L2777",
+          "payeVar": 206.25,
+          "totalVar": 206.25
+        },
+        {
+          "employee": "L2779",
+          "payeVar": -457.81,
+          "totalVar": -457.81
+        }
+      ]
+    },
+    "contract": {
+      "checked": 164,
+      "matched": 43,
+      "variances": 121,
+      "mismatchEmployees": [
+        {
+          "employee": "C0293",
+          "payeVar": 2899.99,
+          "totalVar": 2899.99
+        },
+        {
+          "employee": "C0585",
+          "payeVar": 153.14,
+          "totalVar": 153.14
+        },
+        {
+          "employee": "C0695",
+          "payeVar": 8437.33,
+          "totalVar": 8437.33
+        },
+        {
+          "employee": "C1001",
+          "payeVar": 545.26,
+          "totalVar": 545.26
+        },
+        {
+          "employee": "C1035",
+          "payeVar": 500.68,
+          "totalVar": 500.68
+        },
+        {
+          "employee": "C1065",
+          "payeVar": 774.21,
+          "totalVar": 774.21
+        },
+        {
+          "employee": "C1078",
+          "payeVar": 1551.18,
+          "totalVar": 1551.18
+        },
+        {
+          "employee": "C1096",
+          "payeVar": 8012.4,
+          "totalVar": 8012.4
+        },
+        {
+          "employee": "C1162",
+          "payeVar": 4677.75,
+          "totalVar": 4677.75
+        },
+        {
+          "employee": "C1229",
+          "payeVar": 2830.04,
+          "totalVar": 2830.04
+        },
+        {
+          "employee": "C1491",
+          "payeVar": 893.32,
+          "totalVar": 893.32
+        },
+        {
+          "employee": "C1544",
+          "payeVar": 2902.87,
+          "totalVar": 2902.87
+        },
+        {
+          "employee": "C1607",
+          "payeVar": 1900.15,
+          "totalVar": 1900.15
+        },
+        {
+          "employee": "C1705",
+          "payeVar": 8606.5,
+          "totalVar": 8606.5
+        },
+        {
+          "employee": "C1720",
+          "payeVar": 666.83,
+          "totalVar": 666.83
+        },
+        {
+          "employee": "C1728",
+          "payeVar": 2027.03,
+          "totalVar": 2027.03
+        },
+        {
+          "employee": "C1771",
+          "payeVar": 561.52,
+          "totalVar": 561.52
+        },
+        {
+          "employee": "C1772",
+          "payeVar": 639.86,
+          "totalVar": 639.86
+        },
+        {
+          "employee": "C1775",
+          "payeVar": 446.66,
+          "totalVar": 446.66
+        },
+        {
+          "employee": "C1779",
+          "payeVar": 701.66,
+          "totalVar": 701.66
+        },
+        {
+          "employee": "C1783",
+          "payeVar": 803.99,
+          "totalVar": 803.99
+        },
+        {
+          "employee": "C1789",
+          "payeVar": 11299.31,
+          "totalVar": 11299.31
+        },
+        {
+          "employee": "C1804",
+          "payeVar": 382.86,
+          "totalVar": 382.86
+        },
+        {
+          "employee": "C1823",
+          "payeVar": 467.67,
+          "totalVar": 467.67
+        },
+        {
+          "employee": "C1882",
+          "payeVar": 6450.28,
+          "totalVar": 6450.28
+        },
+        {
+          "employee": "C1888",
+          "payeVar": 294.75,
+          "totalVar": 294.75
+        },
+        {
+          "employee": "C1889",
+          "payeVar": 783.75,
+          "totalVar": 783.75
+        },
+        {
+          "employee": "C1924",
+          "payeVar": 7126.99,
+          "totalVar": 7126.99
+        },
+        {
+          "employee": "C1931",
+          "payeVar": 270.06,
+          "totalVar": 270.06
+        },
+        {
+          "employee": "C1933",
+          "payeVar": 191.42,
+          "totalVar": 191.42
+        },
+        {
+          "employee": "C1938",
+          "payeVar": 2241.98,
+          "totalVar": 2241.98
+        },
+        {
+          "employee": "C1954",
+          "payeVar": 3008.63,
+          "totalVar": 3008.63
+        },
+        {
+          "employee": "C1955",
+          "payeVar": 456.23,
+          "totalVar": 456.23
+        },
+        {
+          "employee": "C1966",
+          "payeVar": 500.68,
+          "totalVar": 500.68
+        },
+        {
+          "employee": "C1967",
+          "payeVar": 245.65,
+          "totalVar": 245.65
+        },
+        {
+          "employee": "C1975",
+          "payeVar": 1087.97,
+          "totalVar": 1087.97
+        },
+        {
+          "employee": "C1979",
+          "payeVar": 3632.94,
+          "totalVar": 3632.94
+        },
+        {
+          "employee": "C1983",
+          "payeVar": 329.99,
+          "totalVar": 329.99
+        },
+        {
+          "employee": "C1989",
+          "payeVar": 2902.46,
+          "totalVar": 2902.46
+        },
+        {
+          "employee": "C2002",
+          "payeVar": 783.75,
+          "totalVar": 783.75
+        },
+        {
+          "employee": "C2015",
+          "payeVar": 357.33,
+          "totalVar": 357.33
+        },
+        {
+          "employee": "C2023",
+          "payeVar": 382.85,
+          "totalVar": 382.85
+        },
+        {
+          "employee": "C2052",
+          "payeVar": 268,
+          "totalVar": 268
+        },
+        {
+          "employee": "C2080",
+          "payeVar": 397.74,
+          "totalVar": 397.74
+        },
+        {
+          "employee": "C2082",
+          "payeVar": 1203.5,
+          "totalVar": 1203.5
+        },
+        {
+          "employee": "C2097",
+          "payeVar": 387.75,
+          "totalVar": 387.75
+        },
+        {
+          "employee": "C2098",
+          "payeVar": 181.5,
+          "totalVar": 181.5
+        },
+        {
+          "employee": "C2116",
+          "payeVar": 4964.28,
+          "totalVar": 4964.28
+        },
+        {
+          "employee": "C2121",
+          "payeVar": 577.5,
+          "totalVar": 577.5
+        },
+        {
+          "employee": "C2129",
+          "payeVar": 63.81,
+          "totalVar": 63.81
+        },
+        {
+          "employee": "C2130",
+          "payeVar": 606.25,
+          "totalVar": 606.25
+        },
+        {
+          "employee": "C2136",
+          "payeVar": 506.61,
+          "totalVar": 506.61
+        },
+        {
+          "employee": "C2138",
+          "payeVar": 8256.99,
+          "totalVar": 8256.99
+        },
+        {
+          "employee": "C2193",
+          "payeVar": 414.75,
+          "totalVar": 414.75
+        },
+        {
+          "employee": "C2201",
+          "payeVar": 0,
+          "totalVar": -10000
+        },
+        {
+          "employee": "C2218",
+          "payeVar": 0,
+          "totalVar": -10000
+        },
+        {
+          "employee": "C2225",
+          "payeVar": 226.22,
+          "totalVar": 226.22
+        },
+        {
+          "employee": "C2229",
+          "payeVar": 0,
+          "totalVar": -10000
+        },
+        {
+          "employee": "C2287",
+          "payeVar": 0,
+          "totalVar": -10000
+        },
+        {
+          "employee": "C2338",
+          "payeVar": 268,
+          "totalVar": 268
+        },
+        {
+          "employee": "C2341",
+          "payeVar": 59.61,
+          "totalVar": 59.61
+        },
+        {
+          "employee": "C2342",
+          "payeVar": 210.57,
+          "totalVar": 210.57
+        },
+        {
+          "employee": "C2343",
+          "payeVar": 268,
+          "totalVar": 268
+        },
+        {
+          "employee": "C2380",
+          "payeVar": 290.11,
+          "totalVar": 290.11
+        },
+        {
+          "employee": "C2383",
+          "payeVar": 577.5,
+          "totalVar": 577.5
+        },
+        {
+          "employee": "C2394",
+          "payeVar": 290.04,
+          "totalVar": 290.04
+        },
+        {
+          "employee": "C2395",
+          "payeVar": 357.33,
+          "totalVar": 357.33
+        },
+        {
+          "employee": "C2396",
+          "payeVar": 145.02,
+          "totalVar": 145.02
+        },
+        {
+          "employee": "C2404",
+          "payeVar": 961.71,
+          "totalVar": 961.71
+        },
+        {
+          "employee": "C2408",
+          "payeVar": 435.06,
+          "totalVar": 435.06
+        },
+        {
+          "employee": "C2412",
+          "payeVar": 536,
+          "totalVar": 536
+        },
+        {
+          "employee": "C2421",
+          "payeVar": 11609.18,
+          "totalVar": 11609.18
+        },
+        {
+          "employee": "C2422",
+          "payeVar": 1202.57,
+          "totalVar": 1202.57
+        },
+        {
+          "employee": "C2427",
+          "payeVar": 290.1,
+          "totalVar": 290.1
+        },
+        {
+          "employee": "C2431",
+          "payeVar": 9612.61,
+          "totalVar": 9612.61
+        },
+        {
+          "employee": "C2443",
+          "payeVar": 232.03,
+          "totalVar": 232.03
+        },
+        {
+          "employee": "C2445",
+          "payeVar": 290.11,
+          "totalVar": 290.11
+        },
+        {
+          "employee": "C2456",
+          "payeVar": 467.93,
+          "totalVar": 467.93
+        },
+        {
+          "employee": "C2460",
+          "payeVar": 8711.97,
+          "totalVar": 8711.97
+        },
+        {
+          "employee": "C2462",
+          "payeVar": 4174.21,
+          "totalVar": 4174.21
+        },
+        {
+          "employee": "C2470",
+          "payeVar": 191.42,
+          "totalVar": 191.42
+        },
+        {
+          "employee": "C2471",
+          "payeVar": 95.72,
+          "totalVar": 95.72
+        },
+        {
+          "employee": "C2477",
+          "payeVar": 700.35,
+          "totalVar": 700.35
+        },
+        {
+          "employee": "C2482",
+          "payeVar": 290.1,
+          "totalVar": 290.1
+        },
+        {
+          "employee": "C2483",
+          "payeVar": 382.86,
+          "totalVar": 382.86
+        },
+        {
+          "employee": "C2484",
+          "payeVar": 625.32,
+          "totalVar": 625.32
+        },
+        {
+          "employee": "C2491",
+          "payeVar": 756.16,
+          "totalVar": 756.16
+        },
+        {
+          "employee": "C2492",
+          "payeVar": 4906.77,
+          "totalVar": 4906.77
+        },
+        {
+          "employee": "C2506",
+          "payeVar": 261.03,
+          "totalVar": 261.03
+        },
+        {
+          "employee": "C2507",
+          "payeVar": 3030.47,
+          "totalVar": 3030.47
+        },
+        {
+          "employee": "C2512",
+          "payeVar": 1379.57,
+          "totalVar": 1379.57
+        },
+        {
+          "employee": "C2515",
+          "payeVar": 140.38,
+          "totalVar": 140.38
+        },
+        {
+          "employee": "C2516",
+          "payeVar": 115.56,
+          "totalVar": 115.56
+        },
+        {
+          "employee": "C2522",
+          "payeVar": 435.05,
+          "totalVar": 435.05
+        },
+        {
+          "employee": "C2523",
+          "payeVar": 6941.8,
+          "totalVar": 6941.8
+        },
+        {
+          "employee": "C2534",
+          "payeVar": 430.74,
+          "totalVar": 430.74
+        },
+        {
+          "employee": "C2536",
+          "payeVar": 608.19,
+          "totalVar": 608.19
+        },
+        {
+          "employee": "C2537",
+          "payeVar": 2789.87,
+          "totalVar": 2789.87
+        },
+        {
+          "employee": "C2555",
+          "payeVar": 5058.64,
+          "totalVar": 5058.64
+        },
+        {
+          "employee": "C2566",
+          "payeVar": 2351.25,
+          "totalVar": 2351.25
+        },
+        {
+          "employee": "C2597",
+          "payeVar": 661.57,
+          "totalVar": 661.57
+        },
+        {
+          "employee": "C2607",
+          "payeVar": 592.35,
+          "totalVar": 592.35
+        },
+        {
+          "employee": "C2622",
+          "payeVar": 327.55,
+          "totalVar": 327.55
+        },
+        {
+          "employee": "C2626",
+          "payeVar": 95.71,
+          "totalVar": 95.71
+        },
+        {
+          "employee": "C2632",
+          "payeVar": 640.99,
+          "totalVar": 640.99
+        },
+        {
+          "employee": "C2633",
+          "payeVar": 452.46,
+          "totalVar": 452.46
+        },
+        {
+          "employee": "C2663",
+          "payeVar": 612.56,
+          "totalVar": 612.56
+        },
+        {
+          "employee": "C2665",
+          "payeVar": 117.56,
+          "totalVar": 117.56
+        },
+        {
+          "employee": "C2674",
+          "payeVar": 16250,
+          "totalVar": 16250
+        },
+        {
+          "employee": "C2690",
+          "payeVar": 268,
+          "totalVar": 268
+        },
+        {
+          "employee": "C2697",
+          "payeVar": 577.5,
+          "totalVar": 577.5
+        },
+        {
+          "employee": "C2722",
+          "payeVar": 6317.05,
+          "totalVar": 6317.05
+        },
+        {
+          "employee": "C2724",
+          "payeVar": 1038.8,
+          "totalVar": 1038.8
+        },
+        {
+          "employee": "C2725",
+          "payeVar": 325.2,
+          "totalVar": 325.2
+        },
+        {
+          "employee": "C2759",
+          "payeVar": 25000,
+          "totalVar": 25000
+        },
+        {
+          "employee": "C2760",
+          "payeVar": -1071.23,
+          "totalVar": -1071.23
+        },
+        {
+          "employee": "C2790",
+          "payeVar": 181.5,
+          "totalVar": 181.5
+        },
+        {
+          "employee": "C2795",
+          "payeVar": 350.94,
+          "totalVar": 350.94
+        },
+        {
+          "employee": "C2805",
+          "payeVar": 3675.37,
+          "totalVar": 3675.37
+        },
+        {
+          "employee": "C2806",
+          "payeVar": 95.72,
+          "totalVar": 95.72
+        },
+        {
+          "employee": "C2807",
+          "payeVar": 17128.5,
+          "totalVar": 17128.5
+        }
+      ]
+    },
+    "other": {
+      "checked": 0,
+      "matched": 0,
+      "variances": 0,
+      "mismatchEmployees": []
+    }
+  },
+  "overall": {
+    "matched": 56,
+    "variances": 247
+  },
+  "note": "Each employee is compared individually using HRIS Sage-aligned formulas vs the June 2026 Sage migration snapshot (audit reference only)."
+}

@@ -9,8 +9,8 @@ import { isNonPermanentPayrollEmployee } from '@/lib/payroll-employee-classifica
 import { activeLoansVersion, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
-import { hasLeaveAllowanceInYear } from '@/lib/payroll-leave-allowance-store';
-import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee } from '@/lib/leave-management-store';
+import { hasLeaveAllowanceInYear, postLeaveAllowanceOnAnnualLeaveApproval } from '@/lib/payroll-leave-allowance-store';
+import { annualLeaveEntitlementForEmployee, dormantLongPolicy, isFourteenDayPaidLeaveEmployee, readLeaveApplicationsForReconciliation } from '@/lib/leave-management-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { listEmployeeAccessiblePayrollPeriods } from '@/lib/payroll-run-store';
 import { computeEnterpriseYtdTotals, readAuthoritativeSagePayslipSnapshotsByPeriod, readEnterpriseEmployeePayslipRecordsByPeriod } from '@/lib/payroll-ess-payslip-store';
@@ -19,6 +19,7 @@ import type { PayrollCalculationRecord } from '@/lib/payroll-calculation-service
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
+import { buildEssDashboardContext } from '@/lib/ess-dashboard-store';
 
 type EssRequest = {
   id: string;
@@ -70,6 +71,202 @@ const maskAccount = (value: string) => {
   return `${'*'.repeat(Math.max(0, text.length - 4))}${text.slice(-4)}`;
 };
 const configured = (value: unknown) => compact(value) || 'Not configured';
+const dateOnly = (value: unknown) => {
+  const text = compact(value);
+  if (!text) return 'Not configured';
+  const date = new Date(text.includes('T') ? text : `${text.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+type EssProfileField = { label: string; value: string };
+type EssProfileSection = {
+  id: string;
+  label: string;
+  status: string;
+  approvalRequired: boolean;
+  fields: EssProfileField[];
+};
+
+const buildEssProfileSections = (
+  employee: DleEmployeeDirectoryRow,
+  documents: Array<{ title: string; category: string; version: string; status: string }>,
+): EssProfileSection[] => {
+  const emergencyStatus = employee.emergencyContactsComplete
+    ? `${employee.emergencyContactCount} contact(s) on file`
+    : 'Not configured';
+
+  const qualDocs = documents.filter((doc) =>
+    /qualification|degree|education|diploma|bsc|msc|hnd|ond|university|polytechnic|nysc/i.test(`${doc.title} ${doc.category}`.toLowerCase()),
+  );
+  const qualificationFields: EssProfileField[] = qualDocs.length
+    ? qualDocs.flatMap((doc, index) => {
+        const suffix = qualDocs.length > 1 ? ` ${index + 1}` : '';
+        return [
+          { label: `Institution${suffix}`, value: configured(doc.category) },
+          { label: `Qualification${suffix}`, value: configured(doc.title) },
+          { label: `Year / Version${suffix}`, value: configured(doc.version) },
+          { label: `Attachment status${suffix}`, value: configured(doc.status) },
+        ];
+      })
+    : [
+        { label: 'Institution', value: 'Not on file' },
+        { label: 'Qualification', value: 'Not on file' },
+        { label: 'Year', value: 'Not on file' },
+        { label: 'Attachment', value: 'Not uploaded' },
+      ];
+
+  const certDocs = documents.filter((doc) =>
+    /certification|certificate|hse|first aid|safety/i.test(`${doc.title} ${doc.category}`.toLowerCase()),
+  );
+  const certificationFields: EssProfileField[] = certDocs.length
+    ? certDocs.flatMap((doc, index) => {
+        const suffix = certDocs.length > 1 ? ` ${index + 1}` : '';
+        return [
+          { label: `Certificate${suffix}`, value: configured(doc.title) },
+          { label: `Issuer / Category${suffix}`, value: configured(doc.category) },
+          { label: `Expiry / Version${suffix}`, value: configured(doc.version) },
+          { label: `Status${suffix}`, value: configured(doc.status) },
+        ];
+      })
+    : [
+        { label: 'Certificate', value: 'Not on file' },
+        { label: 'Issuer', value: 'Not on file' },
+        { label: 'Expiry', value: 'Not on file' },
+        { label: 'Attachment', value: 'Not uploaded' },
+      ];
+
+  return [
+    {
+      id: 'personal',
+      label: 'Personal Information',
+      status: 'View / update',
+      approvalRequired: true,
+      fields: [
+        { label: 'Title', value: configured(employee.title) },
+        { label: 'First name', value: configured(employee.firstName) },
+        { label: 'Middle name', value: configured(employee.middleName) },
+        { label: 'Last name', value: configured(employee.lastName) },
+        { label: 'Preferred name', value: configured(employee.preferredName) },
+        { label: 'Date of birth', value: dateOnly(employee.dateOfBirth) },
+        { label: 'Gender', value: configured(employee.gender) },
+        { label: 'Marital status', value: configured(employee.maritalStatus) },
+        { label: 'Nationality', value: configured(employee.nationality) },
+      ],
+    },
+    {
+      id: 'employment',
+      label: 'Employment Details',
+      status: 'HR verified',
+      approvalRequired: false,
+      fields: [
+        { label: 'Employee ID', value: configured(employee.employeeCode || employee.employeeId) },
+        { label: 'Job title', value: configured(employee.jobTitle || employee.designation) },
+        { label: 'Department', value: configured(employee.department) },
+        { label: 'Business unit', value: configured(employee.businessUnit) },
+        { label: 'Salary grade', value: configured(employee.salaryGrade || employee.jobGrade) },
+        { label: 'Employment type', value: configured(employee.employmentType) },
+        { label: 'Staff category', value: configured(employee.staffCategory) },
+        { label: 'Work location', value: configured(employee.workLocation || employee.location) },
+        { label: 'Cost centre', value: configured(employee.costCenter) },
+        { label: 'Reporting manager', value: configured(employee.managerName) },
+        { label: 'Date joined', value: dateOnly(employee.dateJoined || employee.contractStartDate) },
+        { label: 'Confirmation date', value: dateOnly(employee.confirmationDueDate) },
+        { label: 'Shift pattern', value: configured(employee.shift) },
+      ],
+    },
+    {
+      id: 'contact',
+      label: 'Contact Details',
+      status: 'View / update',
+      approvalRequired: true,
+      fields: [
+        { label: 'Official email', value: configured(employee.officialEmail || employee.email) },
+        { label: 'Personal email', value: configured(employee.personalEmail) },
+        { label: 'Primary phone', value: configured(employee.primaryPhone || employee.phone) },
+        { label: 'Alternate phone', value: configured(employee.alternatePhone) },
+        { label: 'Office extension', value: configured(employee.officeExtension) },
+      ],
+    },
+    {
+      id: 'address',
+      label: 'Addresses',
+      status: 'View / update',
+      approvalRequired: true,
+      fields: [
+        { label: 'Residential address', value: configured(employee.residentialAddress) },
+        { label: 'Permanent address', value: configured(employee.permanentAddress) },
+        { label: 'City', value: configured(employee.city) },
+        { label: 'State', value: configured(employee.state) },
+        { label: 'Country', value: configured(employee.country) },
+        { label: 'Postal code', value: configured(employee.postalCode) },
+      ],
+    },
+    {
+      id: 'emergency',
+      label: 'Emergency Contacts',
+      status: emergencyStatus,
+      approvalRequired: true,
+      fields: [
+        { label: 'Contacts on file', value: emergencyStatus },
+        { label: 'Primary contact', value: employee.emergencyContactsComplete ? 'Recorded in HRIS' : 'Not configured' },
+        { label: 'Relationship', value: employee.emergencyContactsComplete ? 'See HR record' : 'Not configured' },
+        { label: 'Phone', value: employee.emergencyContactsComplete ? 'See HR record' : 'Not configured' },
+      ],
+    },
+    {
+      id: 'next-of-kin',
+      label: 'Next of Kin',
+      status: employee.emergencyContactsComplete ? 'On file' : 'Not configured',
+      approvalRequired: true,
+      fields: [
+        { label: 'Name', value: employee.emergencyContactsComplete ? 'Recorded in HRIS' : 'Not configured' },
+        { label: 'Relationship', value: employee.emergencyContactsComplete ? 'See HR record' : 'Not configured' },
+        { label: 'Phone', value: employee.emergencyContactsComplete ? 'See HR record' : 'Not configured' },
+        { label: 'Address', value: employee.emergencyContactsComplete ? 'See HR record' : 'Not configured' },
+      ],
+    },
+    {
+      id: 'bank',
+      label: 'Bank Details',
+      status: employee.bankName && employee.accountNo ? 'Masked / encrypted' : 'Not configured',
+      approvalRequired: true,
+      fields: [
+        { label: 'Bank', value: configured(employee.bankName) },
+        { label: 'Branch', value: configured(employee.branchName) },
+        { label: 'Account number', value: maskAccount(employee.accountNo || '') },
+        { label: 'Account name', value: configured(employee.accountName) },
+        { label: 'Pension provider', value: configured(employee.pensionProvider) },
+        { label: 'Tax ID', value: configured(employee.taxIdentificationNumber) },
+      ],
+    },
+    {
+      id: 'photo',
+      label: 'Profile Photo',
+      status: employee.hasPhoto ? 'Current photo on file' : 'Upload / replace',
+      approvalRequired: true,
+      fields: [
+        { label: 'Photo status', value: employee.hasPhoto ? 'Uploaded' : 'Not uploaded' },
+        { label: 'Employee code', value: configured(employee.employeeCode || employee.employeeId) },
+        { label: 'Last profile sync', value: dateOnly(employee.modifiedAt || employee.createdAt) },
+      ],
+    },
+    {
+      id: 'qualifications',
+      label: 'Qualifications',
+      status: qualDocs.length ? 'Document-backed' : 'Incomplete',
+      approvalRequired: true,
+      fields: qualificationFields,
+    },
+    {
+      id: 'certifications',
+      label: 'Certifications',
+      status: certDocs.length ? 'Document-backed' : 'Incomplete',
+      approvalRequired: true,
+      fields: certificationFields,
+    },
+  ];
+};
 const employeeCodeText = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) =>
   compact(employee.employeeCode || employee.employeeId || employee.sourceEmployeeId).toUpperCase().replace(/[^A-Z0-9]/g, '');
 const employeeGroupText = (employee: Awaited<ReturnType<typeof readPayrollEmployees>>['employees'][number]) =>
@@ -450,12 +647,9 @@ export async function GET(request: Request) {
       }
 
       const earnings = calculatePayrollEarnings(employee, { period, includePeriodAdjustments: includeAdjustments });
-      const taxInput = {
-        ...payrollInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }),
-        monthlyGrossPay: earnings.grossPay,
-        monthlyTaxablePay: earnings.taxablePay,
-      };
-      const tax = taxVersion ? calculatePayrollTax(taxInput, taxVersion) : null;
+      const tax = taxVersion
+        ? calculatePayrollTax(payrollInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }, earnings), taxVersion)
+        : null;
       const pension = !nonPermanentPayroll && pensionVersion ? calculatePension(pensionInputFromEmployee(employee, { period, includePeriodAdjustments: includeAdjustments }), pensionVersion) : null;
       const paye = roundMoney(tax?.monthlyPaye ?? 0);
       const pensionEmployee = roundMoney(pension?.employeeContribution ?? 0);
@@ -518,42 +712,10 @@ export async function GET(request: Request) {
         },
       };
     };
-    const attendanceRate = round(92 + (employee.employeeDbId % 70) / 10);
     const requests = employeeRequests;
-
-    const fourteenDayPaidLeaveEmployee = isFourteenDayPaidLeaveEmployee(employee);
-    const confirmedPermanent = String(employee.status || '').toLowerCase().includes('confirmed') || (employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() <= Date.now() : false);
     const leaveYear = new Date().getFullYear();
-    const annualEntitlement = annualLeaveEntitlementForEmployee(employee);
-    const employeeLeaveApplications = employeeRequests
-      .filter((item) => item.category === 'Leave' && item.startDate && item.endDate)
-      .map((item) => {
-        const status = item.status === 'Line Manager Review' || item.status === 'HR Review' || item.status === 'Submitted' ? 'Under Review' : item.status;
-        const stage = item.status === 'HR Review' ? 'HR' : item.status === 'Line Manager Review' ? 'Supervisor' : item.status === 'Approved' ? 'Closed' : 'Employee';
-        return {
-          id: item.id,
-          employeeId: item.employeeId,
-          fullName: employee.fullName,
-          department: employee.department,
-          managerName: managerOwnerFor(employee),
-          leaveType: item.leaveType || 'Annual Leave',
-          startDate: item.startDate || '',
-          endDate: item.endDate || '',
-          days: Number(item.days || 0),
-          status,
-          stage,
-          actingOfficer: item.relieverName || 'Not configured',
-          supportingDocuments: 0,
-          exceptions: item.status === 'Terminated' ? ['Approval validity expired after 5 working days'] : [],
-          approvalStatus: item.status === 'Approved' ? 'Approved' : item.status === 'Rejected' ? 'Rejected' : item.status === 'Terminated' ? 'Terminated' : 'Pending',
-        };
-      });
-    const annualLeaveApplications = employeeLeaveApplications.filter((item) => item.leaveType === 'Annual Leave');
-    const leaveUsed = annualLeaveApplications.filter((item) => ['Approved', 'Completed'].includes(item.status)).reduce((sum, item) => sum + Number(item.days || 0), 0);
-    const pendingAnnualLeave = annualLeaveApplications.filter((item) => ['Submitted', 'Under Review'].includes(item.status)).reduce((sum, item) => sum + Number(item.days || 0), 0);
-    const carryForward = 0;
-    const annualBalance = Math.max(0, annualEntitlement - leaveUsed - pendingAnnualLeave);
-    leaveContext = { annualEntitlement, leaveUsed, leaveBalance: annualBalance, carryForward };
+    const annualEntitlementEstimate = annualLeaveEntitlementForEmployee(employee);
+    leaveContext = { annualEntitlement: annualEntitlementEstimate, leaveUsed: 0, leaveBalance: annualEntitlementEstimate, carryForward: 0 };
     releasedPayrollPeriods = await listEmployeeAccessiblePayrollPeriods();
     const employeeMatchKeys = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId];
     [enterpriseRecordsByPeriod, sagePayslipsByPeriod] = await Promise.all([
@@ -568,20 +730,42 @@ export async function GET(request: Request) {
     ));
     const latestReleasedPayroll = payrollHistory[0] || null;
     const currentPeriodReleased = releasedPayrollPeriods.includes(ESS_CURRENT_PAYROLL_PERIOD);
-    const sickUsed = employee.employeeDbId % 3;
-    const casualUsed = employee.employeeDbId % 2;
-    const compassionateUsed = employee.employeeDbId % 2;
-    const examUsed = employee.employeeDbId % 2;
-    const maternityEligible = !fourteenDayPaidLeaveEmployee && /female/i.test(String((employee as any).gender || (employee as any).title || ''));
-    const leavePolicyCards = [
-      { id: 'annual-leave', type: 'Annual Leave', entitlement: annualEntitlement, basis: 'Working days', used: leaveUsed, pending: pendingAnnualLeave, balance: annualBalance, expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Eligible - 14 paid working days annual entitlement' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Eligible - junior permanent employee' : confirmedPermanent ? 'Eligible - confirmed permanent employee' : 'Locked pending confirmation', allowanceStatus: `Eligible only from ${dormantLongPolicy.allowanceMinimumAnnualDays} current-year Annual Leave working days`, policyNote: fourteenDayPaidLeaveEmployee ? 'Contract, lumpsum, NYSC, IT, and daily-rate employees receive 14 paid working days annually.' : annualEntitlement === dormantLongPolicy.annualJuniorPermanentDays ? 'Junior permanent employees receive 25 working days annually.' : 'Confirmed permanent employees receive 30 working days annually.' },
-      { id: 'sick-leave', type: 'Sick Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 10, basis: 'Working days', used: sickUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 10) - sickUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Medical certificate may be required.' },
-      { id: 'casual-leave', type: 'Casual Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: casualUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - casualUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Short-duration absence subject to manager approval.' },
-      { id: 'compassionate-leave', type: 'Compassionate Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: compassionateUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - compassionateUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Supporting document required where applicable.' },
-      { id: 'exam-leave', type: 'Exam Leave', entitlement: fourteenDayPaidLeaveEmployee ? 0 : 5, basis: 'Working days', used: examUsed, pending: 0, balance: Math.max(0, (fourteenDayPaidLeaveEmployee ? 0 : 5) - examUsed), expiryDate: '', eligibilityStatus: fourteenDayPaidLeaveEmployee ? 'Not configured for this employee category' : 'Eligible', allowanceStatus: 'No leave allowance', policyNote: 'Exam timetable or institution evidence required.' },
-      { id: 'maternity-leave', type: 'Maternity Leave', entitlement: maternityEligible ? 90 : 0, basis: 'Calendar days', used: 0, pending: 0, balance: maternityEligible ? 90 : 0, expiryDate: '', eligibilityStatus: maternityEligible ? 'Eligible' : 'Gender/category eligibility not met', allowanceStatus: 'No leave allowance', policyNote: '90 calendar days for eligible female employees.' },
-      { id: 'carry-forward-leave', type: 'Carry Forward Leave', entitlement: carryForward, basis: 'Working days', used: Math.min(carryForward, employee.employeeDbId % 3), pending: 0, balance: Math.max(0, carryForward - Math.min(carryForward, employee.employeeDbId % 3)), expiryDate: `${leaveYear}-03-31`, eligibilityStatus: carryForward ? 'Available until 31 March' : 'No carry-forward balance', allowanceStatus: 'Does not trigger leave allowance', policyNote: 'Unused Annual Leave rolls over on 1 January up to 7 working days.' },
-    ];
+    const essContext = await buildEssDashboardContext({
+      employee,
+      employees: employeeSource.employees,
+      session,
+      requests: employeeRequests,
+      netPay: latestReleasedPayroll?.netPay || 0,
+      documentCountFallback: Number(employee.documentCount || 0),
+      payslipIdentity: payslipIdentity || undefined,
+    });
+    const attendanceRate = essContext.attendance.monthRate;
+    const annualEntitlement = essContext.leave.entitlement;
+    const leaveUsed = essContext.leave.used;
+    const pendingAnnualLeave = essContext.leave.pending;
+    const annualBalance = essContext.leave.balance;
+    const carryForward = essContext.leave.carryForward;
+    leaveContext = { annualEntitlement, leaveUsed, leaveBalance: annualBalance, carryForward };
+    const employeeLeaveApplications = essContext.leave.applications.map((item) => ({
+      id: item.id,
+      employeeId: item.employeeId,
+      fullName: item.fullName,
+      department: item.department,
+      managerName: item.managerName,
+      leaveType: item.leaveType,
+      startDate: item.startDate,
+      endDate: item.endDate,
+      days: item.days,
+      status: item.status,
+      stage: item.stage,
+      actingOfficer: item.actingOfficer,
+      supportingDocuments: item.supportingDocuments,
+      exceptions: item.exceptions,
+      approvalStatus: item.approvalStatus,
+    }));
+    const leavePolicyCards = essContext.leave.policyCards;
+    const confirmedPermanent = String(employee.status || '').toLowerCase().includes('confirmed') || (employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() <= Date.now() : false);
+    const fourteenDayPaidLeaveEmployee = isFourteenDayPaidLeaveEmployee(employee);
     const currentYearAllowanceAlreadyPaid = await hasLeaveAllowanceInYear(employee, leaveYear);
     const allowanceEligible = annualBalance >= 10 && !currentYearAllowanceAlreadyPaid;
     const activeLeaveApplication = employeeLeaveApplications.find((item) => ['Submitted', 'Under Review', 'Approved'].includes(item.status));
@@ -657,22 +841,26 @@ export async function GET(request: Request) {
         jobTitle: employee.jobTitle || employee.designation || 'Employee',
         department: employee.department,
         businessUnit: employee.businessUnit,
-        location: employee.location || employee.workLocation,
-        manager: employee.hasManagerAssigned ? 'Assigned manager' : 'Manager assignment pending',
+        location: essContext.employeeSummary.location,
+        manager: essContext.employeeSummary.manager,
         email: employee.officialEmail || employee.email || employee.personalEmail || `${employee.employeeId.toLowerCase()}@dormanlongeng.com`,
         phone: employee.primaryPhone || employee.phone,
         photoUrl: linkedEmployeePhotoUrl(employee) || '',
         hasPhoto: employee?.hasPhoto === true,
         status: currentLeaveNow ? 'On Leave' : employee.status || 'Active',
-        yearsOfService: round(Number(employee.yearsOfService || 0)),
-        payrollGroup: employee.payrollGroup || 'Monthly Payroll',
-        salaryGrade: employee.salaryGrade || employee.jobGrade || 'Unassigned',
+        yearsOfService: essContext.employeeSummary.yearsOfService,
+        payrollGroup: essContext.employeeSummary.payrollGroup,
+        salaryGrade: essContext.employeeSummary.salaryGrade,
+        dateJoined: employee.dateJoined || employee.contractStartDate || '',
+        confirmationDate: employee.confirmationDueDate || '',
+        emergencyContactsComplete: employee.emergencyContactsComplete === true,
+        documentCount: Number(employee.documentCount || 0),
       },
       widgets: {
         leave: { entitlement: annualEntitlement, used: leaveUsed, balance: annualBalance, pending: requests.filter((item) => item.category === 'Leave' && !['Approved', 'Rejected', 'Terminated', 'Closed'].includes(item.status)).length },
-        attendance: { monthRate: attendanceRate, lateArrivals: employee.employeeDbId % 3, overtimeHours: (employee.employeeDbId % 6) * 2, remoteDays: employee.remoteWorker ? 4 : 0 },
+        attendance: { monthRate: attendanceRate, lateArrivals: essContext.attendance.lateArrivals, overtimeHours: essContext.attendance.overtimeHours, remoteDays: essContext.attendance.remoteDays },
         payroll: {
-          monthlyPay: latestReleasedPayroll?.grossPay || 0,
+          monthlyPay: latestReleasedPayroll?.netPay || latestReleasedPayroll?.grossPay || 0,
           currency: employee.payCurrency || 'NGN',
           payslips: payrollHistory.length,
           deductions: latestReleasedPayroll?.deductions || 0,
@@ -682,48 +870,56 @@ export async function GET(request: Request) {
         requests: { pending: requests.filter((item) => !['Approved', 'Rejected', 'Closed'].includes(item.status)).length, approved: requests.filter((item) => item.status === 'Approved').length, total: requests.length },
         loans: { applications: employeeLoans.length, outstanding: employeeLoans.reduce((sum, item) => sum + Number(item.outstandingBalance || 0), 0) },
       },
+      dashboardAnalytics: essContext.dashboardAnalytics,
       announcements: [
         ...(currentPeriodReleased ? [{ id: 'ann-001', title: `${periodTitle(ESS_CURRENT_PAYROLL_PERIOD)} payslip is now available`, channel: 'Payroll', publishedAt: dateAdd(-1), priority: 'High' }] : []),
-        { id: 'ann-002', title: 'Updated HSE handbook published', channel: 'Policy', publishedAt: dateAdd(-5), priority: 'Normal' },
-        { id: 'ann-003', title: 'Q3 learning calendar available', channel: 'Learning', publishedAt: dateAdd(-8), priority: 'Normal' },
       ],
       notifications: [
-        { id: 'ntf-001', title: 'Leave request awaiting line manager review', type: 'Workflow', status: 'Unread', createdAt: dateAdd(-1) },
-        { id: 'ntf-002', title: 'Employee handbook acknowledgement due', type: 'Document', status: 'Unread', createdAt: dateAdd(-2) },
-        ...(latestReleasedPayroll ? [{ id: 'ntf-003', title: `${latestReleasedPayroll.periodLabel || periodTitle(latestReleasedPayroll.period)} payslip is ready for download`, type: 'Payroll', status: 'Read', createdAt: dateAdd(-4) }] : []),
+        ...essContext.notifications,
+        ...(latestReleasedPayroll && !essContext.notifications.some((item) => /payslip/i.test(item.title))
+          ? [{ id: 'ntf-payslip', title: `${latestReleasedPayroll.periodLabel || periodTitle(latestReleasedPayroll.period)} payslip is ready for download`, type: 'Payroll', status: 'Read', createdAt: dateAdd(-1) }]
+          : []),
       ],
-      birthdays: [
-        { id: 'bd-001', fullName: 'Olamide Badetan', department: 'Human Resources', date: sampleDate(3) },
-        { id: 'bd-002', fullName: 'Adebayo Aina', department: 'Engineering', date: sampleDate(8) },
+      birthdays: essContext.birthdays,
+      anniversaries: essContext.anniversaries,
+      events: essContext.events,
+      documents: essContext.documents.length
+        ? essContext.documents
+        : [
+            ...(Number(employee.documentCount || 0) > 0
+              ? [{ id: 'doc-summary', title: `${employee.documentCount} employee document(s) on file`, category: 'HRIS Documents', version: '—', status: 'Current' }]
+              : []),
+          ],
+      profileSections: buildEssProfileSections(
+        employee,
+        essContext.documents.length
+          ? essContext.documents
+          : Number(employee.documentCount || 0) > 0
+            ? [{ title: `${employee.documentCount} employee document(s) on file`, category: 'HRIS Documents', version: '—', status: 'Current' }]
+            : [],
+      ),
+      profileAuditTrail: [
+        {
+          id: 'audit-sync',
+          at: new Date().toISOString(),
+          action: 'Profile synchronized',
+          detail: 'Employee profile loaded from DLE Enterprise HRIS.',
+          actor: 'System',
+        },
+        {
+          id: 'audit-open',
+          at: new Date().toISOString(),
+          action: 'Profile viewed',
+          detail: 'Employee opened ESS profile command center.',
+          actor: employee.fullName,
+        },
       ],
-      anniversaries: [
-        { id: 'wa-001', fullName: employee.fullName, years: Math.max(1, Math.round(Number(employee.yearsOfService || 1))), date: sampleDate(7) },
-        { id: 'wa-002', fullName: 'Chris Ijeli', years: 12, date: sampleDate(15) },
-      ],
-      events: [
-        { id: 'evt-001', label: 'Timesheet cut-off', date: dateAdd(2), type: 'Payroll' },
-        { id: 'evt-002', label: 'Team safety briefing', date: dateAdd(4), type: 'HSE' },
-        { id: 'evt-003', label: 'Work anniversary', date: dateAdd(7), type: 'Anniversary' },
-      ],
-      documents: [
-        { id: 'doc-001', title: 'Employment Letter', category: 'Letters', version: 'v2.0', status: 'Current' },
-        { id: 'doc-004', title: 'Confirmation Letter', category: 'Letters', version: 'v1.0', status: 'Current' },
-        { id: 'doc-005', title: 'Promotion Letter', category: 'Letters', version: 'v1.2', status: 'Current' },
-        { id: 'doc-006', title: 'Transfer Letter', category: 'Letters', version: 'v1.1', status: 'Archived' },
-        { id: 'doc-007', title: 'Disciplinary Notice', category: 'Notices', version: 'v1.0', status: 'Restricted' },
-        { id: 'doc-002', title: 'Employee Handbook', category: 'Policies', version: 'v6.1', status: 'Acknowledgement Due' },
-        { id: 'doc-003', title: 'HSE Training Certificate', category: 'Certificates', version: 'v1.0', status: 'Current' },
-      ],
-      profileSections: [
-        { id: 'personal', label: 'Personal Information', status: 'View / update', approvalRequired: true, fields: ['Title', 'Names', 'Date of birth', 'Marital status', 'Nationality'] },
-        { id: 'contact', label: 'Contact Details', status: 'View / update', approvalRequired: true, fields: ['Email', 'Phone', 'Office extension'] },
-        { id: 'address', label: 'Addresses', status: 'View / update', approvalRequired: true, fields: ['Residential address', 'Permanent address', 'City', 'State', 'Country'] },
-        { id: 'emergency', label: 'Emergency Contacts', status: 'View / update', approvalRequired: true, fields: ['Primary contact', 'Relationship', 'Phone', 'Address'] },
-        { id: 'next-of-kin', label: 'Next of Kin', status: 'View / update', approvalRequired: true, fields: ['Name', 'Relationship', 'Phone', 'Address'] },
-        { id: 'bank', label: 'Bank Details', status: 'Masked / encrypted', approvalRequired: true, fields: ['Bank', 'Account number', 'Account name', 'BVN token'] },
-        { id: 'photo', label: 'Profile Photo', status: 'Upload / replace', approvalRequired: true, fields: ['Image file', 'Capture date'] },
-        { id: 'qualifications', label: 'Qualifications', status: 'Document-backed', approvalRequired: true, fields: ['Institution', 'Qualification', 'Year', 'Attachment'] },
-        { id: 'certifications', label: 'Certifications', status: 'Document-backed', approvalRequired: true, fields: ['Certificate', 'Issuer', 'Expiry', 'Attachment'] },
+      profilePreferences: [
+        { label: 'Portal language', value: locale === 'en-NG' ? 'English (Nigeria)' : locale },
+        { label: 'Email notifications', value: 'Enabled' },
+        { label: 'In-app notifications', value: 'Enabled' },
+        { label: 'Profile update approvals', value: 'Required for sensitive changes' },
+        { label: 'Document expiry alerts', value: 'Enabled' },
       ],
       leave: {
         balances: leavePolicyCards,
@@ -747,19 +943,9 @@ export async function GET(request: Request) {
         relieverOptions,
       },
       attendance: {
-        records: [
-          { date: sampleDate(0), clockIn: '08:04', clockOut: '17:22', status: 'Present', source: 'Biometric' },
-          { date: sampleDate(-1), clockIn: '08:18', clockOut: '17:10', status: 'Late', source: 'Mobile' },
-          { date: sampleDate(-2), clockIn: 'Remote', clockOut: 'Remote', status: 'Remote Work', source: 'ESS' },
-        ],
-        shifts: [
-          { id: 'shift-001', name: 'Day Shift', start: '08:00', end: '17:00', location: employee.location || 'Lagos HQ' },
-          { id: 'shift-002', name: 'Weekend Standby', start: '09:00', end: '13:00', location: 'Remote' },
-        ],
-        timesheets: [
-          { id: 'ts-001', week: 'Current Week', hours: 40, overtime: 4, status: 'Submitted' },
-          { id: 'ts-002', week: 'Previous Week', hours: 42, overtime: 2, status: 'Approved' },
-        ],
+        records: essContext.attendance.records,
+        shifts: employee.shift ? [{ id: 'shift-current', name: `${employee.shift} Shift`, start: '08:00', end: '17:00', location: essContext.employeeSummary.location }] : [],
+        timesheets: [],
       },
       payrollHistory,
       payrollAccess: {
@@ -935,6 +1121,8 @@ export async function POST(request: Request) {
       );
       await writeRequests(nextRequests);
       essResponseCache.clear();
+      let responseRequest = nextRequests.find((item) => item.id === requestId);
+      let allowanceResult: Awaited<ReturnType<typeof postLeaveAllowanceOnAnnualLeaveApproval>> | undefined;
       if (!approved) {
         await notifyLeaveWorkflow(session, {
           requestId,
@@ -952,6 +1140,7 @@ export async function POST(request: Request) {
           severity: 'warning',
         });
       } else {
+        const requester = employeeSource.employees.find((item) => item.employeeId === found.employeeId || item.employeeCode === found.employeeId);
         await notifyLeaveWorkflow(session, {
           requestId,
           recipientEmployeeCode: found.employeeId,
@@ -964,12 +1153,43 @@ export async function POST(request: Request) {
             requestId,
             recipientEmployeeCode: found.relieverEmployeeId,
             title: 'Leave reliever assignment confirmed',
-            body: `You have been assigned as reliever for ${employee.fullName}: ${found.title}.`,
+            body: `You have been assigned as reliever for ${requester?.fullName || found.employeeId}: ${found.title}.`,
             severity: 'info',
           });
         }
+        if (
+          requester
+          && found.leaveType === 'Annual Leave'
+          && Number(found.days || 0) >= dormantLongPolicy.allowanceMinimumAnnualDays
+          && found.startDate
+        ) {
+          const applications = await readLeaveApplicationsForReconciliation({ syncEss: true });
+          allowanceResult = await postLeaveAllowanceOnAnnualLeaveApproval({
+            employee: requester,
+            applications,
+            leaveType: found.leaveType,
+            days: Number(found.days || 0),
+            startDate: found.startDate,
+            period: found.payrollPeriod || activePayrollPeriod(),
+            requestId: found.id,
+            source: 'ESS Leave Approval',
+            actor: session.fullName || session.username,
+          });
+          if (allowanceResult.posted) {
+            responseRequest = {
+              ...responseRequest!,
+              comments: [
+                ...(responseRequest?.comments || []),
+                { at: now, actor: 'Leave Allowance Automation', comment: allowanceResult.message },
+              ],
+            };
+            const allowanceUpdated = nextRequests.map((item) => (item.id === requestId ? responseRequest! : item));
+            await writeRequests(allowanceUpdated);
+            essResponseCache.clear();
+          }
+        }
       }
-      return ok({ request: nextRequests.find((item) => item.id === requestId) });
+      return ok({ request: responseRequest, leaveAllowance: allowanceResult?.posted ? allowanceResult.message : undefined });
     }
 
     const category = compact(body.category);

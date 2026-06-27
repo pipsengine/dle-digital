@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { payeTaxableFromPayrollEarnings } from '@/lib/payroll-sage-pay-rules';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { contractEmployeeCode, isDailyRatePayrollEmployee } from '@/lib/payroll-employee-classification';
+import { isLeaveAllowancePaymentCode } from '@/lib/leave-allowance-policy';
 import { leaveAllowanceEventsForEmployeePeriod } from '@/lib/payroll-leave-allowance-store';
 
 export type PayrollEarningProfileId =
@@ -141,6 +143,51 @@ const PERIOD_ADJUSTMENTS_PATH = process.env.DLE_PAYROLL_EARNING_ADJUSTMENTS_PATH
 let periodAdjustmentCache: { mtime: number; rows: PayrollPeriodEarningAdjustment[] } | null = null;
 const normalizedPeriod = (period?: string) => compact(period).replace(/\//g, '-').slice(0, 7);
 const normalizedEmployeeKey = (value: unknown) => compact(value).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^P(?=\d+$)/, '');
+
+/** Match payroll period adjustments to employees even when adjustment keys include names (e.g. "L2644 - NZEKWUE"). */
+export const payrollEmployeeMatchKeys = (value: unknown) => {
+  const keys = new Set<string>();
+  const text = compact(value).toUpperCase();
+  if (!text) return keys;
+  keys.add(text.replace(/[^A-Z0-9]/g, ''));
+  keys.add(normalizedEmployeeKey(text));
+  const prefixed = text.match(/\b([PL]\d{3,})\b/);
+  if (prefixed) {
+    keys.add(prefixed[1].replace(/[^A-Z0-9]/g, ''));
+    keys.add(prefixed[1].replace(/^P/i, '').replace(/^L/i, ''));
+  }
+  const digits = text.match(/(\d{3,})/);
+  if (digits) keys.add(digits[1]);
+  return keys;
+};
+
+const employeeAdjustmentMatched = (employee: DleEmployeeDirectoryRow, row: PayrollPeriodEarningAdjustment) => {
+  const employeeKeys = new Set<string>();
+  [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].forEach((value) => {
+    payrollEmployeeMatchKeys(value).forEach((key) => employeeKeys.add(key));
+  });
+  const rowKeys = new Set<string>();
+  [row.employeeId, row.employeeCode].forEach((value) => {
+    payrollEmployeeMatchKeys(value).forEach((key) => rowKeys.add(key));
+  });
+  return [...rowKeys].some((key) => employeeKeys.has(key));
+};
+
+const STANDARD_PROFILE_EARNING_CODES = new Set([
+  'JNR_BASIC', 'JNR_HOUSE', 'JNR_HOUSING', 'JNR_LEAVE', 'JNR_MEDICAL', 'JNR_MEDICALTAX',
+  'JNR_OTHERALL', 'JNR_OTHERALLTAX', 'JNR_TRANS', 'JNR_TRANSPORT', 'JNR_UTILITY',
+  'SNR_BASIC', 'SNR_HOUSE', 'SNR_HOUSING', 'SNR_LEAVE', 'SNR_MEDICAL', 'SNR_MEDICALTAX',
+  'SNR_OTHERALL', 'SNR_OTHERALLTAX', 'SNR_TRANS', 'SNR_TRANSPORT', 'SNR_UTILITY', 'SNR_UTILITIES', 'SNR_LEAVETAX',
+  'SNR_NJIC', 'SNR_NTC', 'PER_MEAL',
+  'MGT_BASIC', 'MGT_HOUSE', 'MGT_HOUSING', 'MGT_LEAVE', 'MGT_MEDICAL', 'MGT_MEDICALTAX',
+  'MGT_OTHERALL', 'MGT_OTHERALLTAX', 'MGT_TRANS', 'MGT_TRANSPORT', 'MGT_UTILITY', 'MGT_FURN',
+  'MGT1COLA_BASIC', 'MGT1COLA_HOUSIN', 'MGT1COLA_LEAVE', 'MGT1COLA_MEDICAL', 'MGT1COLA_MEDTAX',
+  'MGT1COLA_OTHALL', 'MGT1COLA_OTHALLTAX', 'MGT1COLA_TRANSP', 'MGT1COLA_FURN', 'MGT1COLA_UTILIT',
+  'SNM_BASIC', 'SNM_HOUSE', 'SNM_HOUSING', 'SNM_LEAVE', 'SNM_MEDICAL', 'SNM_MEDICALTAX',
+  'SNM_OTHERALL', 'SNM_OTHERALLTAX', 'SNM_TRANS', 'SNM_TRANSPORT', 'SNM_UTILITY', 'SNM_FURN',
+  'JCWEEKDAY', 'JCWEEKDAY_NT', 'WEEKDAYOVT', 'PUBHOL', 'SATEARN', 'SUNDAYEARN',
+  'STIPEND_NT', 'BASIC', 'ALLOWANCE', 'ARREARS', 'LTI',
+]);
 const readPeriodEarningAdjustmentsSync = () => {
   try {
     if (!existsSync(PERIOD_ADJUSTMENTS_PATH)) return [];
@@ -219,8 +266,7 @@ export const PAYROLL_EARNING_PROFILES: Record<Exclude<PayrollEarningProfileId, '
   'contract-lumpsum': {
     name: 'Contract Staff on Lumpsum',
     definitions: [
-      { code: 'BASIC1_LUMPSUM', name: 'LUMPSUM AMOUNT', taxable: true, percentOfGross: 0.6 },
-      { code: 'BASIC_LUMPSUM', name: 'LUMPSUM AMOUNT NONTAXABLE', taxable: false, percentOfGross: 0.4 },
+      { code: 'LUMPSUMTAX', name: 'LUMPSUM ALLOWANCE', taxable: true, percentOfGross: 1 },
     ],
   },
 };
@@ -294,16 +340,16 @@ export const JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS: PayrollEarningDefinition[
 const seniorFixedMonthlyEarningLines = (profileId: PayrollEarningProfileId): PayrollEarningLine[] => {
   if (profileId !== 'senior-permanent') return [];
   return [
-    { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 22000 },
-    { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 15000 },
+    { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 22000, taxable: true },
+    { ...SENIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 15000, taxable: true },
   ];
 };
 
 const juniorFixedMonthlyEarningLines = (profileId: PayrollEarningProfileId): PayrollEarningLine[] => {
   if (profileId !== 'junior-permanent') return [];
   return [
-    { ...JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 8800 },
-    { ...JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 10000 },
+    { ...JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[0], amount: 8800, taxable: true },
+    { ...JUNIOR_FIXED_MONTHLY_EARNING_DEFINITIONS[1], amount: 10000, taxable: true },
   ];
 };
 
@@ -354,15 +400,37 @@ const finalizeContractDayRateEarnings = (lines: PayrollEarningLine[], weekdayDay
   };
 };
 
-export const contractPayeTaxablePay = (earnings: Pick<PayrollEarningsResult, 'profileId' | 'grossPay' | 'taxablePay'>) =>
-  earnings.profileId === 'contract-day-rate' ? earnings.grossPay : earnings.taxablePay;
+export const contractPayeTaxablePay = (earnings: Pick<PayrollEarningsResult, 'profileId' | 'grossPay' | 'taxablePay' | 'paidEarningLines' | 'earningLines'>) => {
+  if (earnings.profileId === 'contract-day-rate') return earnings.grossPay;
+  const paidLines = (earnings.paidEarningLines || earnings.earningLines || []) as PayrollEarningLine[];
+  if (paidLines.length) {
+    if (earnings.profileId === 'contract-lumpsum') {
+      return roundMoney(
+        paidLines.reduce((sum, line) => {
+          const code = line.code.toUpperCase();
+          if (code === 'LEAVEALLOW') return sum;
+          if (line.taxable !== false && line.amount > 0) return sum + line.amount;
+          if (code === 'REFUND') return sum + line.amount;
+          return sum;
+        }, 0),
+      );
+    }
+    return roundMoney(
+      paidLines
+        .filter((line) => line.taxable !== false && !/^REFUND$/i.test(line.code))
+        .reduce((sum, line) => sum + line.amount, 0),
+    );
+  }
+  return earnings.taxablePay;
+};
 
 const isBasicLine = (line: PayrollEarningLine) => {
   const code = line.code.toUpperCase();
   if (code === 'BASIC_LUMPSUM') return false;
-  return /BASIC|LUMPSUM|JCWEEKDAY$/.test(code) || /BASIC|LUMPSUM|WEEKDAY EARNING/.test(line.name);
+  return /BASIC1_LUMPSUM|BASICSALARY|LUMPSUMTAX|EXP_BASIC|_(BASIC)$|^BASIC$|_BASIC$|COLA_BASIC|MGT_BASIC|SNR_BASIC|JNR_BASIC|JCWEEKDAY$/.test(code)
+    || /BASIC|LUMPSUM|WEEKDAY EARNING/.test(line.name);
 };
-const isHousingLine = (line: PayrollEarningLine) => /HOUSE|HOUSIN/.test(line.code.toUpperCase()) || /HOUSING/.test(line.name);
+const isHousingLine = (line: PayrollEarningLine) => /HOUSE|HOUSIN|_HOUS$/i.test(line.code.toUpperCase()) || /HOUSING/.test(line.name);
 const isTransportLine = (line: PayrollEarningLine) => /TRANS/.test(line.code.toUpperCase()) || /TRANSPORT/.test(line.name);
 
 const pensionablePayFromLines = (lines: PayrollEarningLine[]) => {
@@ -394,12 +462,22 @@ const sagePayslipEarningLines = (employee: DleEmployeeDirectoryRow): PayrollEarn
     .filter((line) => line.code && line.amount !== 0);
 };
 
-const isLeaveAllowanceLine = (line: Pick<PayrollEarningLine, 'code' | 'name'>) => {
-  const text = `${line.code || ''} ${line.name || ''}`.toUpperCase();
-  return text.includes('LEAVEALLOW') || text.includes('LEAVE ALLOWANCE') || /(^|_)LEAVE(TAX)?($|_)/.test(String(line.code || '').toUpperCase());
+const isLeaveAllowanceLine = (line: Pick<PayrollEarningLine, 'code' | 'name'>) =>
+  isLeaveAllowancePaymentCode(line.code) || /\bLEAVE ALLOWANCE\b/i.test(String(line.name || ''));
+
+const basicPercentForProfile = (profileId: PayrollEarningProfileId) => {
+  if (profileId === 'fallback' || profileId === 'contract-day-rate' || profileId === 'stipend-non-taxable') return 0;
+  const profile = PAYROLL_EARNING_PROFILES[profileId];
+  const basic = profile.definitions.find((line) => /_(BASIC)$/i.test(line.code));
+  return basic?.percentOfGross || 0;
 };
 
+/** Monthly package gross — the percentage base for permanent staff profile breakdown (not total payslip with one-offs). */
 export const monthlyGrossFromEmployee = (employee: DleEmployeeDirectoryRow) => {
+  const profileId = resolvePayrollEarningProfile(employee);
+  const basicSalary = num(employee.basicSalary);
+  const basicPercent = basicPercentForProfile(profileId);
+  if (basicSalary > 0 && basicPercent > 0) return roundMoney(basicSalary / basicPercent);
   const periodSalary = num(employee.periodSalary);
   if (periodSalary > 0) return roundMoney(periodSalary);
   const annualSalary = num(employee.annualSalary);
@@ -447,16 +525,80 @@ export const resolvePayrollEarningProfile = (employee: DleEmployeeDirectoryRow):
   return 'fallback';
 };
 
+const adjustmentIsPayeTaxable = (row: PayrollPeriodEarningAdjustment) => {
+  const code = compact(row.code).toUpperCase();
+  if (/^(ARREARS|REFUND|OVT|LEAVEALLOW|OVERTIME|SITEALL|SPECIAL_ALL|WKEND_ALL|NIGHT_ALLOW|MISC|OTHER_PAY)$/i.test(code)) return true;
+  return Boolean(row.taxable);
+};
+
+const canonicalEarningCode = (code: string) => {
+  const upper = compact(code).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const aliases: Record<string, string> = {
+    SNRHOUSING: 'SNRHOUSE',
+    SNRHOU: 'SNRHOUSE',
+    SNROTHALL: 'SNROTHERALL',
+    SNRTRANSPORT: 'SNRTRANS',
+    SNRUTILITIES: 'SNRUTILITY',
+    JNRHOUSING: 'JNRHOUSE',
+    JNRHOU: 'JNRHOUSE',
+    JNROTHALL: 'JNROTHERALL',
+    JNRTRANSPORT: 'JNRTRANS',
+    JNRUTILITIES: 'JNRUTILITY',
+    MGTHOUSING: 'MGTHOUSE',
+    MGTOTHALL: 'MGTOTHERALL',
+    MGTTRANSPORT: 'MGTTRANS',
+    SNMHOUSING: 'SNMHOUSE',
+    SNMHOUS: 'SNMHOUSE',
+    SNMOTHERALL: 'SNMOTHERALL',
+    SNMTRANSPORT: 'SNMTRANS',
+    MGT1COLAHOUSIN: 'MGT1COLAHOUSIN',
+  };
+  return aliases[upper] || upper;
+};
+
+const mergeProfileLinesWithAdjustments = (profileLines: PayrollEarningLine[], adjustments: PayrollEarningLine[]) => {
+  const merged = profileLines.map((line) => ({ ...line }));
+  const indexByCanonical = new Map<string, number>();
+  merged.forEach((line, index) => indexByCanonical.set(canonicalEarningCode(line.code), index));
+  const extras: PayrollEarningLine[] = [];
+  for (const adjustment of adjustments) {
+    const canonical = canonicalEarningCode(adjustment.code);
+    const profileIndex = indexByCanonical.get(canonical);
+    if (profileIndex !== undefined) {
+      merged[profileIndex] = {
+        ...merged[profileIndex],
+        amount: adjustment.amount,
+        taxable: adjustment.taxable,
+        name: adjustment.name || merged[profileIndex].name,
+        calculation: adjustment.calculation || merged[profileIndex].calculation,
+      };
+      continue;
+    }
+    const directIndex = merged.findIndex((line) => line.code.toUpperCase() === adjustment.code.toUpperCase());
+    if (directIndex >= 0) {
+      merged[directIndex] = {
+        ...merged[directIndex],
+        amount: adjustment.amount,
+        taxable: adjustment.taxable,
+        name: adjustment.name || merged[directIndex].name,
+        calculation: adjustment.calculation || merged[directIndex].calculation,
+      };
+      continue;
+    }
+    extras.push(adjustment);
+  }
+  return [...merged, ...extras];
+};
+
 const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions): PayrollEarningLine[] => {
   if (!options?.includePeriodAdjustments) return [];
   const period = normalizedPeriod(options.period);
-  const employeeKeys = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].map(normalizedEmployeeKey).filter(Boolean);
   const salaryGrade = normalizedTextKey(employee.salaryGrade || employee.jobGrade);
   const profileId = resolvePayrollEarningProfile(employee);
   return readPeriodEarningAdjustmentsSync()
     .filter((row) => normalizedPeriod(row.period) === period)
     .filter((row) => {
-      const employeeMatched = [row.employeeId, row.employeeCode].map(normalizedEmployeeKey).some((key) => key && employeeKeys.includes(key));
+      const employeeMatched = employeeAdjustmentMatched(employee, row);
       const gradeMatched = Array.isArray(row.salaryGrades) && row.salaryGrades.map(normalizedTextKey).includes(salaryGrade);
       const profileMatched = Array.isArray(row.profileIds) && row.profileIds.includes(profileId);
       return employeeMatched || gradeMatched || profileMatched;
@@ -464,7 +606,7 @@ const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, options?: Payr
     .map((row) => ({
       code: compact(row.code),
       name: compact(row.name || row.code),
-      taxable: Boolean(row.taxable),
+      taxable: adjustmentIsPayeTaxable(row),
       percentOfGross: 0,
       calculation: row.source || 'Payroll period earning adjustment',
       runFrequency: 'formula' as const,
@@ -526,7 +668,7 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
   const profileId = resolvePayrollEarningProfile(employee);
   const gross = monthlyGrossFromEmployee(employee);
   const profile = profileId === 'fallback' || profileId === 'contract-day-rate' || profileId === 'stipend-non-taxable' ? null : PAYROLL_EARNING_PROFILES[profileId];
-  const sageLines = options?.useSagePayslipLines && !options.ignoreSagePayslipLines ? sagePayslipEarningLines(employee) : [];
+  const sageLines = options?.useSagePayslipLines && !options?.ignoreSagePayslipLines ? sagePayslipEarningLines(employee) : [];
   if (sageLines.length > 0) {
     const fallbackProfileName = profileId === 'contract-day-rate'
       ? 'Contract Staff on Day Rate'
@@ -595,6 +737,46 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
       ...finalizeContractDayRateEarnings(lines, weekdayDays, ratePerDay || (weekdayDays > 0 ? gross / weekdayDays : 0)),
     };
   }
+  if (profileId === 'contract-lumpsum') {
+    const isBaseLumpsumCode = (code: string) => /^(LUMPSUMTAX|BASIC1_LUMPSUM)$/i.test(code);
+    const periodAdjustments = [
+      ...periodAdjustmentLines(employee, options),
+      ...leavePayrollEventLines(employee, gross, [], options),
+    ];
+    const baseAdjustments = periodAdjustments.filter((line) => isBaseLumpsumCode(line.code));
+    const supplementalAdjustments = periodAdjustments.filter((line) => !isBaseLumpsumCode(line.code));
+    const coreLines = baseAdjustments.length > 0
+      ? baseAdjustments
+      : [{
+          code: 'LUMPSUMTAX',
+          name: 'LUMPSUM ALLOWANCE',
+          taxable: true,
+          percentOfGross: 1,
+          calculation: 'Monthly lumpsum package',
+          runFrequency: 'monthly' as const,
+          includeInMonthlyPayroll: true,
+          amount: roundMoney(gross),
+        }];
+    const monthlyLines = [...coreLines, ...supplementalAdjustments];
+    const taxablePay = roundMoney(monthlyLines.filter((line) => line.taxable !== false).reduce((sum, line) => sum + line.amount, 0));
+    const grossPay = roundMoney(monthlyLines.reduce((sum, line) => sum + line.amount, 0));
+    const basicPay = roundMoney(coreLines.reduce((sum, line) => sum + line.amount, 0));
+    return {
+      profileId,
+      profileName: 'Contract Staff on Lumpsum',
+      periodPackageGross: gross,
+      grossPay,
+      basePay: basicPay,
+      basicPay,
+      allowances: roundMoney(grossPay - basicPay),
+      taxablePay,
+      nonTaxablePay: roundMoney(grossPay - taxablePay),
+      bhtPay: basicPay,
+      earningLines: monthlyLines,
+      annualBenefitLines: [],
+      paidEarningLines: monthlyLines,
+    };
+  }
   if (!profile) {
     const basePay = gross;
     const allowances = roundMoney(basePay * fallbackAllowanceRate(employee));
@@ -634,11 +816,11 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
     ...periodAdjustmentLines(employee, options),
     ...leavePayrollEventLines(employee, gross, lines, options),
   ];
-  const monthlyLines = [...monthlyPayrollLines(lines), ...periodAdjustments];
+  const monthlyLines = mergeProfileLinesWithAdjustments(monthlyPayrollLines(lines), periodAdjustments);
   const basicPay = lines.find((line) => line.code.endsWith('_BASIC'))?.amount || 0;
   const bhtPay = pensionablePayFromLines(monthlyLines).total;
-  const taxablePay = roundMoney(monthlyLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
-  const nonTaxablePay = roundMoney(monthlyLines.filter((line) => !line.taxable).reduce((sum, line) => sum + line.amount, 0));
+  const taxablePay = roundMoney(monthlyLines.filter((line) => line.taxable !== false).reduce((sum, line) => sum + line.amount, 0));
+  const nonTaxablePay = roundMoney(monthlyLines.filter((line) => line.taxable === false).reduce((sum, line) => sum + line.amount, 0));
   return {
     profileId,
     profileName: profile.name,
@@ -695,7 +877,7 @@ export const taxablePayrollInputFromEmployee = (employee: DleEmployeeDirectoryRo
     monthlyBasePay: bhtPay,
     monthlyAllowances: roundMoney(Math.max(0, earnings.taxablePay - (pensionable.basePay || earnings.basicPay))),
     monthlyGrossPay: earnings.grossPay,
-    monthlyTaxablePay: contractPayeTaxablePay(earnings),
+    monthlyTaxablePay: payeTaxableFromPayrollEarnings(employee, earnings),
   };
 };
 
@@ -714,8 +896,8 @@ export const pensionablePayrollInputFromEmployee = (employee: DleEmployeeDirecto
   };
 };
 
-export const calculatePermanentUnionDues = (employee: DleEmployeeDirectoryRow) => {
-  const earnings = calculatePayrollEarnings(employee);
+export const calculatePermanentUnionDues = (employee: DleEmployeeDirectoryRow, options?: PayrollEarningsOptions) => {
+  const earnings = calculatePayrollEarnings(employee, { ...options, includePeriodAdjustments: false });
   if (earnings.profileId === 'junior-permanent') {
     return {
       code: 'JNR_UNION_DUES',
@@ -725,12 +907,11 @@ export const calculatePermanentUnionDues = (employee: DleEmployeeDirectoryRow) =
     };
   }
   if (earnings.profileId === 'senior-permanent') {
-    const duesBasis = monthlyGrossFromEmployee(employee) || earnings.grossPay;
     return {
-      code: 'SNR_UNION_DUES',
+      code: 'SNR_UNION',
       name: 'Snr Union Dues',
-      basis: '(Monthly Salary * 26%) * 4%',
-      amount: roundMoney(duesBasis * 0.26 * 0.04),
+      basis: '2.5% of Basic Earning',
+      amount: roundMoney(earnings.basicPay * 0.025),
     };
   }
   return {

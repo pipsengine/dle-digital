@@ -8,6 +8,14 @@ export type PayrollEmployeeOption = {
   employeeCode?: string;
   nhfApplicable?: boolean;
   annualRentRelief?: number | null;
+  payeCalculation?: {
+    excludedEarningCodes?: string[];
+    includeRefundInTaxable?: boolean;
+    disablePensionPayeRelief?: boolean;
+    annualRentRelief?: number;
+    usdFlatRate?: number;
+    monthlyPayeOverride?: number;
+  };
   payrollGroup?: string;
   salaryGrade?: string;
   jobGrade?: string;
@@ -114,6 +122,7 @@ export const applyPayrollEmployeeOptions = async (employees: DleEmployeeDirector
       ...employee,
       nhfApplicable: typeof option.nhfApplicable === 'boolean' ? option.nhfApplicable : employee.nhfApplicable,
       annualRentRelief: Number.isFinite(Number(option.annualRentRelief)) ? Number(option.annualRentRelief) : employee.annualRentRelief,
+      payeCalculation: option.payeCalculation || employee.payeCalculation,
       payrollGroup: option.payrollGroup || employee.payrollGroup,
       salaryGrade: option.salaryGrade || employee.salaryGrade,
       jobGrade: option.jobGrade || employee.jobGrade,

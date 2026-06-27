@@ -126,6 +126,11 @@ export const normalizePayrollMatchKey = (value: string | number | null | undefin
   if (!raw) return '';
   const compact = raw.replace(/[^A-Z0-9]/g, '');
   if (!compact) return '';
+  const permanentStaffMatch = compact.match(/^P0*(\d+)$/);
+  if (permanentStaffMatch) {
+    const digits = permanentStaffMatch[1].replace(/^0+/, '');
+    return digits || permanentStaffMatch[1];
+  }
   const numericOnly = compact.replace(/^0+/, '');
   return numericOnly || compact;
 };

@@ -7,7 +7,7 @@ import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPa
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
 import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
-import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
+import { syncLeaveAllowanceEventsForPayroll } from '@/lib/payroll-leave-allowance-store';
 import { normalizePayrollMatchKey, readSagePayrollPeriodTotals } from '@/lib/sage-people-payroll-store';
 import { buildTimesheetHoursMapForPayrollPeriod } from '@/lib/timesheet-entry-store';
 import { payrollPeriodLabel } from '@/lib/payroll-period-store';
@@ -157,7 +157,7 @@ const activeStatus = (value: unknown) => !compact(value).toLowerCase().match(/te
 
 const inputOnlyEmployee = (employee: DleEmployeeDirectoryRow): DleEmployeeDirectoryRow => ({
   ...employee,
-  sagePayrollEarnings: [],
+  sagePayrollEarnings: undefined,
   sagePayrollDeductions: undefined,
   sagePayrollContributions: undefined,
 });
@@ -278,12 +278,10 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
     throw new Error('One or more active payroll configuration versions are missing.');
   }
 
-  if (compareWithSage) {
-    try {
-      await syncSageLeaveAllowanceEvents();
-    } catch (error) {
-      console.warn('[PayrollCalculation] Leave allowance sync skipped:', error instanceof Error ? error.message : error);
-    }
+  try {
+    await syncLeaveAllowanceEventsForPayroll(requestedPeriod);
+  } catch (error) {
+    console.warn('[PayrollCalculation] Leave allowance sync skipped:', error instanceof Error ? error.message : error);
   }
 
   const sageByKey = new Map<string, (typeof sagePeriodTotals)[number]>();
@@ -469,7 +467,8 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
         { code: 'PENSION_EE', label: 'Pension', amount: roundMoney(employeePension) },
         { code: 'NHF', label: 'NHF', amount: roundMoney(nhf) },
         { code: 'LOAN', label: 'Loan Recovery', amount: roundMoney(loanRecovery) },
-        { code: 'OTHER', label: 'Other Deductions', amount: roundMoney(otherDeductions) },
+        { code: 'SNR_UNION', label: 'Union Dues', amount: roundMoney(unionDues) },
+        { code: 'OTHER', label: 'Other Deductions', amount: roundMoney(otherStatutory) },
       ].filter((line) => line.amount > 0),
     };
   });

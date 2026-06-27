@@ -9,7 +9,7 @@ import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFund
 import { activeLoansVersion, calculateLoanRecovery, loanInputsFromApplications, readPayrollLoanApplications, readPayrollLoansConfig } from '@/lib/payroll-loans-engine';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { enterprisePayrollSourceLabel, isEnterprisePayrollPeriod } from '@/lib/payroll-enterprise-source';
-import { syncSageLeaveAllowanceEvents } from '@/lib/payroll-leave-allowance-store';
+import { syncLeaveAllowanceEventsForPayroll } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { calculateTimesheetPeriod, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
@@ -302,9 +302,9 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   const fundsVersion = activeStatutoryFundsVersion(fundsConfig);
   const loansVersion = activeLoansVersion(loansConfig);
   if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) throw new Error('One or more payroll configuration versions are missing.');
-  if (!enterpriseSourceActive) {
-    await syncSageLeaveAllowanceEvents();
-  }
+  await syncLeaveAllowanceEventsForPayroll(requestedPeriod).catch((error) => {
+    console.warn('[PayslipGeneration] Leave allowance sync skipped:', error instanceof Error ? error.message : error);
+  });
 
   const currentBatch = batches.find((batch) => batch.period === requestedPeriod) || null;
   const loanInputs = loanInputsFromApplications(employeeSource.employees, loanApplications).reduce((map, input) => {
@@ -319,25 +319,21 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       .map((key) => identityByKey.get(key))
       .find(Boolean);
     const standardOptions = { period: requestedPeriod, includePeriodAdjustments: true };
-    const standardAmounts = calculatePayrollEarnings(employee, standardOptions);
+    const payrollEmployee = enterpriseSourceActive ? { ...employee, sagePayrollEarnings: undefined, sagePayrollDeductions: undefined, sagePayrollContributions: undefined } : employee;
+    const standardAmounts = calculatePayrollEarnings(payrollEmployee, standardOptions);
     const dailyRateEmployee = isDailyRateEmployee(employee, standardAmounts.profileId);
     const ratePerDay = Number(employee.ratePerDay || 0) || (Number(employee.ratePerHour || 0) > 0 ? Number(employee.ratePerHour) * Number(employee.hoursPerDay || 8) : 0) || (dailyRateEmployee ? Number(employee.periodSalary || 0) : 0);
     const ratePerHour = Number(employee.ratePerHour || 0) || (ratePerDay > 0 ? ratePerDay / Number(employee.hoursPerDay || 8) : 0);
     const dailyAttendance = dailyRateEmployee ? dailyAttendanceForEmployee(employee, dailyAttendanceByKey) : emptyDailyAttendance();
     const dailyTimesheetAmounts = dailyRateEmployee ? mergeDailySupplementalEarnings(contractDayRatePayrollResult({ ratePerDay, daysWorked: dailyAttendance.daysWorked }), standardAmounts) : null;
     const amounts = dailyTimesheetAmounts && dailyTimesheetAmounts.grossPay > 0 ? dailyTimesheetAmounts : standardAmounts;
-    const calculationEmployee = dailyRateEmployee ? { ...employee, sagePayrollEarnings: [] } : employee;
-    const tax = calculatePayrollTax({
-      ...(dailyRateEmployee ? {
-        employee: calculationEmployee,
-        monthlyBasePay: amounts.basicPay,
-        monthlyAllowances: Math.max(0, amounts.taxablePay - amounts.basicPay),
-      } : payrollInputFromEmployee(employee, standardOptions)),
-      monthlyGrossPay: amounts.grossPay,
-      monthlyTaxablePay: amounts.taxablePay,
-    }, taxVersion);
-    const pension = calculatePension(dailyRateEmployee ? { employee: calculationEmployee, monthlyBasePay: amounts.basicPay, monthlyAllowances: Math.max(0, amounts.taxablePay - amounts.basicPay) } : pensionInputFromEmployee(employee, standardOptions), pensionVersion);
-    const funds = calculateStatutoryFunds(dailyRateEmployee ? { employee: calculationEmployee, monthlyBasePay: amounts.basicPay, monthlyAllowances: amounts.allowances, organizationEmployeeCount: employeeSource.employees.length } : statutoryFundInputFromEmployee(employee, employeeSource.employees.length, standardOptions), fundsVersion);
+    const calculationEmployee = dailyRateEmployee ? { ...payrollEmployee, sagePayrollEarnings: [] } : payrollEmployee;
+    const tax = calculatePayrollTax(
+      payrollInputFromEmployee(calculationEmployee, standardOptions, amounts),
+      taxVersion,
+    );
+    const pension = calculatePension(dailyRateEmployee ? { employee: calculationEmployee, monthlyBasePay: amounts.basicPay, monthlyAllowances: Math.max(0, amounts.taxablePay - amounts.basicPay) } : pensionInputFromEmployee(payrollEmployee, standardOptions), pensionVersion);
+    const funds = calculateStatutoryFunds(dailyRateEmployee ? { employee: calculationEmployee, monthlyBasePay: amounts.basicPay, monthlyAllowances: amounts.allowances, organizationEmployeeCount: employeeSource.employees.length } : statutoryFundInputFromEmployee(payrollEmployee, employeeSource.employees.length, standardOptions), fundsVersion);
     const loans = (loanInputs.get(employee.employeeId) || []).map((loanInput) => calculateLoanRecovery(loanInput, loansVersion));
     const paye = roundMoney(tax.monthlyPaye);
     const pensionEmployee = roundMoney(pension.employeeContribution);
@@ -345,7 +341,7 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     const loanRecovery = roundMoney(loans.reduce((sum, loan) => sum + loan.payrollRecovery, 0));
     const taxComponentMonthly = (id: string) => (tax.statutoryItems.find((item) => item.id === id)?.amount || 0) / 12;
     const unionDues = roundMoney(taxComponentMonthly('union-dues'));
-    const unionRule = calculatePermanentUnionDues(calculationEmployee);
+    const unionRule = calculatePermanentUnionDues(calculationEmployee, standardOptions);
     const otherStatutory = roundMoney(taxComponentMonthly('other-statutory'));
     const otherDeductions = roundMoney(unionDues + otherStatutory);
     const totalDeductions = roundMoney(paye + pensionEmployee + nhf + loanRecovery + otherDeductions);

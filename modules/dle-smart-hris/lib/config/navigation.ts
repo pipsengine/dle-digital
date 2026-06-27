@@ -188,6 +188,7 @@ export const navigationConfig: NavItem[] = [
     group: 'main',
     permissionKey: 'hris.benefits',
     subItems: makeSubItems('/benefits', [
+      'Benefits Overview',
       'Benefit Plans',
       'Medical Benefits',
       'Insurance Benefits',
@@ -198,7 +199,10 @@ export const navigationConfig: NavItem[] = [
       'Benefit Enrollment',
       'Benefit Claims',
       'Benefit Approval',
+      'Providers & Vendors',
+      'Compliance',
       'Benefit Reports',
+      'Benefits Settings',
     ], 'hris.benefits'),
   },
   {

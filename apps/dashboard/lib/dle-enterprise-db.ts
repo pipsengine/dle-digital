@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import sql from 'mssql';
+import {
+  buildSagePayrollContributionsFromLines,
+  buildSagePayrollDeductionsFromLines,
+  parseSagePayrollLineItems,
+} from '@/lib/sage-payroll-line-parser';
 
 type DraftRecordLike = {
   draftId: string;
@@ -94,6 +99,14 @@ export type DleEmployeeDirectoryRow = {
   taxIdentificationNumber?: string;
   nhfApplicable?: boolean;
   annualRentRelief?: number | null;
+  payeCalculation?: {
+    excludedEarningCodes?: string[];
+    includeRefundInTaxable?: boolean;
+    disablePensionPayeRelief?: boolean;
+    annualRentRelief?: number;
+    usdFlatRate?: number;
+    monthlyPayeOverride?: number;
+  };
   periodSalary: number | null;
   basicSalary: number | null;
   latestAllowances: number | null;
@@ -103,6 +116,7 @@ export type DleEmployeeDirectoryRow = {
   ratePerDay: number | null;
   hoursPerDay: number | null;
   hoursPerPeriod: number | null;
+  sagePayslipPeriod?: string | null;
   sagePayrollEarnings?: Array<{
     code: string;
     name: string;
@@ -936,6 +950,11 @@ const DIRECTORY_EMPLOYEE_SELECT_SQL = `
       payroll.basic_salary,
       payroll.latest_allowances,
       payroll.latest_deductions,
+      payroll.sage_payslip_period,
+      payroll.sage_earning_lines_json,
+      payroll.sage_deduction_lines_json,
+      payroll.sage_contribution_lines_json,
+      payroll.sage_payslip_synced_at,
       payroll.annual_salary,
       payroll.rate_per_hour,
       payroll.rate_per_day,
@@ -1052,6 +1071,10 @@ const mapDirectoryEmployeeRow = (row: any): DleEmployeeDirectoryRow => {
     basicSalary: Number(row.basic_salary || 0) || null,
     latestAllowances: Number(row.latest_allowances || 0) || null,
     latestDeductions: Number(row.latest_deductions || 0) || null,
+    sagePayslipPeriod: str(row.sage_payslip_period) || null,
+    sagePayrollEarnings: parseSagePayrollLineItems(row.sage_earning_lines_json),
+    sagePayrollDeductions: buildSagePayrollDeductionsFromLines(parseSagePayrollLineItems(row.sage_deduction_lines_json)),
+    sagePayrollContributions: buildSagePayrollContributionsFromLines(parseSagePayrollLineItems(row.sage_contribution_lines_json)),
     annualSalary: Number(row.annual_salary || 0) || null,
     ratePerHour: Number(row.rate_per_hour || 0) || null,
     ratePerDay: Number(row.rate_per_day || 0) || null,

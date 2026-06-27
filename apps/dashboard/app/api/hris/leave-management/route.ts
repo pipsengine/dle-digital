@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { formatLeaveAllowanceAmount } from '@/lib/leave-allowance-policy';
 import { auditLeaveAction, dormantLongPolicy, readLeaveManagementPayload, validateLeaveAction, type LeaveActionId } from '@/lib/leave-management-store';
+import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { calculateAnnualLeaveAllowanceAmount, calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
-import { syncSageLeaveAllowanceEvents, upsertApprovedLeaveAllowanceEvent } from '@/lib/payroll-leave-allowance-store';
+import { postLeaveAllowanceOnAnnualLeaveApproval } from '@/lib/payroll-leave-allowance-store';
 
 const jsonOk = (data: any) => NextResponse.json({ status: 'success', data });
 const jsonErr = (status: number, error: string) => NextResponse.json({ status: 'error', error }, { status });
@@ -11,9 +12,30 @@ export async function GET(request: NextRequest) {
   try {
     const role = request.headers.get('x-hris-role') || request.nextUrl.searchParams.get('role');
     const section = request.nextUrl.searchParams.get('section') || 'dashboard';
-    await syncSageLeaveAllowanceEvents();
-    const payload = await readLeaveManagementPayload(section, role);
-    if (request.nextUrl.searchParams.get('format') === 'csv') {
+    const format = request.nextUrl.searchParams.get('format');
+    const payload = await readLeaveManagementPayload(section, role, format === 'allowance-exceptions-csv' ? { forceSync: true } : undefined);
+    if (format === 'allowance-exceptions-csv') {
+      const rows = payload.allowanceExceptions.map((item) => [
+        item.severity,
+        item.employeeId,
+        item.fullName,
+        item.department,
+        item.leaveYear,
+        item.payrollPeriod,
+        item.requestDays,
+        item.approvedAnnualLeaveDays,
+        formatLeaveAllowanceAmount(item.allowanceAmount),
+        item.allowanceStatus,
+        item.eventStatus,
+        item.linkedRequestId || '',
+        item.recommendation,
+      ]);
+      const csv = [['Severity', 'Employee ID', 'Employee', 'Department', 'Leave Year', 'Payroll Period', 'Request Days', 'Approved Annual Days', 'Allowance Amount', 'Allowance Status', 'Event Status', 'Linked Request', 'Recommendation'], ...rows]
+        .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+      return new NextResponse(csv, { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="leave-allowance-exceptions.csv"' } });
+    }
+    if (format === 'csv') {
       const rows = payload.applications.map((item) => [
         item.id,
         item.employeeId,
@@ -43,7 +65,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const action = String(body.action || '') as LeaveActionId;
     const section = String(body.section || 'dashboard');
-    await syncSageLeaveAllowanceEvents();
     const payload = await readLeaveManagementPayload(section, role);
     const validation = validateLeaveAction(action, role, payload, body);
     if (!validation.ok) return jsonErr(validation.status, validation.message);
@@ -57,33 +78,25 @@ export async function POST(request: NextRequest) {
           : null;
       const leaveType = String(body.leaveType || application?.leaveType || 'Annual Leave');
       const days = Number(body.days || application?.days || 0);
-      const period = String(body.payrollPeriod || body.period || application?.startDate?.slice(0, 7) || new Date().toISOString().slice(0, 7));
+      const period = String(body.payrollPeriod || body.period || activePayrollPeriod() || application?.startDate?.slice(0, 7) || new Date().toISOString().slice(0, 7));
       const leaveYear = Number(body.leaveYear || application?.startDate?.slice(0, 4) || period.slice(0, 4) || new Date().getFullYear());
       if (leaveType === 'Annual Leave' && days >= dormantLongPolicy.allowanceMinimumAnnualDays) {
         const employeeSource = await readPayrollEmployees();
         const employee = employeeSource.employees.find((item) => item.employeeId === (application?.employeeId || bodyEmployeeId) || item.employeeCode === (application?.employeeId || bodyEmployeeId));
-        if (employee) {
-          const annualBenefit = calculatePayrollEarnings(employee).annualBenefitLines.find((line) => line.name.toLowerCase().includes('leave') || line.code.toUpperCase().includes('LEAVE'));
-          const allowanceAmount = Number(annualBenefit?.amount || 0) || calculateAnnualLeaveAllowanceAmount(employee);
-          if (allowanceAmount > 0) {
-            try {
-              const event = await upsertApprovedLeaveAllowanceEvent({
-                employee,
-                period,
-                leaveYear,
-                days,
-                amount: allowanceAmount,
-                taxableAmount: annualBenefit?.taxable === false ? 0 : allowanceAmount,
-                source: 'HR Leave Approval',
-                requestId: String(body.record || application?.id || ''),
-                actor: String(body.actor || role),
-                note: `Approved ${days} days Annual Leave; payable once for ${leaveYear}.`,
-              });
-              leaveAllowanceMessage = `Leave allowance ${event.code} posted to ${event.period} payroll.`;
-            } catch (error) {
-              leaveAllowanceMessage = error instanceof Error ? error.message : 'Leave allowance was not posted.';
-            }
-          }
+        if (employee && application) {
+          const result = await postLeaveAllowanceOnAnnualLeaveApproval({
+            employee,
+            applications: payload.applications,
+            leaveType,
+            days,
+            startDate: application.startDate,
+            period,
+            leaveYear,
+            requestId: String(body.record || application.id || ''),
+            source: 'HR Leave Approval',
+            actor: String(body.actor || role),
+          });
+          leaveAllowanceMessage = result.message;
         }
       }
     }

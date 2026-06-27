@@ -7,7 +7,7 @@
     "period": "2026-06",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 591127.13,
@@ -16,15 +16,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2026-06-01T00:00:00.000Z",
     "createdAt": "2026-06-19T17:57:51.963Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-19T17:57:51.963Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-1028"
   },
   {
     "id": "sage-2026-06-459-LEAVEALLOW",
@@ -43,15 +50,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2026-06-01T00:00:00.000Z",
     "createdAt": "2026-06-19T17:57:51.963Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-19T17:57:51.963Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-1027"
   },
   {
     "id": "sage-2026-06-448-LEAVEALLOW",
@@ -61,7 +75,7 @@
     "period": "2026-06",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 172584.09,
@@ -70,15 +84,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2026-06-01T00:00:00.000Z",
     "createdAt": "2026-06-19T17:57:51.963Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-19T17:57:51.963Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-1025"
   },
   {
     "id": "sage-2026-06-446-LEAVEALLOW",
@@ -97,15 +118,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2026-06-01T00:00:00.000Z",
     "createdAt": "2026-06-19T17:57:51.963Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-19T17:57:51.963Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-1002"
   },
   {
     "id": "sage-2026-06-429-LEAVEALLOW",
@@ -115,7 +143,7 @@
     "period": "2026-06",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 11,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 363182.75,
@@ -124,15 +152,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2026-06-01T00:00:00.000Z",
     "createdAt": "2026-06-19T17:57:51.963Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-19T17:57:51.963Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-1026"
   },
   {
     "id": "sage-2026-06-13-LEAVEALLOW",
@@ -142,7 +177,7 @@
     "period": "2026-06",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 324454.45,
@@ -151,15 +186,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2026-06-01T00:00:00.000Z",
     "createdAt": "2026-06-19T17:57:51.963Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-19T17:57:51.963Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-1010"
   },
   {
     "id": "sage-2026-05-L2767-SNR_LEAVETAX",
@@ -177,7 +219,7 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:19:36.326Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
@@ -196,7 +238,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 11,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 246331.85,
@@ -204,16 +246,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1009"
   },
   {
     "id": "sage-2026-05-446-LEAVEALLOW",
@@ -231,16 +280,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1002"
   },
   {
     "id": "sage-2026-05-420-LEAVEALLOW",
@@ -250,21 +306,27 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 339287.39,
     "taxableAmount": 339287.39,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
     "postedAt": "2026-05-01T00:00:00.000Z"
@@ -277,21 +339,27 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 7,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 72150.8,
     "taxableAmount": 72150.8,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
     "postedAt": "2026-05-01T00:00:00.000Z"
@@ -304,7 +372,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 351401.6,
@@ -312,16 +380,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1017"
   },
   {
     "id": "sage-2026-05-388-LEAVEALLOW",
@@ -331,7 +406,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 290206.09,
@@ -339,16 +414,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1005"
   },
   {
     "id": "sage-2026-05-318-LEAVEALLOW",
@@ -366,16 +448,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-977"
   },
   {
     "id": "sage-2026-05-290-LEAVEALLOW",
@@ -385,7 +474,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 200801.08,
@@ -393,16 +482,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-997"
   },
   {
     "id": "sage-2026-05-268-LEAVEALLOW",
@@ -412,21 +508,27 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 196487.35,
     "taxableAmount": 196487.35,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
     "postedAt": "2026-05-01T00:00:00.000Z"
@@ -439,7 +541,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 11,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 286080,
@@ -447,16 +549,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-979"
   },
   {
     "id": "sage-2026-05-92-LEAVEALLOW",
@@ -466,7 +575,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 12,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 506701.41,
@@ -474,16 +583,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1014"
   },
   {
     "id": "sage-2026-05-60-LEAVEALLOW",
@@ -493,7 +609,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 20,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 229431.18,
@@ -501,16 +617,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1011"
   },
   {
     "id": "sage-2026-05-59-LEAVEALLOW",
@@ -520,7 +643,7 @@
     "period": "2026-05",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 235134.2,
@@ -528,16 +651,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-05-01T00:00:00.000Z"
+    "postedAt": "2026-05-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-1007"
   },
   {
     "id": "sage-2026-04-443-LEAVEALLOW",
@@ -547,7 +677,7 @@
     "period": "2026-04",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 11,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 241663.2,
@@ -555,16 +685,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-982"
   },
   {
     "id": "sage-2026-04-384-LEAVEALLOW",
@@ -582,16 +719,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-989"
   },
   {
     "id": "sage-2026-04-289-LEAVEALLOW",
@@ -601,7 +745,7 @@
     "period": "2026-04",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 21,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 349760.07,
@@ -609,16 +753,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-988"
   },
   {
     "id": "sage-2026-04-185-LEAVEALLOW",
@@ -628,7 +779,7 @@
     "period": "2026-04",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 283757.7,
@@ -636,16 +787,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-970"
   },
   {
     "id": "sage-2026-04-182-LEAVEALLOW",
@@ -655,7 +813,7 @@
     "period": "2026-04",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 22,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 178176.05,
@@ -663,16 +821,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-974"
   },
   {
     "id": "sage-2026-04-72-LEAVEALLOW",
@@ -682,7 +847,7 @@
     "period": "2026-04",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 311087.79,
@@ -690,16 +855,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-981"
   },
   {
     "id": "sage-2026-04-61-LEAVEALLOW",
@@ -709,7 +881,7 @@
     "period": "2026-04",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 242840.43,
@@ -717,16 +889,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-04-01T00:00:00.000Z"
+    "postedAt": "2026-04-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-983"
   },
   {
     "id": "sage-2026-03-436-LEAVEALLOW",
@@ -736,7 +915,7 @@
     "period": "2026-03",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 21,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 610326.48,
@@ -744,16 +923,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-03-01T00:00:00.000Z"
+    "postedAt": "2026-03-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-957"
   },
   {
     "id": "sage-2026-03-398-LEAVEALLOW",
@@ -763,21 +949,27 @@
     "period": "2026-03",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 206246.55,
     "taxableAmount": 206246.55,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
     "postedAt": "2026-03-01T00:00:00.000Z"
@@ -798,16 +990,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-03-01T00:00:00.000Z"
+    "postedAt": "2026-03-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-959"
   },
   {
     "id": "sage-2026-03-334-LEAVEALLOW",
@@ -825,16 +1024,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-03-01T00:00:00.000Z"
+    "postedAt": "2026-03-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-965"
   },
   {
     "id": "sage-2026-03-194-LEAVEALLOW",
@@ -852,16 +1058,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-03-01T00:00:00.000Z"
+    "postedAt": "2026-03-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-956"
   },
   {
     "id": "sage-2026-03-185-LEAVEALLOW",
@@ -871,7 +1084,7 @@
     "period": "2026-03",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 283757.7,
@@ -879,16 +1092,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-03-01T00:00:00.000Z"
+    "postedAt": "2026-03-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-970"
   },
   {
     "id": "sage-2026-02-454-LEAVEALLOW",
@@ -898,7 +1118,7 @@
     "period": "2026-02",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 387922.22,
@@ -906,16 +1126,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-02-01T00:00:00.000Z"
+    "postedAt": "2026-02-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-901"
   },
   {
     "id": "sage-2026-02-399-LEAVEALLOW",
@@ -925,7 +1152,7 @@
     "period": "2026-02",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 16,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 163706.01,
@@ -933,16 +1160,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-02-01T00:00:00.000Z"
+    "postedAt": "2026-02-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-927"
   },
   {
     "id": "sage-2026-02-371-LEAVEALLOW",
@@ -952,21 +1186,27 @@
     "period": "2026-02",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 38683.33,
     "taxableAmount": 38683.33,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
     "postedAt": "2026-02-01T00:00:00.000Z"
@@ -987,16 +1227,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-02-01T00:00:00.000Z"
+    "postedAt": "2026-02-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-936"
   },
   {
     "id": "sage-2026-02-181-LEAVEALLOW",
@@ -1014,16 +1261,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-02-01T00:00:00.000Z"
+    "postedAt": "2026-02-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-929"
   },
   {
     "id": "sage-2026-02-43-LEAVEALLOW",
@@ -1033,7 +1287,7 @@
     "period": "2026-02",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 139739.47,
@@ -1041,16 +1295,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-02-01T00:00:00.000Z"
+    "postedAt": "2026-02-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-913"
   },
   {
     "id": "sage-2026-01-50-LEAVEALLOW",
@@ -1060,7 +1321,7 @@
     "period": "2026-01",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 240777.48,
@@ -1068,16 +1329,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-01"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-01-01T00:00:00.000Z"
+    "postedAt": "2026-01-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-908"
   },
   {
     "id": "sage-2026-01-33-LEAVEALLOW",
@@ -1087,7 +1355,7 @@
     "period": "2026-01",
     "leaveYear": 2026,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 257311.12,
@@ -1095,16 +1363,23 @@
     "status": "Paid",
     "source": "Sage Payroll Migration",
     "createdAt": "2026-06-16T12:30:10.367Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:30:10.367Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2026-01"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2026; minimum 10 working days required."
       }
     ],
-    "postedAt": "2026-01-01T00:00:00.000Z"
+    "postedAt": "2026-01-01T00:00:00.000Z",
+    "requestId": "sage-leave-tx-885"
   },
   {
     "id": "sage-2025-12-459-LEAVEALLOW",
@@ -1114,22 +1389,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 24495.06,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1150,7 +1431,7 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:19:36.326Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
@@ -1168,22 +1449,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 1,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 237257.86,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1195,7 +1482,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 22,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 344891.4,
@@ -1204,15 +1491,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-846"
   },
   {
     "id": "sage-2025-12-454-LEAVEALLOW",
@@ -1222,22 +1516,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 164241.26,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1249,22 +1549,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 2,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 275114.96,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1276,22 +1582,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 262697.08,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1303,22 +1615,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 126654.45,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1330,7 +1648,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 219513.45,
@@ -1339,15 +1657,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-836"
   },
   {
     "id": "sage-2025-12-445-LEAVEALLOW",
@@ -1357,22 +1682,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 164146.99,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1384,7 +1715,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 483326.4,
@@ -1393,15 +1724,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-879"
   },
   {
     "id": "sage-2025-12-385-LEAVEALLOW",
@@ -1411,22 +1749,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 8,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 452559.76,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1438,22 +1782,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 1109858.5,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1465,7 +1815,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 137719.37,
@@ -1474,15 +1824,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-860"
   },
   {
     "id": "sage-2025-12-320-LEAVEALLOW",
@@ -1492,7 +1849,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 158465.74,
@@ -1501,15 +1858,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-861"
   },
   {
     "id": "sage-2025-12-316-LEAVEALLOW",
@@ -1519,7 +1883,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 115952.67,
@@ -1528,15 +1892,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-845"
   },
   {
     "id": "sage-2025-12-295-LEAVEALLOW",
@@ -1546,7 +1917,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 121518.92,
@@ -1555,15 +1926,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-813"
   },
   {
     "id": "sage-2025-12-279-LEAVEALLOW",
@@ -1573,7 +1951,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 182680.63,
@@ -1582,15 +1960,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-830"
   },
   {
     "id": "sage-2025-12-272-LEAVEALLOW",
@@ -1600,7 +1985,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 233031.54,
@@ -1609,15 +1994,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-825"
   },
   {
     "id": "sage-2025-12-80-LEAVEALLOW",
@@ -1627,7 +2019,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 200821.02,
@@ -1636,15 +2028,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-816"
   },
   {
     "id": "sage-2025-12-76-LEAVEALLOW",
@@ -1663,15 +2062,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-824"
   },
   {
     "id": "sage-2025-12-59-LEAVEALLOW",
@@ -1681,22 +2087,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 235124.2,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1708,22 +2120,28 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 257311.12,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -1735,7 +2153,7 @@
     "period": "2025-12",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 12,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 154316.67,
@@ -1744,15 +2162,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-12-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-12"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-792"
   },
   {
     "id": "sage-2025-11-453-LEAVEALLOW",
@@ -1762,7 +2187,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 27,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 109863,
@@ -1771,15 +2196,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-839"
   },
   {
     "id": "sage-2025-11-449-LEAVEALLOW",
@@ -1789,7 +2221,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 19,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 714417.91,
@@ -1798,15 +2230,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-782"
   },
   {
     "id": "sage-2025-11-446-LEAVEALLOW",
@@ -1816,7 +2255,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 11,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 425511.83,
@@ -1825,15 +2264,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-811"
   },
   {
     "id": "sage-2025-11-433-LEAVEALLOW",
@@ -1843,7 +2289,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 20,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 442090.46,
@@ -1852,15 +2298,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-785"
   },
   {
     "id": "sage-2025-11-420-LEAVEALLOW",
@@ -1870,7 +2323,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 12,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 827607.57,
@@ -1879,15 +2332,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-659"
   },
   {
     "id": "sage-2025-11-321-LEAVEALLOW",
@@ -1897,7 +2357,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 137719.37,
@@ -1906,15 +2366,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-784"
   },
   {
     "id": "sage-2025-11-315-LEAVEALLOW",
@@ -1924,7 +2391,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 194730.51,
@@ -1933,15 +2400,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-838"
   },
   {
     "id": "sage-2025-11-61-LEAVEALLOW",
@@ -1951,7 +2425,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 242840.43,
@@ -1960,15 +2434,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-870"
   },
   {
     "id": "sage-2025-11-45-LEAVEALLOW",
@@ -1978,7 +2459,7 @@
     "period": "2025-11",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 289021.74,
@@ -1987,15 +2468,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-11-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-11"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-814"
   },
   {
     "id": "sage-2025-10-439-LEAVEALLOW",
@@ -2005,22 +2493,28 @@
     "period": "2025-10",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 562673.56,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-10-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-10"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2032,7 +2526,7 @@
     "period": "2025-10",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 156567.43,
@@ -2041,15 +2535,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-10-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-10"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-807"
   },
   {
     "id": "sage-2025-10-384-LEAVEALLOW",
@@ -2059,7 +2560,7 @@
     "period": "2025-10",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 11,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 235644.95,
@@ -2068,15 +2569,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-10-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-10"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-765"
   },
   {
     "id": "sage-2025-09-415-LEAVEALLOW",
@@ -2095,15 +2603,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-09-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-09"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-717"
   },
   {
     "id": "sage-2025-09-72-LEAVEALLOW",
@@ -2113,7 +2628,7 @@
     "period": "2025-09",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 311087.79,
@@ -2122,15 +2637,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-09-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-09"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-886"
   },
   {
     "id": "sage-2025-09-44-LEAVEALLOW",
@@ -2140,7 +2662,7 @@
     "period": "2025-09",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 278730.53,
@@ -2149,15 +2671,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-09-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-09"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-720"
   },
   {
     "id": "sage-2025-09-40-LEAVEALLOW",
@@ -2167,7 +2696,7 @@
     "period": "2025-09",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 139351.01,
@@ -2176,15 +2705,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-09-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-09"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-733"
   },
   {
     "id": "sage-2025-08-440-LEAVEALLOW",
@@ -2194,22 +2730,28 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 630246.75,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2221,7 +2763,7 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 610326.48,
@@ -2230,15 +2772,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-699"
   },
   {
     "id": "sage-2025-08-435-LEAVEALLOW",
@@ -2248,22 +2797,28 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 108768.22,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2275,7 +2830,7 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 17,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 465962.92,
@@ -2284,15 +2839,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-732"
   },
   {
     "id": "sage-2025-08-409-LEAVEALLOW",
@@ -2302,22 +2864,28 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 464173.39,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2338,15 +2906,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-688"
   },
   {
     "id": "sage-2025-08-309-LEAVEALLOW",
@@ -2356,7 +2931,7 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 94995.74,
@@ -2365,15 +2940,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-835"
   },
   {
     "id": "sage-2025-08-290-LEAVEALLOW",
@@ -2383,7 +2965,7 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 200801.08,
@@ -2392,15 +2974,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-710"
   },
   {
     "id": "sage-2025-08-232-LEAVEALLOW",
@@ -2410,22 +2999,28 @@
     "period": "2025-08",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 229339.48,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-08-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-08"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2437,22 +3032,28 @@
     "period": "2025-07",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 255979.23,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-07-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-07"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2464,7 +3065,7 @@
     "period": "2025-07",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 541155.12,
@@ -2473,15 +3074,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-07-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-07"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-677"
   },
   {
     "id": "sage-2025-07-428-LEAVEALLOW",
@@ -2491,22 +3099,28 @@
     "period": "2025-07",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 363182.75,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-07-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-07"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2518,22 +3132,28 @@
     "period": "2025-07",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 462701.41,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-07-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-07"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2545,22 +3165,28 @@
     "period": "2025-07",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 424869.72,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-07-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-07"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2572,7 +3198,7 @@
     "period": "2025-07",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 13,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 295102.21,
@@ -2581,15 +3207,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-07-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-07"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-687"
   },
   {
     "id": "sage-2025-06-444-LEAVEALLOW",
@@ -2599,22 +3232,28 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 177969,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2626,7 +3265,7 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 17,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 557259.19,
@@ -2635,15 +3274,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-601"
   },
   {
     "id": "sage-2025-06-399-LEAVEALLOW",
@@ -2653,7 +3299,7 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 163706.01,
@@ -2662,15 +3308,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-647"
   },
   {
     "id": "sage-2025-06-392-LEAVEALLOW",
@@ -2680,7 +3333,7 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 19,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 351401.6,
@@ -2689,15 +3342,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-661"
   },
   {
     "id": "sage-2025-06-383-LEAVEALLOW",
@@ -2707,22 +3367,28 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 68012.49,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2734,7 +3400,7 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 162662.58,
@@ -2743,15 +3409,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-704"
   },
   {
     "id": "sage-2025-06-13-LEAVEALLOW",
@@ -2761,7 +3434,7 @@
     "period": "2025-06",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 324454.45,
@@ -2770,15 +3443,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-06-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-06"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-627"
   },
   {
     "id": "sage-2025-05-434-LEAVEALLOW",
@@ -2788,22 +3468,28 @@
     "period": "2025-05",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 327724.41,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-05-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2815,22 +3501,28 @@
     "period": "2025-05",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 75130.37,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-05-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2842,22 +3534,28 @@
     "period": "2025-05",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 375797.35,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-05-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -2869,7 +3567,7 @@
     "period": "2025-05",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 23,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 286080,
@@ -2878,15 +3576,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-05-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-613"
   },
   {
     "id": "sage-2025-05-92-LEAVEALLOW",
@@ -2896,7 +3601,7 @@
     "period": "2025-05",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 15,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 506701.41,
@@ -2905,15 +3610,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-05-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-628"
   },
   {
     "id": "sage-2025-05-51-LEAVEALLOW",
@@ -2923,7 +3635,7 @@
     "period": "2025-05",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 16,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 367431.49,
@@ -2932,15 +3644,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-05-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-05"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-607"
   },
   {
     "id": "sage-2025-04-429-LEAVEALLOW",
@@ -2950,7 +3669,7 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 24,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 363182.75,
@@ -2959,15 +3678,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-665"
   },
   {
     "id": "sage-2025-04-421-LEAVEALLOW",
@@ -2977,22 +3703,28 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 93126.32,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3004,22 +3736,28 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 206246.55,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3040,7 +3778,7 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:19:36.326Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
@@ -3058,7 +3796,7 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 321230.88,
@@ -3067,15 +3805,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-841"
   },
   {
     "id": "sage-2025-04-331-LEAVEALLOW",
@@ -3085,22 +3830,28 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 328837.7,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3112,7 +3863,7 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 189890.35,
@@ -3121,15 +3872,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-872"
   },
   {
     "id": "sage-2025-04-182-LEAVEALLOW",
@@ -3139,7 +3897,7 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 178176.05,
@@ -3148,15 +3906,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-848"
   },
   {
     "id": "sage-2025-04-60-LEAVEALLOW",
@@ -3166,7 +3931,7 @@
     "period": "2025-04",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 229431.18,
@@ -3175,15 +3940,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-04-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-04"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-602"
   },
   {
     "id": "sage-2025-03-397-LEAVEALLOW",
@@ -3193,22 +3965,28 @@
     "period": "2025-03",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 172445.52,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-03-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3229,15 +4007,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-03-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-538"
   },
   {
     "id": "sage-2025-03-318-LEAVEALLOW",
@@ -3247,7 +4032,7 @@
     "period": "2025-03",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 25,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 135311.03,
@@ -3256,15 +4041,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-03-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-753"
   },
   {
     "id": "sage-2025-03-50-LEAVEALLOW",
@@ -3274,7 +4066,7 @@
     "period": "2025-03",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 240777.48,
@@ -3283,15 +4075,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-03-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-496"
   },
   {
     "id": "sage-2025-03-43-LEAVEALLOW",
@@ -3301,7 +4100,7 @@
     "period": "2025-03",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 18,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 139739.47,
@@ -3310,15 +4109,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-03-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-03"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-539"
   },
   {
     "id": "sage-2025-02-431-LEAVEALLOW",
@@ -3328,22 +4134,28 @@
     "period": "2025-02",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 605111.04,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3355,22 +4167,28 @@
     "period": "2025-02",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 41527.78,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3382,22 +4200,28 @@
     "period": "2025-02",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 23707.6,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3418,15 +4242,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-751"
   },
   {
     "id": "sage-2025-02-371-LEAVEALLOW",
@@ -3436,22 +4267,28 @@
     "period": "2025-02",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 0,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 373938.89,
     "taxableAmount": 0,
-    "status": "Paid",
+    "status": "Reversed",
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:28:23.395Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
     ]
   },
@@ -3472,15 +4309,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-482"
   },
   {
     "id": "sage-2025-02-185-LEAVEALLOW",
@@ -3490,7 +4334,7 @@
     "period": "2025-02",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 30,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 283757.7,
@@ -3499,15 +4343,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-02-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-02"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-701"
   },
   {
     "id": "sage-2025-01-289-LEAVEALLOW",
@@ -3517,7 +4368,7 @@
     "period": "2025-01",
     "leaveYear": 2025,
     "leaveType": "Annual Leave",
-    "days": 10,
+    "days": 13,
     "code": "LEAVEALLOW",
     "description": "Leave Allowance",
     "amount": 349760.07,
@@ -3526,15 +4377,22 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-01-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-01"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-474"
   },
   {
     "id": "sage-2025-01-268-LEAVEALLOW",
@@ -3553,14 +4411,21 @@
     "source": "Sage Payroll Migration",
     "postedAt": "2025-01-01T00:00:00.000Z",
     "createdAt": "2026-06-16T12:38:59.468Z",
-    "updatedAt": "2026-06-25T14:51:08.325Z",
+    "updatedAt": "2026-06-26T22:52:49.816Z",
     "audit": [
       {
         "at": "2026-06-16T12:38:59.468Z",
         "actor": "Sage Payroll Migration",
         "action": "Imported paid leave allowance",
         "note": "LEAVEALLOW 2025-01"
+      },
+      {
+        "at": "2026-06-26T22:28:23.395Z",
+        "actor": "Leave Allowance Policy",
+        "action": "Reversed ineligible leave allowance",
+        "note": "Only 0 approved annual leave day(s) recorded for 2025; minimum 10 working days required."
       }
-    ]
+    ],
+    "requestId": "sage-leave-tx-871"
   }
 ]

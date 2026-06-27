@@ -8,6 +8,11 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { NotificationCenter } from '@/components/layout/notification-center';
 import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
+import { EssDashboardView, EssRightPanel } from './ess-dashboard-view';
+import { EssLeaveDashboardView, type EssLeavePayload, type LeaveWorkspaceTab } from './ess-leave-dashboard-view';
+import { EssProfileDashboardView, type EssProfilePayload } from './ess-profile-dashboard-view';
+import { EssPayrollDashboardView, type EssPayrollPayload } from './ess-payroll-dashboard-view';
+import { ESS_NAV_ITEMS, EssPortalShell, EssMobileNav, type EssTab } from './ess-portal-shell';
 import {
   Activity,
   ArrowRight,
@@ -105,7 +110,7 @@ type Payload = {
   anniversaries: Array<{ id: string; fullName: string; years: number; date: string }>;
   events: Array<{ id: string; label: string; date: string; type: string }>;
   documents: Array<{ id: string; title: string; category: string; version: string; status: string }>;
-  profileSections: Array<{ id: string; label: string; status: string; approvalRequired: boolean; fields: string[] }>;
+  profileSections: Array<{ id: string; label: string; status: string; approvalRequired: boolean; fields: Array<{ label: string; value: string }> }>;
   leave: {
     balances: SimpleRecord[];
     calendar: SimpleRecord[];
@@ -141,9 +146,20 @@ type Payload = {
   requests: EssRequest[];
   integrations: string[];
   analytics: Array<{ label: string; value: number; unit: string }>;
+  dashboardAnalytics?: {
+    activityByCategory: Array<{ label: string; value: number; color: string }>;
+    totalActivities: number;
+    hrInsights: {
+      attendanceTrend: { trend: number; series: number[] };
+      leaveUtilization: { trend: number; series: number[] };
+      payrollSummary: { netPay: number; label: string };
+      requestsCompleted: { count: number; trend: number };
+      trainingProgress: { percent: number };
+    };
+  };
 };
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
-type Tab = 'dashboard' | 'profile' | 'leave' | 'time' | 'payroll' | 'documents' | 'performance' | 'learning' | 'claims' | 'loans' | 'services' | 'travel' | 'assets' | 'communication' | 'workflow' | 'exit' | 'security';
+type Tab = EssTab;
 
 const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
 const money2Fmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -228,25 +244,7 @@ const metricSurface = (tone: string) => {
   return 'border-slate-200 bg-white';
 };
 
-const navItems: Array<{ id: Tab; label: string; icon: any }> = [
-  { id: 'dashboard', label: 'Dashboard', icon: Activity },
-  { id: 'profile', label: 'Profile', icon: UserRound },
-  { id: 'leave', label: 'Leave', icon: CalendarCheck },
-  { id: 'time', label: 'Time', icon: Clock },
-  { id: 'payroll', label: 'Payslip', icon: Banknote },
-  { id: 'documents', label: 'Documents', icon: FileArchive },
-  { id: 'performance', label: 'Performance', icon: Target },
-  { id: 'learning', label: 'Learning', icon: GraduationCap },
-  { id: 'claims', label: 'Claims', icon: WalletCards },
-  { id: 'loans', label: 'Loans', icon: Landmark },
-  { id: 'services', label: 'Services', icon: ClipboardList },
-  { id: 'travel', label: 'Travel', icon: Plane },
-  { id: 'assets', label: 'Assets', icon: BriefcaseBusiness },
-  { id: 'communication', label: 'Comms', icon: Megaphone },
-  { id: 'workflow', label: 'Workflow', icon: ClipboardList },
-  { id: 'exit', label: 'Exit', icon: FileText },
-  { id: 'security', label: 'Security', icon: ShieldCheck },
-];
+const navItems = ESS_NAV_ITEMS;
 
 function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: any; tone: string }) {
   return (
@@ -809,7 +807,7 @@ const calcLeaveDays = (from: string, to: string, basis: string) => {
   return days;
 };
 
-function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string }) => Promise<void>; saving?: boolean }) {
+function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initialNow }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string }) => Promise<void>; saving?: boolean; initialNow: string }) {
   const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
   const [leaveType, setLeaveType] = useState('Annual Leave');
   const [startDate, setStartDate] = useState('');
@@ -840,53 +838,32 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
     ...(!ack ? ['Policy acknowledgement is required before submission.'] : []),
   ];
 
-  const metricRows = [
-    ['Annual Leave Balance', payload?.leave.balances.find((x) => x.type === 'Annual Leave')?.balance ?? 0, 'Current entitlement'],
-    ['Sick Leave Balance', payload?.leave.balances.find((x) => x.type === 'Sick Leave')?.balance ?? 0, 'Working days'],
-    ['Casual Leave Balance', payload?.leave.balances.find((x) => x.type === 'Casual Leave')?.balance ?? 0, 'Working days'],
-    ['Compassionate Balance', payload?.leave.balances.find((x) => x.type === 'Compassionate Leave')?.balance ?? 0, 'Working days'],
-    ['Exam Leave Balance', payload?.leave.balances.find((x) => x.type === 'Exam Leave')?.balance ?? 0, 'Working days'],
-    ['Maternity Balance', payload?.leave.balances.find((x) => x.type === 'Maternity Leave')?.balance ?? 0, 'Calendar days'],
-    ['Carry Forward', payload?.leave.balances.find((x) => x.type === 'Carry Forward Leave')?.balance ?? 0, 'Expires 31 Mar'],
-    ['Pending Applications', payload?.widgets.requests.pending ?? 0, 'Workflow queue'],
-    ['Approved This Year', payload?.widgets.requests.approved ?? 0, 'Approved requests'],
-    ['Leave Allowance', allowanceEligible ? 'Eligible' : 'Conditional', '10+ annual days'],
-    ['Next Scheduled Leave', String(payload?.leave.calendar[0]?.from || '-'), 'Approved schedule'],
-    ['Return-to-Work Pending', 0, 'No pending action'],
-  ];
+  const openApply = (type?: string) => {
+    if (type) setLeaveType(type);
+    setActive('Apply Leave');
+  };
 
   return (
     <section className="space-y-4">
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {leaveTabs.map((tab) => (
-          <button key={tab} type="button" onClick={() => setActive(tab)} className={`h-10 shrink-0 rounded-lg px-3 text-xs font-black ${active === tab ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{tab}</button>
-        ))}
-      </div>
-
-      {active === 'Leave Dashboard' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-4">
-            {metricRows.map(([label, value, detail]) => <MetricCard key={String(label)} label={String(label)} value={String(value)} detail={String(detail)} icon={CalendarCheck} tone="bg-emerald-100 text-emerald-700" />)}
+      {active === 'Leave Dashboard' ? (
+        <EssLeaveDashboardView
+          payload={payload as EssLeavePayload | null}
+          initialNow={initialNow}
+          activeTab={active as LeaveWorkspaceTab}
+          onTabChange={(tab) => setActive(tab as LeaveTab)}
+          onApplyLeave={openApply}
+        />
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-[20px] border border-[#E5E7EB] bg-white p-2 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
+            <div className="flex min-w-max gap-1">
+              {leaveTabs.map((tab) => (
+                <button key={tab} type="button" onClick={() => setActive(tab)} className={`inline-flex h-10 shrink-0 items-center rounded-[14px] px-4 text-[13px] font-semibold ${active === tab ? 'bg-[#2563EB] text-white' : 'text-[#475569] hover:bg-[#F8FAFC]'}`}>{tab}</button>
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {(payload?.leave.balances || []).map((item) => (
-              <button key={String(item.id)} type="button" onClick={() => { setLeaveType(String(item.type)); setActive('Apply Leave'); }} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-emerald-300 hover:bg-emerald-50/40">
-                <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-black text-slate-950">{String(item.type)}</p><p className="mt-1 text-xs font-semibold text-slate-500">{String(item.policyNote)}</p></div><span className={`rounded-full px-2 py-1 text-[11px] font-black ${statusTone(String(item.eligibilityStatus))}`}>{String(item.eligibilityStatus)}</span></div>
-                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                  <p><span className="font-black text-slate-500">Entitlement:</span> {String(item.entitlement)} {String(item.basis).toLowerCase()}</p>
-                  <p><span className="font-black text-slate-500">Used:</span> {String(item.used)} days</p>
-                  <p><span className="font-black text-slate-500">Pending:</span> {String(item.pending)} days</p>
-                  <p><span className="font-black text-slate-500">Balance:</span> {String(item.balance)} days</p>
-                </div>
-                {item.expiryDate ? <p className="mt-2 text-xs font-bold text-amber-700">Expires: {String(item.expiryDate)}</p> : null}
-                <p className="mt-3 text-xs font-bold text-blue-700">{String(item.allowanceStatus)}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {active === 'Apply Leave' && (
+          {active === 'Apply Leave' && (
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-black text-slate-950">Guided Leave Application</h2>
@@ -923,13 +900,15 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving }: { pa
             </button>
           </div>
         </section>
-      )}
+          )}
 
       {active === 'My Applications' && <DataList rows={(payload?.requests.filter((item) => item.category === 'Leave').map((item) => ({ id: item.id, title: item.title, status: item.status, submittedAt: item.submittedAt, updatedAt: item.updatedAt, reliever: item.relieverName || 'Reliever not configured', workflow: item.workflow?.map((step) => `${step.stage}: ${step.status}`).join(' | ') || item.approvers.join(', ') })) || [])} titleKey="title" subtitleKeys={['status', 'submittedAt', 'updatedAt', 'reliever', 'workflow']} />}
       {active === 'Leave Calendar' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Calendar" rows={payload?.leave.calendar || []} keys={['label', 'from', 'to', 'status', 'scope']} /><InfoListLike title="Notifications" rows={payload?.leave.notifications || []} keys={['title', 'channel', 'status']} /></section>}
       {active === 'Leave History' && <DataList rows={payload?.leave.history || []} titleKey="type" subtitleKeys={['from', 'to', 'days', 'approvalStage', 'allowanceStatus']} />}
       {active === 'Approvals' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Approval Workflow" rows={payload?.leave.workflows || []} keys={['stage', 'owner', 'status', 'sla']} /><InfoListLike title="Manager/HR Queue" rows={payload?.leave.approvals || []} keys={['employee', 'type', 'days', 'stage', 'status', 'conflict']} /></section>}
       {active === 'Policy & Entitlement' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Payroll & Allowance" rows={payload?.leave.allowance || []} keys={['label', 'value', 'status']} /><InfoListLike title="Reports & RBAC" rows={[...(payload?.leave.reports || []), ...(payload?.leave.security || [])]} keys={['title', 'role', 'access', 'format', 'status']} /></section>}
+        </>
+      )}
     </section>
   );
 }
@@ -960,6 +939,16 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [showSecurityBanner, setShowSecurityBanner] = useState(true);
+
+  const navigateTab = (next: Tab) => {
+    setTab(next);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', next);
+      window.history.replaceState(null, '', url.toString());
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -1076,233 +1065,52 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
   const selectedLoanProduct = payload?.loanManagement.products.find((product) => product.id === loanProductId) || null;
 
   return (
-    <div className="min-h-dvh bg-slate-50">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <div className="relative h-9 w-24 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-white sm:h-10 sm:w-32">
-              <Image src="/brand/dorman-long-logo.jpg" alt="Dorman Long" fill sizes="160px" className="object-contain p-1" priority />
-            </div>
-            <div className="min-w-0 border-l border-slate-200 pl-2 sm:pl-3">
-              <h1 className="truncate text-sm font-black text-slate-950 sm:text-lg">Employee Self-Service Portal</h1>
-              <p className="truncate text-xs font-semibold text-slate-500">{employee ? `${employee.fullName} - ${employee.department}` : 'Loading employee workspace'}</p>
-            </div>
-          </div>
-          <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 lg:justify-end">
-            <Link href="/" aria-label="Go to enterprise landing page" className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 text-xs font-extrabold text-slate-700 hover:bg-slate-50 sm:px-3">
-              <Building2 className="h-4 w-4" /><span className="hidden sm:inline">Enterprise Home</span>
-            </Link>
-            <select value={locale} onChange={(e) => setLocale(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 outline-none">
-              {['en-NG', 'fr-FR', 'ar', 'es-ES'].map((item) => <option key={item}>{item}</option>)}
-            </select>
-            <NotificationCenter scope="notifications" />
-            <NotificationCenter scope="messages" />
-            <EnterpriseUserProfile
-              context="ess"
-              name={employee?.fullName}
-              role={employee?.jobTitle || 'Employee Self-Service'}
-              employeeCode={employeeCode}
-              department={employee?.department}
-              photoUrl={employee?.photoUrl}
-              hasPhoto={employee?.hasPhoto}
-              profileHref="/workforce-portal?tab=profile"
-            />
-            <button type="button" onClick={() => void load()} disabled={loading} aria-label="Refresh ESS data" className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-2 text-xs font-extrabold text-white disabled:cursor-wait disabled:opacity-60 sm:px-3">
-              <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /><span className="hidden sm:inline">Refresh</span>
-            </button>
-          </div>
-        </div>
-      </header>
+    <EssPortalShell
+      tab={tab}
+      onTabChange={navigateTab}
+      locale={locale}
+      onLocaleChange={setLocale}
+      loading={loading}
+      onRefresh={() => void load()}
+      generatedAt={payload?.generatedAt}
+      department={employee?.department}
+      employee={employee}
+      rightPanel={tab === 'dashboard' ? <EssRightPanel payload={payload} onNavigate={navigateTab} /> : undefined}
+    >
+      <EssMobileNav tab={tab} onTabChange={navigateTab} />
 
-      <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm lg:sticky lg:top-20 lg:flex lg:max-h-[calc(100dvh-6rem)] lg:flex-col lg:overflow-hidden">
-          <nav className="flex gap-1 overflow-x-auto pb-1 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-1 lg:overflow-y-auto lg:overflow-x-hidden lg:pb-0 lg:pr-1">
-            {navItems.map((item) => (
-              <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-left text-xs font-black transition-colors lg:h-9 lg:w-full ${tab === item.id ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-50'}`}>
-                <item.icon className="h-4 w-4 shrink-0" /><span className="whitespace-nowrap">{item.label}</span>
-              </button>
-            ))}
-          </nav>
-          <div className="mt-3 hidden shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 p-3 lg:block">
-            <p className="text-xs font-black uppercase tracking-normal text-slate-500">Access Context</p>
-            <div className="mt-3 space-y-2 text-xs font-semibold text-slate-600">
-              <div className="flex items-center gap-2"><LockKeyhole className="h-4 w-4 text-emerald-600" />RBAC Employee</div>
-              <div className="flex items-center gap-2"><Fingerprint className="h-4 w-4 text-emerald-600" />MFA enabled</div>
-              <div className="flex items-center gap-2"><Languages className="h-4 w-4 text-blue-600" />{locale}</div>
-            </div>
-          </div>
-        </aside>
+      {error && <div className="mb-4 rounded-[16px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{error}</div>}
+      {toast && <div className="mb-4 rounded-[16px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{toast}</div>}
 
-        <main className="min-w-0 space-y-4">
-          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div>}
-          {toast && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">{toast}</div>}
+      {tab === 'dashboard' && (
+        <EssDashboardView
+          payload={payload}
+          initialNow={initialNow}
+          onNavigate={navigateTab}
+          showSecurityBanner={showSecurityBanner}
+          onDismissSecurity={() => setShowSecurityBanner(false)}
+        />
+      )}
 
-          <section className="overflow-hidden rounded-lg border border-blue-200 bg-blue-50/40 shadow-sm">
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px]">
-              <div className="p-4 sm:p-5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-black text-blue-800">Standalone ESS Module</span>
-                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-black text-emerald-800">Cloud-ready</span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-700">Loaded {stableDateTime(payload?.generatedAt || initialNow)}</span>
-                </div>
-                <h2 className="mt-4 text-xl font-black tracking-tight text-slate-950 sm:text-2xl">My HR workspace</h2>
-                <p className="mt-2 max-w-4xl text-sm font-semibold leading-6 text-slate-600">
-                  Secure access to profile, leave, time, payroll, documents, learning, claims, loans, travel, assets, communications, workflow tracking, and exit services.
-                </p>
-                <div className="mt-4 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-                  <button type="button" onClick={() => setTab('services')} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-black text-white hover:bg-blue-700 sm:justify-start"><Send className="h-4 w-4" />New Request</button>
-                  <button type="button" onClick={() => setTab('loans')} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-4 text-sm font-black text-cyan-900 hover:bg-white sm:justify-start"><Landmark className="h-4 w-4" />Apply for Loan</button>
-                  <button type="button" onClick={() => setTab('payroll')} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 text-sm font-black text-violet-900 hover:bg-white sm:justify-start"><Download className="h-4 w-4" />Payslips</button>
-                </div>
-              </div>
-              <div className="border-t border-blue-200 bg-white/80 p-4 sm:p-5 lg:border-l lg:border-t-0">
-                <div className="flex items-center gap-3">
-                  <EmployeeAvatar
-                    fullName={employee?.fullName || 'Employee'}
-                    employeeCode={employeeCode}
-                    photoUrl={employee?.photoUrl}
-                    hasPhoto={employee?.hasPhoto}
-                    tryPhoto={Boolean(employeeCode)}
-                    size="lg"
-                    className="rounded-lg ring-0"
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-black text-slate-950">{employee?.fullName || 'Employee'}</p>
-                    <p className="truncate text-xs font-semibold text-slate-500">{employee?.jobTitle}</p>
-                  </div>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  {[
-                    ['Grade', employee?.salaryGrade],
-                    ['Location', employee?.location],
-                    ['Payroll', employee?.payrollGroup],
-                    ['Service', `${employee?.yearsOfService || 0} yrs`],
-                  ].map(([label, value]) => {
-                    const tone = areaTone(String(label));
-                    return (
-                    <div key={label} className={`rounded-lg border p-3 ${tone.item}`}>
-                      <p className="text-[11px] font-black uppercase tracking-normal text-slate-500">{label}</p>
-                      <p className="mt-1 truncate text-xs font-bold text-slate-800">{value || 'N/A'}</p>
-                    </div>
-                  );
-                  })}
-                </div>
-              </div>
-            </div>
-          </section>
+      {tab === 'profile' && (
+        <EssProfileDashboardView
+          payload={payload as EssProfilePayload | null}
+          initialNow={initialNow}
+          onNavigate={navigateTab}
+        />
+      )}
 
-          {tab === 'dashboard' && widgets && (
-            <>
-              <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-                <MetricCard label="Leave Balance" value={`${widgets.leave.balance} days`} detail={`${widgets.leave.used}/${widgets.leave.entitlement} used`} icon={CalendarCheck} tone="bg-emerald-100 text-emerald-700" />
-                <MetricCard label="Attendance" value={`${widgets.attendance.monthRate}%`} detail={`${widgets.attendance.overtimeHours} overtime hours`} icon={Clock} tone="bg-blue-100 text-blue-700" />
-                <MetricCard label="Monthly Pay" value={money(widgets.payroll.monthlyPay)} detail={`${money(widgets.payroll.deductions)} deductions`} icon={Banknote} tone="bg-violet-100 text-violet-700" />
-                <MetricCard label="Requests" value={String(widgets.requests.pending)} detail={`${widgets.requests.approved} approved, ${widgets.requests.total} total`} icon={ClipboardList} tone="bg-amber-100 text-amber-700" />
-                <MetricCard label="Loan Balance" value={money(widgets.loans.outstanding)} detail={`${widgets.loans.applications} loan applications`} icon={Landmark} tone="bg-cyan-100 text-cyan-700" />
-              </section>
+      {tab === 'payroll' && widgets && (
+        <EssPayrollDashboardView
+          payload={payload as EssPayrollPayload | null}
+          onNavigate={navigateTab}
+        />
+      )}
 
-              <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                <Section title="Personalized Quick Actions">
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                    {[
-                      ['Apply Leave', CalendarCheck, 'leave'],
-                      ['Clock In / Out', Fingerprint, 'time'],
-                      ['Submit Claim', WalletCards, 'services'],
-                      ['Request Letter', FileText, 'services'],
-                      ['Enroll Training', GraduationCap, 'services'],
-                      ['Report Asset', BriefcaseBusiness, 'services'],
-                      ['Travel Request', Plane, 'services'],
-                      ['Track Workflow', ClipboardList, 'services'],
-                    ].map(([label, Icon, target]) => {
-                      const tone = areaTone(String(label));
-                      return (
-                      <button key={String(label)} type="button" onClick={() => setTab(target as Tab)} className={`flex min-h-20 flex-col items-start justify-between rounded-lg border p-3 text-left hover:bg-white ${tone.item}`}>
-                        <Icon className={`h-5 w-5 ${tone.icon}`} />
-                        <span className="text-xs font-black text-slate-800">{String(label)}</span>
-                      </button>
-                    );
-                    })}
-                  </div>
-                </Section>
-                <Section title="Announcements & Events" action={<Bell className="h-4 w-4 text-slate-400" />}>
-                  <div className="space-y-3">
-                    {payload?.notifications.slice(0, 2).map((item) => (
-                      <div key={item.id} className="flex items-start justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50 p-3">
-                        <div><p className="text-sm font-black text-slate-900">{item.title}</p><p className="mt-1 text-xs font-semibold text-slate-500">{item.type} - {dateText(item.createdAt)}</p></div>
-                        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-black text-blue-800">{item.status}</span>
-                      </div>
-                    ))}
-                    {payload?.announcements.map((item) => (
-                      <div key={item.id} className={`flex items-start justify-between gap-3 rounded-lg border p-3 ${areaTone(item.channel).item}`}>
-                        <div><p className="text-sm font-black text-slate-900">{item.title}</p><p className="mt-1 text-xs font-semibold text-slate-500">{item.channel} - {dateText(item.publishedAt)}</p></div>
-                        <span className="rounded-full bg-blue-100 px-2 py-1 text-[11px] font-black text-blue-800">{item.priority}</span>
-                      </div>
-                    ))}
-                    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                      {payload?.birthdays.map((item) => <div key={item.id} className="rounded-lg bg-emerald-50 p-3 text-xs font-bold text-emerald-800">Birthday: {item.fullName} - {dateText(item.date)}</div>)}
-                      {payload?.anniversaries.map((item) => <div key={item.id} className="rounded-lg bg-amber-50 p-3 text-xs font-bold text-amber-800">Anniversary: {item.fullName} - {item.years} yrs</div>)}
-                    </div>
-                    {payload?.events.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-3 px-1 text-sm">
-                        <span className="font-bold text-slate-700">{item.label}</span>
-                        <span className="text-xs font-semibold text-slate-500">{dateText(item.date)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </Section>
-              </section>
-            </>
-          )}
-
-          {tab === 'profile' && (
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-              <Section title="My Profile">
-                <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-                  <EmployeeAvatar
-                    fullName={employee?.fullName || 'Employee'}
-                    employeeCode={employeeCode}
-                    photoUrl={employee?.photoUrl}
-                    hasPhoto={employee?.hasPhoto}
-                    tryPhoto={Boolean(employeeCode)}
-                    size="xl"
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate text-lg font-black text-slate-950">{employee?.fullName || 'Employee'}</p>
-                    <p className="truncate text-sm font-semibold text-slate-600">{employee?.jobTitle}</p>
-                    <p className="mt-1 text-xs font-semibold text-slate-500">{employeeCode} · {employee?.department}</p>
-                  </div>
-                </div>
-              </Section>
-              <Section title="Profile Management">
-                <div className="space-y-3">
-                  {(payload?.profileSections || []).map((section) => (
-                    <div key={section.id} className={`rounded-lg border p-3 ${areaTone(section.label).item}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div><p className="text-sm font-black text-slate-900">{section.label}</p><p className="mt-1 text-xs font-semibold text-slate-500">{section.status}{section.approvalRequired ? ' - approval workflow applies' : ''}</p></div>
-                        <ChevronRight className="h-4 w-4 text-slate-400" />
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {section.fields.map((field) => <span key={field} className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">{field}</span>)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Section>
-              <Section title="Profile Actions & Approval Controls">
-                <ActionGrid items={[
-                  ['Update personal data', UserRound, 'Routes to HR'],
-                  ['Change contact details', Smartphone, 'Routes to HR'],
-                  ['Upload profile photo', FileArchive, 'Approval required'],
-                  ['Update bank details', Landmark, 'Encrypted workflow'],
-                  ['Add qualification', GraduationCap, 'Attach evidence'],
-                  ['Add certification', BadgeCheck, 'Expiry tracked'],
-                ]} />
-              </Section>
-            </section>
-          )}
-
+      {tab !== 'dashboard' && tab !== 'profile' && tab !== 'payroll' && (
+        <div className="space-y-4">
           {tab === 'leave' && widgets && (
-            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} saving={saving} />
+            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} saving={saving} initialNow={initialNow} />
           )}
 
           {tab === 'time' && widgets && (
@@ -1325,14 +1133,6 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
                   <DataList rows={payload?.attendance.shifts || []} titleKey="name" subtitleKeys={['start', 'end', 'location']} statusKey="name" />
                   <DataList rows={payload?.attendance.timesheets || []} titleKey="week" subtitleKeys={['hours', 'overtime']} />
                 </div>
-              </Section>
-            </section>
-          )}
-
-          {tab === 'payroll' && widgets && (
-            <section className="space-y-4">
-              <Section title="Payroll Self-Service">
-                <PayslipWorkspace payload={payload} employee={employee} />
               </Section>
             </section>
           )}
@@ -1571,6 +1371,22 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
             </section>
           )}
 
+          {tab === 'reports' && (
+            <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <Section title="My Reports">
+                <DataList rows={payload?.reports || []} titleKey="title" subtitleKeys={['format']} />
+              </Section>
+              <Section title="Report Downloads">
+                <ActionGrid items={[
+                  ['Leave statement', FileText, 'PDF / Excel'],
+                  ['Payroll history', Banknote, 'PDF / Excel'],
+                  ['Training transcript', GraduationCap, 'PDF'],
+                  ['Claim status', WalletCards, 'Excel'],
+                ]} />
+              </Section>
+            </section>
+          )}
+
           {tab === 'security' && (
             <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               <Section title="Enterprise Security & Access">
@@ -1613,8 +1429,8 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
             </section>
           )}
 
-        </main>
-      </div>
-    </div>
+        </div>
+      )}
+    </EssPortalShell>
   );
 }

@@ -515,3 +515,86 @@ export const readLiveAttendancePunches = async (requestedDate?: string): Promise
   cachedLiveRead(`attendance-punches:${requestedDate || 'today'}`, () => readLiveAttendancePunchesRaw(requestedDate));
 
 export const toLivePunchTimestamp = (date: string, time: string) => displayDateTime(date.replace(/-/g, ''), time.replace(':', '').padEnd(6, '0'));
+
+export type EmployeeAttendanceSummary = {
+  monthRate: number;
+  lateArrivals: number;
+  overtimeHours: number;
+  remoteDays: number;
+  records: Array<{ date: string; clockIn: string; clockOut: string; status: string; source: string }>;
+};
+
+const normalizeBiometricCode = (value: string) => value.trim().toUpperCase().replace(/_/g, '');
+
+export async function readEmployeeAttendanceMonthSummary(employeeCodes: string[]): Promise<EmployeeAttendanceSummary> {
+  const codes = [...new Set(employeeCodes.map(normalizeBiometricCode).filter(Boolean))];
+  const empty: EmployeeAttendanceSummary = { monthRate: 0, lateArrivals: 0, overtimeHours: 0, remoteDays: 0, records: [] };
+  if (!codes.length) return empty;
+
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}01`;
+  const nextMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 1));
+  const monthEnd = `${nextMonth.getFullYear()}${String(nextMonth.getMonth() + 1).padStart(2, '0')}01`;
+
+  let pool: mysql.Pool | null = null;
+  try {
+    pool = getPool();
+    const [rows] = await pool.query<Array<RowDataPacket & { uniqueCode: string | null; punchDate: string; firstPunch: string | null; lastPunch: string | null; punchCount: number }>>(
+      `
+      SELECT
+        u.C_Unique AS uniqueCode,
+        punches.punchDate,
+        punches.firstPunch,
+        punches.lastPunch,
+        punches.punchCount
+      FROM tuser u
+      INNER JOIN (
+        SELECT L_UID, C_Date AS punchDate, MIN(C_Time) AS firstPunch, MAX(C_Time) AS lastPunch, COUNT(*) AS punchCount
+        FROM tenter
+        WHERE C_Date >= ? AND C_Date < ?
+        GROUP BY L_UID, C_Date
+      ) punches ON punches.L_UID = u.L_ID
+      WHERE UPPER(REPLACE(u.C_Unique, '_', '')) IN (?)
+      ORDER BY punches.punchDate DESC
+      `,
+      [monthStart, monthEnd, codes],
+    );
+
+    const records = rows.map((row) => {
+      const schedule = scheduleForShift(resolveShift(row.firstPunch));
+      const minutesLate = calculateMinutesLate(row.firstPunch, schedule.start);
+      const status = resolveStatus(row.firstPunch, minutesLate);
+      return {
+        date: displayDate(row.punchDate),
+        clockIn: displayTime(row.firstPunch) || '—',
+        clockOut: row.punchCount > 1 ? displayTime(row.lastPunch) || '—' : '—',
+        status,
+        source: 'Biometric',
+      };
+    });
+
+    let workingDaysElapsed = 0;
+    for (let day = 1; day <= now.getDate(); day += 1) {
+      const date = new Date(Date.UTC(now.getFullYear(), now.getMonth(), day));
+      const weekday = date.getUTCDay();
+      if (weekday !== 0 && weekday !== 6) workingDaysElapsed += 1;
+    }
+
+    const presentDays = records.filter((item) => item.status === 'Present' || item.status === 'Late').length;
+    const lateArrivals = records.filter((item) => item.status === 'Late').length;
+    const overtimeHours = rows.reduce((sum, row) => sum + calculateOvertime(row.firstPunch, row.lastPunch), 0);
+    const monthRate = workingDaysElapsed ? Math.round((presentDays / workingDaysElapsed) * 1000) / 10 : 0;
+
+    return {
+      monthRate,
+      lateArrivals,
+      overtimeHours: Math.round(overtimeHours * 10) / 10,
+      remoteDays: 0,
+      records: records.slice(0, 10),
+    };
+  } catch {
+    return empty;
+  } finally {
+    if (pool) await pool.end().catch(() => undefined);
+  }
+}

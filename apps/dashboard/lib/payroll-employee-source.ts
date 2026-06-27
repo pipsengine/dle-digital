@@ -6,6 +6,10 @@ import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-stor
 import { isGenericPayrollGrade } from '@/lib/payroll-earnings-engine';
 import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines, readSagePayrollEmployeeBankDetails } from '@/lib/sage-people-payroll-store';
+import {
+  buildSagePayrollContributionsFromLines,
+  buildSagePayrollDeductionsFromLines,
+} from '@/lib/sage-payroll-line-parser';
 
 export type PayrollEmployeeSource = {
   employees: DleEmployeeDirectoryRow[];
@@ -302,9 +306,13 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
       const bankDetail = bankByEmployeeId.get(Number(sage.employeeId));
       const pensionProvider = str(sage.pensionProvider) || jsonValue(sage.sageEmployeeDetailJson, ['PensionFundAdministrator', 'PensionFundAdmin', 'PensionProvider', 'PFA', 'PFADescription', 'RetirementFundName']);
       const pensionPin = str(sage.pensionPin) || jsonValue(sage.sageEmployeeDetailJson, ['PensionNo', 'PensionNumber', 'PensionPIN', 'PFANumber', 'RSAPIN', 'RsaPin']);
-      const earningLines = sageLineItems(sage.latestEarningLinesJson);
-      const deductionLines = sageLineItems(sage.latestDeductionLinesJson);
-      const contributionLines = sageLineItems(sage.latestContributionLinesJson);
+      const liveEarningLines = sageLineItems(sage.latestEarningLinesJson);
+      const liveDeductionLines = sageLineItems(sage.latestDeductionLinesJson);
+      const liveContributionLines = sageLineItems(sage.latestContributionLinesJson);
+      const earningLines = liveEarningLines.length ? liveEarningLines : (employee.sagePayrollEarnings || []);
+      const deductionLines = liveDeductionLines.length ? liveDeductionLines : (employee.sagePayrollDeductions?.lines || []);
+      const contributionLines = liveContributionLines.length ? liveContributionLines : (employee.sagePayrollContributions?.lines || []);
+      const persistedDeductions = buildSagePayrollDeductionsFromLines(deductionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line));
       const hoursPerDay = moneyFrom(employee.hoursPerDay, sage.hoursPerDay, 8) || 8;
       const hoursPerPeriod = moneyFrom(employee.hoursPerPeriod, sage.hoursPerPeriod) || hoursPerDay * 22;
       const isDailyRate = isDailyRatePayrollEmployee(employee);
@@ -341,7 +349,7 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
         hoursPerDay,
         hoursPerPeriod,
         sagePayrollEarnings: earningLines,
-        sagePayrollDeductions: {
+        sagePayrollDeductions: liveDeductionLines.length ? {
           paye: moneyOrNull(sage.latestPaye),
           pensionEmployee: moneyOrNull(sage.latestPensionEmployee),
           nhf: moneyOrNull(sage.latestNhf),
@@ -349,14 +357,14 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
           totalDeductions: moneyOrNull(sage.latestTotalDeductions),
           netPay: moneyOrNull(sage.latestNetPay),
           lines: deductionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line),
-        },
-        sagePayrollContributions: {
+        } : persistedDeductions,
+        sagePayrollContributions: liveContributionLines.length ? {
           pensionEmployer: moneyOrNull(sage.latestPensionEmployer),
           nsitf: moneyOrNull(sage.latestNsitf),
           itf: moneyOrNull(sage.latestItf),
           totalEmployerContributions: moneyOrNull(sage.latestTotalEmployerContributions),
           lines: contributionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line),
-        },
+        } : buildSagePayrollContributionsFromLines(contributionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line)),
       };
     });
   } catch {

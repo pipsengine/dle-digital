@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import LeaveCommandCenter from './LeaveCommandCenter';
 import LeaveTransactionsCommandCenter from './LeaveTransactionsCommandCenter';
+import LeaveDrilldownModal, { type LeaveDrilldownPanel, type LeaveDrilldownRow } from './LeaveDrilldownModal';
 import {
   AlertTriangle,
   Archive,
@@ -62,6 +63,10 @@ type AppRecord = {
   auditCount: number;
   createdAt: string;
   updatedAt: string;
+  allowanceStatus?: string;
+  allowanceEligible?: boolean;
+  allowancePaid?: boolean;
+  approvedAnnualLeaveDays?: number;
 };
 type BalanceRecord = {
   employeeId: string;
@@ -96,6 +101,22 @@ type LeaveTypeRule = {
   encashmentRule: string;
   allowanceRule: string;
 };
+type AllowanceExceptionRecord = {
+  id: string;
+  severity: 'Critical' | 'Review' | 'Pending';
+  employeeId: string;
+  fullName: string;
+  department: string;
+  leaveYear: number;
+  payrollPeriod: string;
+  approvedAnnualLeaveDays: number;
+  requestDays: number;
+  allowanceAmount: number;
+  allowanceStatus: string;
+  eventStatus: string;
+  linkedRequestId?: string;
+  recommendation: string;
+};
 type AuditEntry = { id: string; at: string; user: string; role: string; action: string; record: string; oldValue: string | null; newValue: string | null; comments?: string; reason?: string };
 type SectionArea = 'Dashboard' | 'Transactions' | 'Planning & Balances' | 'Administration' | 'Reports & Analytics';
 type SectionConfig = { id: string; label: string; area: SectionArea; description: string; actions: string[]; controls: string[]; reports?: string[] };
@@ -117,6 +138,8 @@ type Payload = {
     recallRequests: number;
     cancellationRequests: number;
     exceptionCount: number;
+    allowanceExceptionCount: number;
+    allowancePendingPayrollCount: number;
   };
   current: {
     leaveStatus: string;
@@ -132,6 +155,7 @@ type Payload = {
   actions: LeaveAction[];
   applications: AppRecord[];
   balances: BalanceRecord[];
+  allowanceExceptions: AllowanceExceptionRecord[];
   leaveTypes: LeaveTypeRule[];
   calendar: Array<Record<string, string | number>>;
   blockedPeriods: Array<Record<string, string>>;
@@ -141,6 +165,17 @@ type Payload = {
   auditTrail: AuditEntry[];
   integrations: Array<Record<string, string>>;
   operationalSections: SectionConfig[];
+  drilldowns?: {
+    totalEmployees: LeaveDrilldownRow[];
+    onLeaveToday: LeaveDrilldownRow[];
+    returningToday: LeaveDrilldownRow[];
+    pendingApprovals: LeaveDrilldownRow[];
+    upcomingLeave: LeaveDrilldownRow[];
+    leaveUtilization: LeaveDrilldownRow[];
+    leaveLiability: LeaveDrilldownRow[];
+    carryForwardProcessing: LeaveDrilldownRow[];
+    leaveAllowanceExceptions: LeaveDrilldownRow[];
+  };
 };
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 
@@ -194,22 +229,32 @@ const actionIcon = (id: string) => {
 
 const applyLeaveAction = (actions: LeaveAction[]) => actions.find((item) => item.id === 'apply') || actions.find((item) => item.id === 'create');
 
-function HubMetricCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: any; tone: LeaveTone }) {
+function HubMetricCard({ label, value, detail, icon: Icon, tone, onClick }: { label: string; value: string; detail: string; icon: any; tone: LeaveTone; onClick?: () => void }) {
   const styles = toneStyles[tone];
-  return (
-    <div className={`rounded-xl border bg-white p-4 shadow-sm ${styles.card}`}>
+  const className = `rounded-xl border bg-white p-4 text-left shadow-sm transition-colors ${styles.card} ${onClick ? 'cursor-pointer hover:border-[#2563EB]/40 hover:bg-blue-50/40' : ''}`;
+  const content = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
           <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
           <p className="mt-1 text-xs text-slate-600">{detail}</p>
+          {onClick ? <p className="mt-2 text-xs font-semibold text-[#2563EB]">Click to view details →</p> : null}
         </div>
         <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${styles.icon}`}>
           <Icon className="h-5 w-5" />
         </span>
       </div>
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    );
+  }
+  return <div className={className}>{content}</div>;
 }
 
 function MetricCard({ label, value, detail, icon: Icon, tone }: { label: string; value: string; detail: string; icon: any; tone: LeaveTone }) {
@@ -295,6 +340,13 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [auditOpen, setAuditOpen] = useState(false);
+  const [drilldown, setDrilldown] = useState<LeaveDrilldownPanel>(null);
+  const [drilldownQuery, setDrilldownQuery] = useState('');
+
+  const openDrilldown = (panel: LeaveDrilldownPanel) => {
+    setDrilldownQuery('');
+    setDrilldown(panel);
+  };
 
   const activeSection = useMemo(() => payload?.operationalSections.find((item) => item.id === section) || payload?.operationalSections[0], [payload?.operationalSections, section]);
   const activeWorkspace = useMemo(() => workspaceForSection(section, payload), [payload, section]);
@@ -398,6 +450,14 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
               <>
                 <button
                   type="button"
+                  onClick={() => navigateSection('leave-allowance-exceptions')}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 hover:bg-red-100"
+                >
+                  <AlertTriangle className="h-4 w-4" />
+                  Allowance Exceptions{payload?.summary.allowanceExceptionCount ? ` (${payload.summary.allowanceExceptionCount})` : ''}
+                </button>
+                <button
+                  type="button"
                   onClick={() => navigateSection('leave-reports')}
                   className="inline-flex items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
@@ -466,11 +526,66 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
         {toast ? <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800">{toast}</div> : null}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <HubMetricCard label="Total Employees" value={number(payload?.summary.totalEmployees)} detail={isTransactionsHub ? 'Multi-company workforce scope' : 'Workforce in scope'} icon={Users} tone="blue" />
-          <HubMetricCard label="On Leave Today" value={number(payload?.summary.employeesOnLeave)} detail={isTransactionsHub ? 'Employees currently on leave' : `${number(payload?.summary.returningToday)} returning today`} icon={CalendarClock} tone="green" />
-          <HubMetricCard label="Pending Approvals" value={number(payload?.summary.pendingApprovals)} detail={isTransactionsHub ? 'Requests awaiting approval' : `${number(payload?.summary.pendingApplications)} applications`} icon={ClipboardCheck} tone={(payload?.summary.pendingApprovals || 0) ? 'amber' : 'green'} />
-          <HubMetricCard label="Leave Utilization" value={`${number(payload?.summary.leaveUtilizationPct)}%`} detail={isTransactionsHub ? 'Used against annual balance' : 'Used against accrued balance'} icon={FileSpreadsheet} tone="violet" />
-          <HubMetricCard label="Leave Liability" value={compactMoney(payload?.summary.leaveLiability)} detail={isTransactionsHub ? 'Current leave exposure' : 'Accrued leave exposure'} icon={Banknote} tone="red" />
+          <HubMetricCard
+            label="Total Employees"
+            value={number(payload?.summary.totalEmployees)}
+            detail={isTransactionsHub ? 'Multi-company workforce scope' : 'Active workforce in scope'}
+            icon={Users}
+            tone="blue"
+            onClick={() => openDrilldown({
+              title: 'Total Employees',
+              note: 'Active employees from DLE_Enterprise HRIS employee directory.',
+              rows: payload?.drilldowns?.totalEmployees || [],
+            })}
+          />
+          <HubMetricCard
+            label="On Leave Today"
+            value={number(payload?.summary.employeesOnLeave)}
+            detail={isTransactionsHub ? 'Employees currently on approved leave today' : `${number(payload?.summary.returningToday)} returning today`}
+            icon={CalendarClock}
+            tone="green"
+            onClick={() => openDrilldown({
+              title: 'On Leave Today',
+              note: 'Approved or completed leave applications where today falls within the leave period, plus employees marked On Leave in HRIS.',
+              rows: payload?.drilldowns?.onLeaveToday || [],
+            })}
+          />
+          <HubMetricCard
+            label="Pending Approvals"
+            value={number(payload?.summary.pendingApprovals)}
+            detail={isTransactionsHub ? 'Requests awaiting approval' : `${number(payload?.summary.pendingApplications)} applications`}
+            icon={ClipboardCheck}
+            tone={(payload?.summary.pendingApprovals || 0) ? 'amber' : 'green'}
+            onClick={() => openDrilldown({
+              title: 'Pending Approvals',
+              note: 'Leave applications with Submitted, Under Review, or Draft status in DLE_Enterprise.',
+              rows: payload?.drilldowns?.pendingApprovals || [],
+            })}
+          />
+          <HubMetricCard
+            label="Leave Utilization"
+            value={`${number(payload?.summary.leaveUtilizationPct)}%`}
+            detail={isTransactionsHub ? 'Annual leave used against accrued balance' : 'Annual leave used against accrued balance'}
+            icon={FileSpreadsheet}
+            tone="violet"
+            onClick={() => openDrilldown({
+              title: 'Leave Utilization Detail',
+              note: 'Per-employee annual leave used vs accrued balances from hris.LeaveBalances.',
+              rows: payload?.drilldowns?.leaveUtilization || [],
+            })}
+          />
+          <HubMetricCard
+            label="Leave Liability"
+            value={compactMoney(payload?.summary.leaveLiability)}
+            detail={isTransactionsHub ? 'Annual leave liability exposure' : 'Annual leave accrued exposure'}
+            icon={Banknote}
+            tone="red"
+            onClick={() => openDrilldown({
+              title: 'Leave Liability Detail',
+              note: 'Annual leave liability values from hris.LeaveBalances (current balance exposure).',
+              rows: payload?.drilldowns?.leaveLiability || [],
+            })}
+          />
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-[#E5E7EB] bg-white p-2 shadow-sm">
@@ -523,6 +638,7 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
           <LeaveCommandCenter
             payload={payload}
             onNavigate={navigateSection}
+            onOpenDrilldown={openDrilldown}
             onAction={(actionId) => {
               const action = payload?.actions.find((item) => item.id === actionId);
               if (action) void runAction(action);
@@ -551,12 +667,22 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
         {!isDashboard && section === 'leave-calendar' ? <CalendarView payload={payload} /> : null}
         {!isDashboard && section === 'leave-balances' ? <BalanceView rows={filteredBalances} /> : null}
         {!isDashboard && section === 'leave-types' ? <LeaveTypeView payload={payload} /> : null}
+        {!isDashboard && section === 'leave-allowance-exceptions' ? <LeaveAllowanceExceptionsView rows={payload?.allowanceExceptions || []} /> : null}
         {!isDashboard && ['recalls', 'cancellations', 'encashments', 'team-leave-planner', 'holiday-calendar', 'leave-policies', 'leave-accruals', 'carry-forward-processing', 'balance-adjustments', 'leave-year-end-processing', 'leave-reports', 'leave-utilization', 'leave-liability', 'leave-trends', 'approval-reports'].includes(section) ? (
           <OperationalView payload={payload} section={section} />
         ) : null}
       </div>
 
       {auditOpen ? <AuditPanel rows={payload?.auditTrail || []} onClose={() => setAuditOpen(false)} /> : null}
+      <LeaveDrilldownModal
+        panel={drilldown}
+        query={drilldownQuery}
+        onQueryChange={setDrilldownQuery}
+        onClose={() => {
+          setDrilldown(null);
+          setDrilldownQuery('');
+        }}
+      />
     </div>
   );
 }
@@ -568,7 +694,7 @@ function ApplicationView({ rows }: { rows: AppRecord[] }) {
       <TableHeader title="Leave Applications" detail="Draft, submitted, review, approved, rejected, withdrawn, cancelled, and completed requests." />
       <div className="overflow-x-auto">
         <table className="min-w-[1180px] w-full divide-y divide-slate-100">
-          <thead className="bg-slate-50"><tr>{['Request', 'Employee', 'Type', 'Dates', 'Days', 'Balance', 'Stage', 'Compliance', 'Exceptions'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>)}</tr></thead>
+          <thead className="bg-slate-50"><tr>{['Request', 'Employee', 'Type', 'Dates', 'Days', 'Balance', 'Stage', 'Compliance', 'Allowance', 'Exceptions'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>)}</tr></thead>
           <tbody className="divide-y divide-slate-100 bg-white">{rows.map((item) => <ApplicationRow key={item.id} item={item} />)}</tbody>
         </table>
       </div>
@@ -644,6 +770,70 @@ function LeaveTypeView({ payload }: { payload: Payload | null }) {
   );
 }
 
+function LeaveAllowanceExceptionsView({ rows }: { rows: AllowanceExceptionRecord[] }) {
+  const critical = rows.filter((item) => item.severity === 'Critical');
+  const pending = rows.filter((item) => item.severity === 'Pending');
+  return (
+    <section className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+          <p className="text-xs font-black uppercase tracking-wide text-red-700">Policy Exceptions</p>
+          <p className="mt-2 text-3xl font-black text-red-900">{critical.length}</p>
+          <p className="mt-1 text-sm font-medium text-red-800">Reversed or ineligible payroll leave allowance postings.</p>
+        </div>
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-xs font-black uppercase tracking-wide text-amber-700">Pending Payroll</p>
+          <p className="mt-2 text-3xl font-black text-amber-900">{pending.length}</p>
+          <p className="mt-1 text-sm font-medium text-amber-800">Approved annual leave eligible for leave allowance posting.</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-black uppercase tracking-wide text-slate-500">Export</p>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/api/hris/leave-management?format=allowance-exceptions-csv'; }}
+            className="mt-3 inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Download CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <TableHeader title="Leave Allowance Exceptions Report" detail="Validated against approved annual leave days and the 10-working-day leave allowance policy." />
+        <div className="overflow-x-auto">
+          <table className="min-w-[1280px] w-full divide-y divide-slate-100">
+            <thead className="bg-slate-50">
+              <tr>
+                {['Severity', 'Employee', 'Department', 'Period', 'Request Days', 'Approved Days', 'Amount', 'Status', 'Linked Request', 'Recommendation'].map((header) => (
+                  <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {rows.length ? rows.map((item) => (
+                <tr key={item.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3"><Chip value={item.severity} /></td>
+                  <td className="px-4 py-3"><div className="font-black text-slate-950">{item.fullName}</div><div className="text-xs font-semibold text-slate-500">{item.employeeId}</div></td>
+                  <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.department}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.payrollPeriod}<div className="text-xs font-semibold text-slate-500">{item.leaveYear}</div></td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-900">{item.requestDays}</td>
+                  <td className="px-4 py-3 text-sm font-black text-slate-900">{item.approvedAnnualLeaveDays}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.allowanceAmount > 0 ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 }).format(item.allowanceAmount) : '—'}</td>
+                  <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.allowanceStatus}</td>
+                  <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.linkedRequestId || '—'}</td>
+                  <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.recommendation}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan={10} className="px-4 py-8 text-center text-sm font-semibold text-slate-500">No leave allowance exceptions or pending payroll items.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function OperationalView({ payload, section }: { payload: Payload | null; section: string }) {
   const config = payload?.operationalSections.find((item) => item.id === section);
   const rows = (config?.reports?.length ? config.reports.map((item) => ({ control: item, value: 'Report-ready' })) : config?.controls.map((item) => ({ control: item, value: 'Configured' }))) || [];
@@ -661,6 +851,7 @@ function ApplicationRow({ item }: { item: AppRecord }) {
       <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.availableBalance} available, {item.balanceImpact} impact</td>
       <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.stage}</td>
       <td className="px-4 py-3"><Chip value={item.policyComplianceStatus} /></td>
+      <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.allowanceStatus || 'Not eligible'}</td>
       <td className="px-4 py-3 text-xs font-semibold text-slate-600">{item.exceptions.length ? item.exceptions.join(', ') : 'None'}</td>
     </tr>
   );

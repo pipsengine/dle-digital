@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { calculatePayrollEarnings, resolvePayrollEarningProfile, type PayrollEarningsOptions } from '@/lib/payroll-earnings-engine';
+import { defaultNhfApplicableForEmployee } from '@/lib/payroll-tax-engine';
 
 export type FundStatus = 'Draft' | 'Active' | 'Retired';
 export type FundPayer = 'Employee' | 'Employer';
@@ -105,9 +106,7 @@ const eligible = (rule: StatutoryFundRule, input: StatutoryFundInput) => {
   if (!rule.enabled) return false;
   const profileId = resolvePayrollEarningProfile(input.employee);
   if (rule.id === 'nhf' && String(profileId).startsWith('contract-')) return false;
-  if (rule.id === 'nhf' && input.employee.nhfApplicable === false) return false;
-  if (rule.id === 'nhf' && input.employee.nhfApplicable !== true && isNhfExcludedGrade(input.employee)) return false;
-  if (rule.id === 'nhf' && input.employee.nhfApplicable !== true && profileId === 'senior-permanent') return false;
+  if (rule.id === 'nhf' && !defaultNhfApplicableForEmployee(input.employee)) return false;
   const type = compact(input.employee.employmentType || input.employee.staffCategory || input.employee.employeeCategory).toLowerCase();
   if (rule.eligibleEmploymentTypes.length && !rule.eligibleEmploymentTypes.some((item) => type.includes(item.toLowerCase()))) return false;
   if (Number(rule.minimumMonthlyIncome || 0) > 0 && input.monthlyBasePay < Number(rule.minimumMonthlyIncome)) return false;
