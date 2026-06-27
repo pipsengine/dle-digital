@@ -108,8 +108,8 @@ export type TimesheetHeader = {
   currentApprover?: string | null;
 };
 
-export type TimesheetWorkflowStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR';
-export type TimesheetWorkflowDecision = 'Submitted' | 'Approved' | 'Acknowledged' | 'Rejected' | 'Returned';
+export type TimesheetWorkflowStage = 'Supervisor' | 'Project Manager' | 'Cost Control' | 'HR' | 'Payroll';
+export type TimesheetWorkflowDecision = 'Submitted' | 'Approved' | 'Acknowledged' | 'Rejected' | 'Returned' | 'Overtime Booked' | 'Overtime Correction Posted';
 export type TimesheetWorkflowEvent = {
   stage: TimesheetWorkflowStage;
   decision: TimesheetWorkflowDecision;

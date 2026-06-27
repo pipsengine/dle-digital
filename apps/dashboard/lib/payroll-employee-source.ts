@@ -279,6 +279,14 @@ const sageLineItems = (raw: string | null | undefined) => {
   }
 };
 
+const sageStoredLineItems = (lines: Array<{ code: string; name: string; amount: number; ytdTotal?: number | null; taxableAmount?: number | null }>) =>
+  lines.map((line) => ({
+    code: line.code,
+    name: line.name,
+    amount: line.amount,
+    ytdTotal: line.ytdTotal ?? null,
+  }));
+
 const maybeEnrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
   if (!SAGE_PAYROLL_ENRICH_ENABLED) return employees;
   return enrichEmployeesFromSagePayroll(employees);
@@ -312,7 +320,7 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
       const earningLines = liveEarningLines.length ? liveEarningLines : (employee.sagePayrollEarnings || []);
       const deductionLines = liveDeductionLines.length ? liveDeductionLines : (employee.sagePayrollDeductions?.lines || []);
       const contributionLines = liveContributionLines.length ? liveContributionLines : (employee.sagePayrollContributions?.lines || []);
-      const persistedDeductions = buildSagePayrollDeductionsFromLines(deductionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line));
+      const persistedDeductions = buildSagePayrollDeductionsFromLines(sageStoredLineItems(deductionLines));
       const hoursPerDay = moneyFrom(employee.hoursPerDay, sage.hoursPerDay, 8) || 8;
       const hoursPerPeriod = moneyFrom(employee.hoursPerPeriod, sage.hoursPerPeriod) || hoursPerDay * 22;
       const isDailyRate = isDailyRatePayrollEmployee(employee);
@@ -356,15 +364,15 @@ const enrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow
           other: moneyOrNull(sage.latestOtherDeductions),
           totalDeductions: moneyOrNull(sage.latestTotalDeductions),
           netPay: moneyOrNull(sage.latestNetPay),
-          lines: deductionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line),
+          lines: sageStoredLineItems(deductionLines),
         } : persistedDeductions,
         sagePayrollContributions: liveContributionLines.length ? {
           pensionEmployer: moneyOrNull(sage.latestPensionEmployer),
           nsitf: moneyOrNull(sage.latestNsitf),
           itf: moneyOrNull(sage.latestItf),
           totalEmployerContributions: moneyOrNull(sage.latestTotalEmployerContributions),
-          lines: contributionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line),
-        } : buildSagePayrollContributionsFromLines(contributionLines.map(({ taxableAmount: _taxableAmount, ...line }) => line)),
+          lines: sageStoredLineItems(contributionLines),
+        } : buildSagePayrollContributionsFromLines(sageStoredLineItems(contributionLines)),
       };
     });
   } catch {

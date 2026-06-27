@@ -173,6 +173,7 @@ export type LeavePayload = {
     encashmentRequests: number;
     recallRequests: number;
     cancellationRequests: number;
+    exceptionCount: number;
     allowanceExceptionCount: number;
     allowancePendingPayrollCount: number;
   };

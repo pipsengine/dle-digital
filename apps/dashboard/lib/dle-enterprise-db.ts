@@ -99,6 +99,7 @@ export type DleEmployeeDirectoryRow = {
   pensionPin?: string;
   taxIdentificationNumber?: string;
   nhfApplicable?: boolean;
+  annualRent?: number | null;
   annualRentRelief?: number | null;
   payeCalculation?: {
     excludedEarningCodes?: string[];

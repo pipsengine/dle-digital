@@ -221,7 +221,7 @@ const buildStructures = (records: PayrollRecord[]): StructureRow[] => {
       name: meta.name,
       code: meta.code,
       type: structureTypeForProfile(profileId),
-      status: exceptions > 0 ? 'Under Review' : 'Active',
+      status: (exceptions > 0 ? 'Under Review' : 'Active') as StructureRow['status'],
       effectiveFrom: '01 Jan 2026',
       effectiveTo: '31 Dec 9999',
       grades,

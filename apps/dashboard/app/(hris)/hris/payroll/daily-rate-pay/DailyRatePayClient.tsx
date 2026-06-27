@@ -130,6 +130,12 @@ const defaultPeriod = () => {
 
 const PAGE_SIZE = 10;
 
+const timesheetStatusLabel = (record: DailyRateRecord) => {
+  if (record.payrollReadyDays > 0 || record.payrollReadyHours > 0) return 'Payroll Ready';
+  if (record.daysWorked > 0 || record.bookedHours > 0 || record.attendanceHours > 0) return 'Submitted';
+  return 'Pending';
+};
+
 const readinessScore = (record: DailyRateRecord) => {
   let score = 100;
   if (!record.ratePerDay && !record.ratePerHour) score -= 40;
@@ -757,7 +763,7 @@ export default function DailyRatePayClient({ initialNow }: { initialNow?: string
                   <p className="text-xs text-[#64748B]">{selected.payrollGroup} · {selected.paymentRun}</p>
                 </AccordionSection>
                 <AccordionSection title="Approval History" count={2}>
-                  <p className="text-xs text-[#64748B]">Timesheet status: {selected.timesheetStatus || 'Pending'}</p>
+                  <p className="text-xs text-[#64748B]">Timesheet status: {timesheetStatusLabel(selected)}</p>
                 </AccordionSection>
                 <AccordionSection title="Notes">
                   <ReadinessIssueList issues={selected.issues} tone={statusTone(selected.status)} />

@@ -1020,13 +1020,13 @@ export const calculateContractDayRateEarnings = (input: {
   const ratePerHour = ratePerDay / 8;
   const weekdayDays = Math.max(0, num(input.weekdayDays));
   const weekdayBase = weekdayDays * ratePerDay;
-  const lines = [
-    { code: 'JCWEEKDAY', name: 'WEEKDAY EARNING', taxable: true, amount: roundMoney(weekdayBase * 0.45), calculation: '(No of days worked * Day rate) * 45%' },
-    { code: 'JCWEEKDAY_NT', name: 'WEEKDAY ALLOWANCE NON TAX', taxable: false, amount: roundMoney(weekdayBase * 0.55), calculation: '(No of days worked * Day rate) * 55%' },
-    { code: 'WEEKDAYOVT', name: 'WEEKDAY OVT EARNING', taxable: true, amount: roundMoney(ratePerHour * Math.max(0, num(input.weekdayOvertimeHours)) * 1.5), calculation: '(Day rate / 8) * hours worked * 1.5' },
-    { code: 'PUBHOL', name: 'PUBLIC HOLIDAY EARNING', taxable: true, amount: roundMoney(ratePerHour * Math.max(0, num(input.publicHolidayHours)) * 2), calculation: '(Day rate / 8) * hours worked * 2' },
-    { code: 'SATEARN', name: 'SATURDAY EARNING', taxable: true, amount: roundMoney(ratePerHour * Math.max(0, num(input.saturdayHours)) * 1.5), calculation: '(Day rate / 8) * hours worked * 1.5' },
-    { code: 'SUNDAYEARN', name: 'SUNDAY EARNING', taxable: true, amount: roundMoney(ratePerHour * Math.max(0, num(input.sundayHours)) * 2), calculation: '(Day rate / 8) * hours worked * 2' },
+  const lines: PayrollEarningLine[] = [
+    { code: 'JCWEEKDAY', name: 'WEEKDAY EARNING', taxable: true, percentOfGross: 0.45, amount: roundMoney(weekdayBase * 0.45), calculation: '(No of days worked * Day rate) * 45%' },
+    { code: 'JCWEEKDAY_NT', name: 'WEEKDAY ALLOWANCE NON TAX', taxable: false, percentOfGross: 0.55, amount: roundMoney(weekdayBase * 0.55), calculation: '(No of days worked * Day rate) * 55%' },
+    { code: 'WEEKDAYOVT', name: 'WEEKDAY OVT EARNING', taxable: true, percentOfGross: 0, amount: roundMoney(ratePerHour * Math.max(0, num(input.weekdayOvertimeHours)) * 1.5), calculation: '(Day rate / 8) * hours worked * 1.5' },
+    { code: 'PUBHOL', name: 'PUBLIC HOLIDAY EARNING', taxable: true, percentOfGross: 0, amount: roundMoney(ratePerHour * Math.max(0, num(input.publicHolidayHours)) * 2), calculation: '(Day rate / 8) * hours worked * 2' },
+    { code: 'SATEARN', name: 'SATURDAY EARNING', taxable: true, percentOfGross: 0, amount: roundMoney(ratePerHour * Math.max(0, num(input.saturdayHours)) * 1.5), calculation: '(Day rate / 8) * hours worked * 1.5' },
+    { code: 'SUNDAYEARN', name: 'SUNDAY EARNING', taxable: true, percentOfGross: 0, amount: roundMoney(ratePerHour * Math.max(0, num(input.sundayHours)) * 2), calculation: '(Day rate / 8) * hours worked * 2' },
   ].filter((line) => line.amount > 0);
   return {
     profileId: 'contract-day-rate' as const,

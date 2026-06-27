@@ -38,6 +38,7 @@ import {
   type TimesheetApprovalDecision,
   type TimesheetApprovalStep,
   type TimesheetEntryMode,
+  type TimesheetWorkflowEvent,
   type TimesheetRecord,
   type TimesheetStatus,
   type Project,
@@ -1397,16 +1398,14 @@ export async function PATCH(request: Request) {
 
       const preservedHeader = { ...header };
       if (retro && !isTimesheetEditableStatus(header.status)) {
-        preservedHeader.workflowHistory = [
-          ...(header.workflowHistory || []),
-          {
-            stage: 'Supervisor',
-            decision: 'Overtime Booked',
-            by: actor,
-            actedAt: new Date().toISOString(),
-            comment: `Retroactive ${otHours}h overtime booked on ${auth.projectCode} for ${targets.length} employee(s).`,
-          },
-        ];
+        const overtimeBookedEvent: TimesheetWorkflowEvent = {
+          stage: 'Supervisor',
+          decision: 'Overtime Booked',
+          by: actor,
+          actedAt: new Date().toISOString(),
+          comment: `Retroactive ${otHours}h overtime booked on ${auth.projectCode} for ${targets.length} employee(s).`,
+        };
+        preservedHeader.workflowHistory = [...(header.workflowHistory || []), overtimeBookedEvent];
       }
 
       await writeTimesheetHeaderLines(preservedHeader, nextLines.map((line) => ({
@@ -1416,18 +1415,16 @@ export async function PATCH(request: Request) {
 
       const shouldPost = Boolean(postToPayroll) || (retro && isTimesheetPayrollReadyStatus(header.status));
       if (shouldPost && isTimesheetPayrollReadyStatus(header.status)) {
-        const payrollHeader = {
+        const payrollPostedEvent: TimesheetWorkflowEvent = {
+          stage: 'Payroll',
+          decision: 'Overtime Correction Posted',
+          by: actor,
+          actedAt: new Date().toISOString(),
+          comment: `Payroll feed refreshed after ${otHours}h overtime booking on ${auth.projectCode}.`,
+        };
+        const payrollHeader: TimesheetHeader = {
           ...preservedHeader,
-          workflowHistory: [
-            ...(preservedHeader.workflowHistory || []),
-            {
-              stage: 'Payroll',
-              decision: 'Overtime Correction Posted',
-              by: actor,
-              actedAt: new Date().toISOString(),
-              comment: `Payroll feed refreshed after ${otHours}h overtime booking on ${auth.projectCode}.`,
-            },
-          ],
+          workflowHistory: [...(preservedHeader.workflowHistory || []), payrollPostedEvent],
         };
         await writeTimesheetHeaderLines(payrollHeader, nextLines.map((line) => ({
           ...line,

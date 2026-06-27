@@ -15,6 +15,7 @@ import {
 } from '@/lib/leave-allowance-policy';
 import { calculateAnnualLeaveAllowanceAmount, calculatePayrollEarnings } from '@/lib/payroll-earnings-engine';
 import { isEnterprisePayrollPeriod } from '@/lib/payroll-enterprise-source';
+import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { syncSageSupplementalEarningAdjustments } from '@/lib/payroll-period-earning-adjustments-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 
