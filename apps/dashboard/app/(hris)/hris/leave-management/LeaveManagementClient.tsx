@@ -174,6 +174,7 @@ type Payload = {
     leaveUtilization: LeaveDrilldownRow[];
     leaveLiability: LeaveDrilldownRow[];
     carryForwardProcessing: LeaveDrilldownRow[];
+    cancellationRequests: LeaveDrilldownRow[];
     leaveAllowanceExceptions: LeaveDrilldownRow[];
   };
 };
