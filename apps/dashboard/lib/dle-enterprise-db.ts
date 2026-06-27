@@ -6,6 +6,7 @@ import {
   buildSagePayrollDeductionsFromLines,
   parseSagePayrollLineItems,
 } from '@/lib/sage-payroll-line-parser';
+import { resolvePayCurrency } from '@/lib/payroll-currency';
 
 type DraftRecordLike = {
   draftId: string;
@@ -150,6 +151,32 @@ export type DleEmployeeDirectoryRow = {
       ytdTotal?: number | null;
     }>;
   };
+  localPayrollGroup?: string | null;
+  localPayCurrency?: string | null;
+  localPeriodSalary?: number | null;
+  localLatestDeductions?: number | null;
+  sageLocalPayrollEarnings?: Array<{
+    code: string;
+    name: string;
+    amount: number;
+    taxableAmount?: number | null;
+    ytdTotal?: number | null;
+  }>;
+  sageLocalPayrollDeductions?: {
+    paye?: number | null;
+    pensionEmployee?: number | null;
+    nhf?: number | null;
+    other?: number | null;
+    totalDeductions?: number | null;
+    netPay?: number | null;
+    lines?: Array<{
+      code: string;
+      name: string;
+      amount: number;
+      ytdTotal?: number | null;
+    }>;
+  };
+  hasDualCurrencyPayroll?: boolean;
   setupAssignedToPayroll: boolean;
   sourceSystem: string;
   sourceEmployeeId: string;
@@ -955,6 +982,13 @@ const DIRECTORY_EMPLOYEE_SELECT_SQL = `
       payroll.sage_deduction_lines_json,
       payroll.sage_contribution_lines_json,
       payroll.sage_payslip_synced_at,
+      payroll.sage_local_payroll_group,
+      payroll.sage_local_pay_currency,
+      payroll.sage_local_period_salary,
+      payroll.sage_local_latest_deductions,
+      payroll.sage_local_earning_lines_json,
+      payroll.sage_local_deduction_lines_json,
+      payroll.sage_local_contribution_lines_json,
       payroll.annual_salary,
       payroll.rate_per_hour,
       payroll.rate_per_day,
@@ -1055,7 +1089,13 @@ const mapDirectoryEmployeeRow = (row: any): DleEmployeeDirectoryRow => {
     payrollGroup: str(row.payroll_group),
     salaryGrade: str(row.salary_grade),
     benefitGroup: str(row.benefit_group),
-    payCurrency: str(row.pay_currency),
+    payCurrency: resolvePayCurrency({
+      payCurrency: str(row.pay_currency),
+      payrollGroup: str(row.payroll_group),
+      salaryGrade: str(row.salary_grade),
+      jobGrade: str(row.job_grade),
+      businessUnit: str(row.business_unit),
+    }),
     paymentRun: str(row.payment_run),
     paymentType: str(row.payment_type),
     bankName: str(row.bank_name),
@@ -1075,6 +1115,13 @@ const mapDirectoryEmployeeRow = (row: any): DleEmployeeDirectoryRow => {
     sagePayrollEarnings: parseSagePayrollLineItems(row.sage_earning_lines_json),
     sagePayrollDeductions: buildSagePayrollDeductionsFromLines(parseSagePayrollLineItems(row.sage_deduction_lines_json)),
     sagePayrollContributions: buildSagePayrollContributionsFromLines(parseSagePayrollLineItems(row.sage_contribution_lines_json)),
+    localPayrollGroup: str(row.sage_local_payroll_group) || null,
+    localPayCurrency: str(row.sage_local_pay_currency) || null,
+    localPeriodSalary: Number(row.sage_local_period_salary || 0) || null,
+    localLatestDeductions: Number(row.sage_local_latest_deductions || 0) || null,
+    sageLocalPayrollEarnings: parseSagePayrollLineItems(row.sage_local_earning_lines_json),
+    sageLocalPayrollDeductions: buildSagePayrollDeductionsFromLines(parseSagePayrollLineItems(row.sage_local_deduction_lines_json)),
+    hasDualCurrencyPayroll: Boolean(str(row.sage_local_payroll_group) && str(row.sage_local_earning_lines_json)),
     annualSalary: Number(row.annual_salary || 0) || null,
     ratePerHour: Number(row.rate_per_hour || 0) || null,
     ratePerDay: Number(row.rate_per_day || 0) || null,

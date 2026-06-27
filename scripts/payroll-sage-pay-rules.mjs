@@ -12,12 +12,22 @@ export const isBasicEarningCode = (code) => {
 };
 
 export const isHousingEarningCode = (code) => /HOUSE|HOUSIN|_HOUS$/i.test(String(code || '').toUpperCase());
-export const isTransportEarningCode = (code) => /TRANS/i.test(String(code || '').toUpperCase());
+export const isTransportEarningCode = (code) => {
+  const upper = String(code || '').toUpperCase();
+  if (/^TCM/.test(upper)) return false;
+  return /TRANS/i.test(upper);
+};
+
+export const isPensionBhtEarningCode = (code) => {
+  const upper = String(code || '').toUpperCase();
+  if (/^TCM/.test(upper)) return false;
+  return isBasicEarningCode(upper) || isHousingEarningCode(upper) || isTransportEarningCode(upper);
+};
 
 export const bhtFromEarningLines = (lines) =>
   roundMoney(
     lines
-      .filter((line) => isBasicEarningCode(line.code) || isHousingEarningCode(line.code) || isTransportEarningCode(line.code))
+      .filter((line) => isPensionBhtEarningCode(line.code))
       .reduce((sum, line) => sum + Number(line.amount || 0), 0),
   );
 
@@ -112,9 +122,9 @@ export const lumpsumAnnualRentRelief = (monthlyTaxable) => {
 
 export const resolveAnnualRentRelief = ({ category, monthlyTaxable, option, payeRules, salaryGrade, earningLines }) => {
   if (Number.isFinite(Number(payeRules?.annualRentRelief))) return Number(payeRules.annualRentRelief);
-  if (Number.isFinite(Number(option?.annualRentRelief)) && Number(option.annualRentRelief) > 0) return Number(option.annualRentRelief);
   if (category === 'stipend' || category === 'contract') return 0;
   if (category === 'lumpsum') return lumpsumAnnualRentRelief(monthlyTaxable);
+  if (Number.isFinite(Number(option?.annualRentRelief)) && Number(option.annualRentRelief) > 0) return Number(option.annualRentRelief);
 
   const codes = (earningLines || []).map((line) => String(line.code || '').toUpperCase());
   const grade = normalizedGrade(salaryGrade);

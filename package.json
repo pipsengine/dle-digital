@@ -20,7 +20,8 @@
     "audit:sage-payroll-deductions": "node scripts/database/sync-sage-payroll-deductions.js --audit-only",
     "sync:nhf-from-sage-snapshot": "node scripts/sync-nhf-from-sage-snapshot.mjs",
     "reconcile:payroll-deductions": "node scripts/reconcile-payroll-deductions.mjs",
-    "reconcile:runtime-payroll": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" npx --yes tsx --tsconfig apps/dashboard/tsconfig.json apps/dashboard/scripts/reconcile-runtime-payroll.mts"
+    "reconcile:runtime-payroll": "call \"%npm_package_json%\\..\\scripts\\Run-FromRepo.cmd\" npx --yes tsx --tsconfig apps/dashboard/tsconfig.json apps/dashboard/scripts/reconcile-runtime-payroll.mts",
+    "sync:sage-earning-adjustments": "node scripts/sync-sage-earning-adjustments.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

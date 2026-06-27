@@ -112,11 +112,46 @@ export const applyPayrollEmployeeOptions = async (employees: DleEmployeeDirector
   const options = await readPayrollEmployeeOptions();
   if (!options.length) return employees;
   const byKey = new Map<string, PayrollEmployeeOption>();
-  options.forEach((option) => {
-    [option.employeeId, option.employeeCode].map(keyFor).filter(Boolean).forEach((key) => byKey.set(key, option));
-  });
+  const registerOptionKeys = (option: PayrollEmployeeOption) => {
+    for (const raw of [option.employeeId, option.employeeCode]) {
+      const text = compact(raw).toUpperCase();
+      if (!text) continue;
+      const normalized = text.replace(/[^A-Z0-9]/g, '');
+      byKey.set(keyFor(text), option);
+      byKey.set(normalized, option);
+      const digits = normalized.replace(/^[PLC]/, '').match(/^(\d+)$/);
+      if (digits) {
+        byKey.set(digits[1], option);
+        byKey.set(`P${digits[1]}`, option);
+        byKey.set(`L${digits[1]}`, option);
+      }
+      const prefixed = normalized.match(/^([PLC])(\d+)$/);
+      if (prefixed) {
+        byKey.set(`${prefixed[1]}${prefixed[2]}`, option);
+        byKey.set(prefixed[2], option);
+      }
+    }
+  };
+  options.forEach((option) => registerOptionKeys(option));
+  const optionForEmployee = (employee: DleEmployeeDirectoryRow) => {
+    const keys = new Set<string>();
+    for (const raw of [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId]) {
+      const text = compact(raw).toUpperCase();
+      if (!text) continue;
+      keys.add(keyFor(text));
+      keys.add(text.replace(/[^A-Z0-9]/g, ''));
+      const normalized = text.replace(/[^A-Z0-9]/g, '');
+      const bareDigits = normalized.replace(/^[PLC]/, '');
+      if (/^\d+$/.test(bareDigits)) {
+        keys.add(bareDigits);
+        keys.add(`P${bareDigits}`);
+        keys.add(`L${bareDigits}`);
+      }
+    }
+    return [...keys].map((key) => byKey.get(key)).find(Boolean);
+  };
   return employees.map((employee) => {
-    const option = [employee.employeeId, employee.employeeCode, employee.sourceEmployeeId].map(keyFor).map((key) => byKey.get(key)).find(Boolean);
+    const option = optionForEmployee(employee);
     if (!option) return employee;
     return {
       ...employee,

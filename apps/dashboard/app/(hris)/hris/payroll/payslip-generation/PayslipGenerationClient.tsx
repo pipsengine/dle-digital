@@ -4,6 +4,7 @@
 import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, BadgeCheck, Download, Eye, FileText, Mail, Printer, RefreshCcw, Search, Send, ShieldCheck, Wallet, X } from 'lucide-react';
+import { currencyCode, formatPayrollMoney } from '@/lib/payroll-currency';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
 type Tone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
@@ -56,6 +57,15 @@ type Payslip = {
   status: PayslipStatus;
   deliveryStatus: DeliveryStatus;
   issues: string[];
+  localRun?: {
+    payrollGroup: string;
+    payCurrency: string;
+    grossPay: number | null;
+    totalDeductions: number | null;
+    netPay: number | null;
+    earnings: Array<{ code?: string; label: string; taxable?: boolean; amount: number | null }>;
+    deductions: Array<{ label: string; amount: number | null }>;
+  } | null;
 };
 
 type Batch = {
@@ -89,11 +99,12 @@ type Payload = {
 
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 
-const moneyFmt = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 });
-const moneyFmt2 = new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const numberFmt = new Intl.NumberFormat('en-GB');
-const money = (value: number | null | undefined, allowed = true) => (!allowed || value === null || value === undefined ? 'Restricted' : moneyFmt.format(value));
-const money2 = (value: number | null | undefined, allowed = true) => (!allowed || value === null || value === undefined ? 'Restricted' : moneyFmt2.format(value));
+const slipCurrency = (slip: Pick<Payslip, 'payCurrency' | 'payrollGroup'>) => currencyCode(`${slip.payCurrency} ${slip.payrollGroup}`);
+const money = (value: number | null | undefined, allowed = true, currency = 'NGN') =>
+  !allowed || value === null || value === undefined ? 'Restricted' : formatPayrollMoney(value, currency, { maximumFractionDigits: currencyCode(currency) === 'USD' ? 2 : 0 });
+const money2 = (value: number | null | undefined, allowed = true, currency = 'NGN') =>
+  !allowed || value === null || value === undefined ? 'Restricted' : formatPayrollMoney(value, currency);
 const number = (value: number | null | undefined) => numberFmt.format(Number(value || 0));
 const fmtDate = (value?: string) => {
   if (!value) return '-';
@@ -137,6 +148,7 @@ function PayslipLineTable({
   total,
   canViewMoney,
   amountTone = 'text-slate-950',
+  currency = 'NGN',
 }: {
   title: string;
   lines: Array<{ code?: string; label: string; units?: number; taxable?: boolean; amount: number | null }>;
@@ -144,6 +156,7 @@ function PayslipLineTable({
   total: number | null;
   canViewMoney: boolean;
   amountTone?: string;
+  currency?: string;
 }) {
   const visible = lines.filter((line) => Number(line.amount || 0) !== 0);
   const rows: Array<{ code?: string; label: string; units?: number; taxable?: boolean; amount: number | null }> =
@@ -158,7 +171,7 @@ function PayslipLineTable({
             <th className="w-[42%] px-2 py-1.5 text-sm font-black uppercase">Description</th>
             <th className="w-[20%] px-2 py-1.5 text-xs font-black uppercase">Code</th>
             <th className="w-[14%] px-2 py-1.5 text-right text-xs font-black uppercase">Units</th>
-            <th className="px-2 py-1.5 text-right text-sm font-black uppercase">Amount (NGN)</th>
+            <th className="px-2 py-1.5 text-right text-sm font-black uppercase">Amount ({currencyCode(currency)})</th>
           </tr>
         </thead>
         <tbody>
@@ -170,7 +183,7 @@ function PayslipLineTable({
               </td>
               <td className="px-2 py-1 font-semibold text-slate-600">{line.code || '-'}</td>
               <td className="px-2 py-1 text-right font-semibold text-slate-700">{Number(line.units || 0).toFixed(2)}</td>
-              <td className={`px-2 py-1 text-right font-black ${amountTone}`}>{money2(line.amount, canViewMoney)}</td>
+              <td className={`px-2 py-1 text-right font-black ${amountTone}`}>{money2(line.amount, canViewMoney, currency)}</td>
             </tr>
           ))}
           {hiddenRows > 0 ? (
@@ -182,7 +195,7 @@ function PayslipLineTable({
         <tfoot>
           <tr className="bg-blue-50">
             <td colSpan={3} className="px-2 py-1.5 text-xs font-black uppercase text-blue-950">{totalLabel}</td>
-            <td className="px-2 py-1.5 text-right text-xs font-black text-blue-950">{money2(total, canViewMoney)}</td>
+            <td className="px-2 py-1.5 text-right text-xs font-black text-blue-950">{money2(total, canViewMoney, currency)}</td>
           </tr>
         </tfoot>
       </table>
@@ -192,6 +205,7 @@ function PayslipLineTable({
 
 function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; slip: Payslip; canViewMoney: boolean }) {
   const payslipTitle = slip.isDailyRate ? 'Daily Rate Payslip' : 'Official Payslip';
+  const currency = slipCurrency(slip);
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-100 p-4 sm:p-6 lg:p-8 print:border-0 print:bg-white print:p-0">
       <div id="payslip-print-area" className="mx-auto w-full max-w-[980px] overflow-hidden rounded-none border border-[#2f67b1] bg-white shadow-sm print:max-w-none print:border-[#2f67b1] print:shadow-none">
@@ -241,7 +255,7 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
                   ['Department', slip.department],
                   ['Business Unit', slip.businessUnit],
                   ['Location', slip.location],
-                  ['Grade / Group', `${slip.salaryGrade} / ${slip.payrollGroup}`],
+                  ['Grade / Group', `${slip.salaryGrade} / ${slip.payrollGroup} (${currencyCode(currency)})`],
                   ['Pay Basis', slip.payBasis || (slip.isDailyRate ? 'Daily Rate' : 'Monthly Salary')],
                   ['Payment', `${slip.paymentRun}${slip.paymentType ? ` / ${slip.paymentType}` : ''}`],
                   ['Bank', `${slip.bankName} ${slip.maskedAccount}`],
@@ -259,7 +273,7 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
             <div className="flex flex-col justify-between border border-emerald-200 bg-emerald-50 p-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-normal text-emerald-700">Net Pay</p>
-                <p className="mt-3 text-2xl font-black text-emerald-950">{money2(slip.netPay, canViewMoney)}</p>
+                <p className="mt-3 text-2xl font-black text-emerald-950">{money2(slip.netPay, canViewMoney, currency)}</p>
                 <p className="mt-2 text-xs font-semibold text-emerald-700">Delivery: {slip.deliveryStatus}</p>
               </div>
               <span className={`mt-4 inline-flex w-fit rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(slip.status)].chip}`}>{slip.status}</span>
@@ -269,11 +283,11 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
             <div className="mt-3 grid grid-cols-2 gap-2 border border-cyan-200 bg-cyan-50 p-3 sm:grid-cols-3 lg:grid-cols-6">
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Daily Rate</p>
-                <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerDay, canViewMoney)}</p>
+                <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerDay, canViewMoney, currency)}</p>
               </div>
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Hourly Rate</p>
-                <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerHour, canViewMoney)}</p>
+                <p className="mt-1 text-sm font-black text-slate-950">{money2(slip.ratePerHour, canViewMoney, currency)}</p>
               </div>
               <div>
                 <p className="text-[11px] font-black uppercase text-cyan-700">Days Worked</p>
@@ -296,20 +310,46 @@ function PayslipPreview({ payload, slip, canViewMoney }: { payload: Payload; sli
         </div>
 
         <div className="grid grid-cols-1 gap-3 px-5 pb-3 lg:grid-cols-2">
-          <PayslipLineTable title="Earnings" lines={slip.earnings} totalLabel="Total Earnings" total={slip.grossPay} canViewMoney={canViewMoney} />
-          <PayslipLineTable title="Deductions" lines={slip.deductions} totalLabel="Total Deductions" total={slip.totalDeductions} canViewMoney={canViewMoney} amountTone="text-red-700" />
+          <PayslipLineTable title={`Earnings (${currency})`} lines={slip.earnings} totalLabel="Total Earnings" total={slip.grossPay} canViewMoney={canViewMoney} currency={currency} />
+          <PayslipLineTable title={`Deductions (${currency})`} lines={slip.deductions} totalLabel="Total Deductions" total={slip.totalDeductions} canViewMoney={canViewMoney} amountTone="text-red-700" currency={currency} />
         </div>
 
         <div className="grid grid-cols-1 gap-3 px-5 pb-4 lg:grid-cols-2">
           <div className="border border-[#2f67b1] p-3">
             <p className="text-xs font-black uppercase tracking-normal text-slate-500">Year To Date</p>
             <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">Gross</p><p className="mt-1 text-xs font-black text-slate-950">{money2(slip.ytdGross, canViewMoney)}</p></div>
-              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">PAYE</p><p className="mt-1 text-xs font-black text-red-700">{money2(slip.ytdPaye, canViewMoney)}</p></div>
-              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">Net</p><p className="mt-1 text-xs font-black text-emerald-700">{money2(slip.ytdNet, canViewMoney)}</p></div>
+              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">Gross</p><p className="mt-1 text-xs font-black text-slate-950">{money2(slip.ytdGross, canViewMoney, currency)}</p></div>
+              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">PAYE</p><p className="mt-1 text-xs font-black text-red-700">{money2(slip.ytdPaye, canViewMoney, currency)}</p></div>
+              <div className="bg-slate-50 p-2"><p className="text-[10px] font-black uppercase text-slate-500">Net</p><p className="mt-1 text-xs font-black text-emerald-700">{money2(slip.ytdNet, canViewMoney, currency)}</p></div>
             </div>
           </div>
-          <PayslipLineTable title="Employer Contributions" lines={slip.employerContributions} totalLabel="Total Company Contributions" total={slip.employerContributions.reduce((sum, line) => sum + Number(line.amount || 0), 0)} canViewMoney={canViewMoney} />
+          <PayslipLineTable title="Employer Contributions" lines={slip.employerContributions} totalLabel="Total Company Contributions" total={slip.employerContributions.reduce((sum, line) => sum + Number(line.amount || 0), 0)} canViewMoney={canViewMoney} currency={currency} />
+          {slip.localRun ? (
+            <div className="mt-4 rounded-none border border-amber-300 bg-amber-50 p-4">
+              <p className="text-xs font-black uppercase tracking-normal text-amber-800">Local Naira Payroll Run ({slip.localRun.payrollGroup})</p>
+              <p className="mt-1 text-[11px] font-semibold text-amber-900">This employee also receives a separate NGN payroll run on Sage DLE. Amounts below are in Naira.</p>
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                <PayslipLineTable
+                  title="NGN Earnings"
+                  lines={slip.localRun.earnings}
+                  totalLabel="NGN Gross"
+                  total={slip.localRun.grossPay}
+                  canViewMoney={canViewMoney}
+                  currency={slip.localRun.payCurrency || 'NGN'}
+                />
+                <PayslipLineTable
+                  title="NGN Deductions"
+                  lines={slip.localRun.deductions}
+                  totalLabel="NGN Deductions"
+                  total={slip.localRun.totalDeductions}
+                  canViewMoney={canViewMoney}
+                  amountTone="text-red-700"
+                  currency={slip.localRun.payCurrency || 'NGN'}
+                />
+              </div>
+              <p className="mt-3 text-xs font-black text-amber-950">NGN Net Pay: {money2(slip.localRun.netPay, canViewMoney, slip.localRun.payCurrency || 'NGN')}</p>
+            </div>
+          ) : null}
         </div>
 
         <div className="border-t border-[#2f67b1] bg-slate-50 px-5 py-3 text-center text-[11px] font-semibold leading-4 text-slate-500">

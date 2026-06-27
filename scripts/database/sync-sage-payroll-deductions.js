@@ -95,6 +95,19 @@ const dleConfig = () => ({
   requestTimeout: Number(process.env.DLE_ENTERPRISE_DB_REQUEST_TIMEOUT_MS || 120000),
 });
 
+const payCurrencyForCompany = (companyCode) => {
+  const company = clean(companyCode).toUpperCase();
+  if (company.includes('USD')) return 'USD';
+  return 'NGN';
+};
+
+const companySyncPriority = (companyCode) => {
+  const company = clean(companyCode).toUpperCase();
+  if (company === 'DLE_USD') return 2;
+  if (company === 'DLE') return 1;
+  return 0;
+};
+
 const ensurePayrollColumns = async (pool) => {
   await pool.request().query(`
     IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_payslip_period') IS NULL
@@ -107,6 +120,20 @@ const ensurePayrollColumns = async (pool) => {
       ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_contribution_lines_json] nvarchar(max) NULL;
     IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_payslip_synced_at') IS NULL
       ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_payslip_synced_at] datetime2(3) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_payroll_group') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_payroll_group] nvarchar(80) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_pay_currency') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_pay_currency] nvarchar(10) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_period_salary') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_period_salary] decimal(19, 4) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_latest_deductions') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_latest_deductions] decimal(19, 4) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_earning_lines_json') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_earning_lines_json] nvarchar(max) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_deduction_lines_json') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_deduction_lines_json] nvarchar(max) NULL;
+    IF COL_LENGTH(N'hris.EmployeePayrollSetup', N'sage_local_contribution_lines_json') IS NULL
+      ALTER TABLE [hris].[EmployeePayrollSetup] ADD [sage_local_contribution_lines_json] nvarchar(max) NULL;
   `);
 };
 
@@ -295,24 +322,28 @@ const derivePackageSalary = (employee) => {
   );
 };
 
-const upsertEmployee = async (pool, employee, period, apply) => {
+const upsertEmployee = async (pool, employee, period, apply, options = {}) => {
+  const { mode = 'primary' } = options;
   const packageSalary = derivePackageSalary(employee);
   const basicLine = employee.earnings.find((line) => /_(BASIC)$/i.test(clean(line.code)) || /^BASIC/i.test(clean(line.code)));
   const basicSalary = basicLine ? roundMoney(Number(basicLine.amount)) : null;
   const deductionSummary = summarizeDeductions(employee.deductions);
   const periodSalary = packageSalary > 0 ? packageSalary : null;
   const salaryGrade = employee.jobGrade || employee.remunerationDefinition || null;
+  const payCurrency = payCurrencyForCompany(employee.companyCode);
+  const payrollGroup = employee.companyCode || null;
 
   if (!apply) {
-    return { updated: false, reason: 'audit-only', salaryGrade, ...deductionSummary };
+    return { updated: false, reason: 'audit-only', mode, salaryGrade, payCurrency, payrollGroup, ...deductionSummary };
   }
 
-  const result = await pool.request()
+  const request = pool.request()
     .input('sage_employee_id', sql.NVarChar(80), employee.sageEmployeeId)
     .input('directory_employee_code', sql.NVarChar(80), employee.directoryEmployeeCode)
     .input('normalized_code', sql.NVarChar(80), clean(employee.sageEmployeeCode).replace(/_/g, '').toUpperCase())
     .input('salary_grade', sql.NVarChar(80), salaryGrade)
-    .input('payroll_group', sql.NVarChar(80), employee.companyCode || null)
+    .input('payroll_group', sql.NVarChar(80), payrollGroup)
+    .input('pay_currency', sql.NVarChar(10), payCurrency)
     .input('period_salary', sql.Decimal(19, 4), periodSalary)
     .input('basic_salary', sql.Decimal(19, 4), basicSalary)
     .input('annual_salary', sql.Decimal(19, 4), periodSalary ? roundMoney(periodSalary * 12) : null)
@@ -321,7 +352,15 @@ const upsertEmployee = async (pool, employee, period, apply) => {
     .input('sage_earning_lines_json', sql.NVarChar(sql.MAX), JSON.stringify(employee.earnings))
     .input('sage_deduction_lines_json', sql.NVarChar(sql.MAX), JSON.stringify(employee.deductions))
     .input('sage_contribution_lines_json', sql.NVarChar(sql.MAX), JSON.stringify(employee.contributions))
-    .query(`
+    .input('sage_local_payroll_group', sql.NVarChar(80), mode === 'local' ? payrollGroup : null)
+    .input('sage_local_pay_currency', sql.NVarChar(10), mode === 'local' ? payCurrency : null)
+    .input('sage_local_period_salary', sql.Decimal(19, 4), mode === 'local' ? periodSalary : null)
+    .input('sage_local_latest_deductions', sql.Decimal(19, 4), mode === 'local' ? (deductionSummary.totalDeductions || null) : null)
+    .input('sage_local_earning_lines_json', sql.NVarChar(sql.MAX), mode === 'local' ? JSON.stringify(employee.earnings) : null)
+    .input('sage_local_deduction_lines_json', sql.NVarChar(sql.MAX), mode === 'local' ? JSON.stringify(employee.deductions) : null)
+    .input('sage_local_contribution_lines_json', sql.NVarChar(sql.MAX), mode === 'local' ? JSON.stringify(employee.contributions) : null);
+
+  const primarySql = `
 DECLARE @employee_id bigint;
 
 SELECT @employee_id = employee_id
@@ -352,6 +391,7 @@ USING (SELECT @employee_id AS employee_id) AS source
 ON target.employee_id = source.employee_id
 WHEN MATCHED THEN UPDATE SET
   payroll_group = COALESCE(NULLIF(@payroll_group, N''), target.payroll_group),
+  pay_currency = COALESCE(NULLIF(@pay_currency, N''), target.pay_currency),
   salary_grade = COALESCE(NULLIF(@salary_grade, N''), target.salary_grade),
   period_salary = COALESCE(@period_salary, target.period_salary),
   basic_salary = COALESCE(@basic_salary, target.basic_salary),
@@ -365,11 +405,11 @@ WHEN MATCHED THEN UPDATE SET
   setup_assigned_to_payroll = 1,
   modified_at = SYSUTCDATETIME()
 WHEN NOT MATCHED THEN INSERT (
-  employee_id, payroll_group, salary_grade, period_salary, annual_salary, latest_deductions,
+  employee_id, payroll_group, pay_currency, salary_grade, period_salary, annual_salary, latest_deductions,
   sage_payslip_period, sage_earning_lines_json, sage_deduction_lines_json, sage_contribution_lines_json,
   sage_payslip_synced_at, setup_assigned_to_payroll
 ) VALUES (
-  @employee_id, @payroll_group, @salary_grade, @period_salary, @annual_salary, @latest_deductions,
+  @employee_id, @payroll_group, @pay_currency, @salary_grade, @period_salary, @annual_salary, @latest_deductions,
   @sage_payslip_period, @sage_earning_lines_json, @sage_deduction_lines_json, @sage_contribution_lines_json,
   SYSUTCDATETIME(), 1
 );
@@ -384,13 +424,62 @@ VALUES (
 );
 
 SELECT CAST(1 AS bit) AS updated, N'Updated' AS reason;
-`);
+`;
+
+  const localSql = `
+DECLARE @employee_id bigint;
+
+SELECT @employee_id = employee_id
+FROM [hris].[EmployeeSourceRecords] WITH (UPDLOCK, HOLDLOCK)
+WHERE source_system = N'Sage 300 People Payroll'
+  AND source_employee_id = @sage_employee_id;
+
+IF @employee_id IS NULL
+BEGIN
+  SELECT TOP (1) @employee_id = employee_id
+  FROM [hris].[Employees] WITH (UPDLOCK, HOLDLOCK)
+  WHERE REPLACE(UPPER(LTRIM(RTRIM(employee_code))), '_', '') IN (@directory_employee_code, @normalized_code, CONCAT(N'P', @normalized_code));
+END;
+
+IF @employee_id IS NULL
+BEGIN
+  SELECT CAST(0 AS bit) AS updated, N'Missing DLE employee' AS reason;
+  RETURN;
+END;
+
+MERGE [hris].[EmployeePayrollSetup] AS target
+USING (SELECT @employee_id AS employee_id) AS source
+ON target.employee_id = source.employee_id
+WHEN MATCHED THEN UPDATE SET
+  sage_local_payroll_group = @sage_local_payroll_group,
+  sage_local_pay_currency = @sage_local_pay_currency,
+  sage_local_period_salary = @sage_local_period_salary,
+  sage_local_latest_deductions = @sage_local_latest_deductions,
+  sage_local_earning_lines_json = @sage_local_earning_lines_json,
+  sage_local_deduction_lines_json = @sage_local_deduction_lines_json,
+  sage_local_contribution_lines_json = @sage_local_contribution_lines_json,
+  modified_at = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN INSERT (
+  employee_id, sage_local_payroll_group, sage_local_pay_currency, sage_local_period_salary, sage_local_latest_deductions,
+  sage_local_earning_lines_json, sage_local_deduction_lines_json, sage_local_contribution_lines_json, setup_assigned_to_payroll
+) VALUES (
+  @employee_id, @sage_local_payroll_group, @sage_local_pay_currency, @sage_local_period_salary, @sage_local_latest_deductions,
+  @sage_local_earning_lines_json, @sage_local_deduction_lines_json, @sage_local_contribution_lines_json, 1
+);
+
+SELECT CAST(1 AS bit) AS updated, N'Updated local run' AS reason;
+`;
+
+  const result = await request.query(mode === 'local' ? localSql : primarySql);
 
   const row = result.recordset?.[0];
   return {
     updated: Boolean(row?.updated),
     reason: clean(row?.reason) || 'unknown',
+    mode,
     salaryGrade,
+    payCurrency,
+    payrollGroup,
     ...deductionSummary,
   };
 };
@@ -426,16 +515,45 @@ const main = async () => {
     let missing = 0;
     const samples = [];
 
-    for (const employee of filtered) {
-      const result = await upsertEmployee(dlePool, employee, period, apply && !auditOnly);
-      if (result.updated) updated += 1;
-      if (result.reason === 'Missing DLE employee') missing += 1;
-      if (samples.length < 12 && employee.deductions.length) {
-        samples.push({
-          employee: employee.directoryEmployeeCode,
-          grade: employee.jobGrade,
-          deductions: employee.deductions.map((line) => `${line.code}:${line.amount}`).join(', '),
-        });
+    const byDirectory = filtered.reduce((map, employee) => {
+      const key = employee.directoryEmployeeCode;
+      const list = map.get(key) || [];
+      list.push(employee);
+      map.set(key, list);
+      return map;
+    }, new Map());
+
+    for (const employeesForCode of byDirectory.values()) {
+      const sorted = employeesForCode.slice().sort((left, right) => {
+        const priorityDelta = companySyncPriority(left.companyCode) - companySyncPriority(right.companyCode);
+        if (priorityDelta !== 0) return priorityDelta;
+        return clean(left.companyCode).localeCompare(clean(right.companyCode));
+      });
+      const hasDualCompany = new Set(sorted.map((employee) => clean(employee.companyCode).toUpperCase())).size > 1;
+
+      for (const employee of sorted) {
+        const company = clean(employee.companyCode).toUpperCase();
+        const isLocalRun = hasDualCompany && company === 'DLE';
+        const isPrimaryRun = !isLocalRun;
+        const result = await upsertEmployee(
+          dlePool,
+          employee,
+          period,
+          apply && !auditOnly,
+          { mode: isLocalRun ? 'local' : 'primary' },
+        );
+        if (result.updated && isPrimaryRun) updated += 1;
+        if (result.reason === 'Missing DLE employee') missing += 1;
+        if (samples.length < 12 && employee.deductions.length) {
+          samples.push({
+            employee: employee.directoryEmployeeCode,
+            company: employee.companyCode,
+            mode: isLocalRun ? 'local' : 'primary',
+            grade: employee.jobGrade,
+            payCurrency: result.payCurrency,
+            deductions: employee.deductions.map((line) => `${line.code}:${line.amount}`).join(', '),
+          });
+        }
       }
     }
 

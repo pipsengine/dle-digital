@@ -1,0 +1,37 @@
+﻿
+> dle-connect-iis-dashboard@0.1.0 reconcile:runtime-payroll
+> call "%npm_package_json%\..\scripts\Run-FromRepo.cmd" npx --yes tsx --tsconfig apps/dashboard/tsconfig.json apps/dashboard/scripts/reconcile-runtime-payroll.mts --report
+
+{
+  "mode": "runtime-profile-parity-report",
+  "period": "2026-06",
+  "tolerance": 10,
+  "totalChecked": 139,
+  "byCategory": {
+    "permanent": {
+      "checked": 72,
+      "matched": 72,
+      "deductionMatched": 72,
+      "earningsMatched": 72,
+      "variances": 0,
+      "deductionVariances": 0,
+      "mismatchEmployees": []
+    },
+    "lumpsum": {
+      "checked": 67,
+      "matched": 67,
+      "deductionMatched": 67,
+      "earningsMatched": 67,
+      "variances": 0,
+      "deductionVariances": 0,
+      "mismatchEmployees": []
+    }
+  },
+  "overall": {
+    "matched": 139,
+    "variances": 0,
+    "deductionMatched": 139,
+    "deductionVariances": 0
+  },
+  "topDeductionVariances": []
+}

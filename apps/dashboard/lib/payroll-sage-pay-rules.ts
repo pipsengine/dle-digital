@@ -24,16 +24,26 @@ export const normalizedGrade = (value: unknown) => String(value || '').trim().to
 export const isBasicEarningCode = (code: unknown) => {
   const upper = String(code || '').toUpperCase();
   if (upper === 'BASIC_LUMPSUM') return false;
-  return /BASIC1_LUMPSUM|BASICSALARY|LUMPSUMTAX|EXP_BASIC|_(BASIC)$|^BASIC$|_BASIC$|COLA_BASIC|MGT_BASIC|SNR_BASIC|JNR_BASIC/i.test(upper);
+  return /BASIC1_LUMPSUM|BASICSALARY|LUMPSUMTAX|EXP_BASIC|EXP_BASICTAX|_(BASIC)$|^BASIC$|_BASIC$|COLA_BASIC|MGT_BASIC|SNR_BASIC|JNR_BASIC/i.test(upper);
 };
 
 export const isHousingEarningCode = (code: unknown) => /HOUSE|HOUSIN|_HOUS$/i.test(String(code || '').toUpperCase());
-export const isTransportEarningCode = (code: unknown) => /TRANS/i.test(String(code || '').toUpperCase());
+export const isTransportEarningCode = (code: unknown) => {
+  const upper = String(code || '').toUpperCase();
+  if (/^TCM/.test(upper)) return false;
+  return /TRANS/i.test(upper);
+};
+
+export const isPensionBhtEarningCode = (code: unknown) => {
+  const upper = String(code || '').toUpperCase();
+  if (/^TCM/.test(upper)) return false;
+  return isBasicEarningCode(upper) || isHousingEarningCode(upper) || isTransportEarningCode(upper);
+};
 
 export const bhtFromEarningLines = (lines: SagePayeEarningLine[]) =>
   roundMoney(
     lines
-      .filter((line) => isBasicEarningCode(line.code) || isHousingEarningCode(line.code) || isTransportEarningCode(line.code))
+      .filter((line) => isPensionBhtEarningCode(line.code))
       .reduce((sum, line) => sum + Number(line.amount || 0), 0),
   );
 
@@ -148,11 +158,11 @@ export const resolveSageAlignedAnnualRentRelief = (input: {
 }) => {
   const payeRules = input.payeRules || resolvePayeRules(input.employee);
   if (Number.isFinite(Number(payeRules?.annualRentRelief))) return Number(payeRules?.annualRentRelief);
+  if (input.category === 'stipend' || input.category === 'contract') return 0;
+  if (input.category === 'lumpsum') return lumpsumAnnualRentRelief(input.monthlyTaxable);
   if (Number.isFinite(Number(input.employee?.annualRentRelief)) && Number(input.employee?.annualRentRelief) > 0) {
     return Number(input.employee?.annualRentRelief);
   }
-  if (input.category === 'stipend' || input.category === 'contract') return 0;
-  if (input.category === 'lumpsum') return lumpsumAnnualRentRelief(input.monthlyTaxable);
   if (normalizedGrade(input.employee?.salaryGrade || input.employee?.jobGrade) === 'MGT7') return 400000;
   return 500000;
 };

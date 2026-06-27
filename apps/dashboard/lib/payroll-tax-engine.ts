@@ -106,7 +106,7 @@ export const defaultAnnualRentReliefForEmployee = (employee?: DleEmployeeDirecto
   const explicit = Number(employee.annualRentRelief);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
   const profileId = resolvePayrollEarningProfile(employee);
-  if (profileId === 'stipend-non-taxable' || profileId === 'contract-day-rate') return 0;
+  if (profileId === 'stipend-non-taxable' || profileId === 'contract-day-rate' || profileId === 'contract-lumpsum') return 0;
   return DEFAULT_ANNUAL_RENT_RELIEF;
 };
 

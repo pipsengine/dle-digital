@@ -1,0 +1,1577 @@
+﻿
+> dle-connect-iis-dashboard@0.1.0 reconcile:runtime-payroll
+> call "%npm_package_json%\..\scripts\Run-FromRepo.cmd" npx --yes tsx --tsconfig apps/dashboard/tsconfig.json apps/dashboard/scripts/reconcile-runtime-payroll.mts --report
+
+{
+  "mode": "runtime-profile-parity-report",
+  "period": "2026-06",
+  "tolerance": 10,
+  "totalChecked": 139,
+  "byCategory": {
+    "permanent": {
+      "checked": 72,
+      "matched": 43,
+      "deductionMatched": 59,
+      "earningsMatched": 44,
+      "variances": 29,
+      "deductionVariances": 13,
+      "mismatchEmployees": [
+        {
+          "employee": "P0080",
+          "payeVar": -918.39,
+          "totalVar": 4183.77,
+          "earningLineDiffs": 0
+        },
+        {
+          "employee": "P0315",
+          "payeVar": 3960,
+          "totalVar": 6120,
+          "earningLineDiffs": 1
+        },
+        {
+          "employee": "P0364",
+          "payeVar": -2965.35,
+          "totalVar": -3483.29,
+          "earningLineDiffs": 2
+        },
+        {
+          "employee": "P0370",
+          "payeVar": 41670.78,
+          "totalVar": 25627.01,
+          "earningLineDiffs": 12
+        },
+        {
+          "employee": "P0420",
+          "payeVar": 63648.2,
+          "totalVar": 52535.61,
+          "earningLineDiffs": 2
+        },
+        {
+          "employee": "P0425",
+          "payeVar": 0,
+          "totalVar": -29724.09,
+          "earningLineDiffs": 13
+        },
+        {
+          "employee": "P0433",
+          "payeVar": 32995.68,
+          "totalVar": 20291.93,
+          "earningLineDiffs": 12
+        },
+        {
+          "employee": "P0442",
+          "payeVar": 0,
+          "totalVar": 285.31,
+          "earningLineDiffs": 6
+        },
+        {
+          "employee": "P0448",
+          "payeVar": 34537.86,
+          "totalVar": 34537.86,
+          "earningLineDiffs": 3
+        },
+        {
+          "employee": "P0449",
+          "payeVar": 83235.61,
+          "totalVar": 53975.53,
+          "earningLineDiffs": 12
+        },
+        {
+          "employee": "P0455",
+          "payeVar": 83235.61,
+          "totalVar": 53975.53,
+          "earningLineDiffs": 12
+        },
+        {
+          "employee": "P0458",
+          "payeVar": 0,
+          "totalVar": 272.22,
+          "earningLineDiffs": 6
+        },
+        {
+          "employee": "P0463",
+          "payeVar": -12345.3,
+          "totalVar": -13209.35,
+          "earningLineDiffs": 3
+        }
+      ]
+    },
+    "lumpsum": {
+      "checked": 67,
+      "matched": 61,
+      "deductionMatched": 61,
+      "earningsMatched": 65,
+      "variances": 6,
+      "deductionVariances": 6,
+      "mismatchEmployees": [
+        {
+          "employee": "L1940",
+          "payeVar": -962.02,
+          "totalVar": -962.02,
+          "earningLineDiffs": 0
+        },
+        {
+          "employee": "L2144",
+          "payeVar": -714.14,
+          "totalVar": -714.14,
+          "earningLineDiffs": 0
+        },
+        {
+          "employee": "L2214",
+          "payeVar": -964.55,
+          "totalVar": -964.55,
+          "earningLineDiffs": 0
+        },
+        {
+          "employee": "L2336",
+          "payeVar": -964.55,
+          "totalVar": -964.55,
+          "earningLineDiffs": 0
+        },
+        {
+          "employee": "L2764",
+          "payeVar": 734.99,
+          "totalVar": 734.99,
+          "earningLineDiffs": 1
+        },
+        {
+          "employee": "L2776",
+          "payeVar": 1274.99,
+          "totalVar": 1274.99,
+          "earningLineDiffs": 1
+        }
+      ]
+    }
+  },
+  "overall": {
+    "matched": 104,
+    "variances": 35,
+    "deductionMatched": 120,
+    "deductionVariances": 19
+  },
+  "topDeductionVariances": [
+    {
+      "employee": "P0449",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 2576749.11,
+        "taxable": 2576749.1,
+        "paye": 464535.82,
+        "pension": 127680.35,
+        "nhf": 0,
+        "union": 0,
+        "total": 592216.17
+      },
+      "hris": {
+        "gross": 3241883.94,
+        "taxable": 2909383.01,
+        "paye": 547771.43,
+        "pension": 98420.27,
+        "nhf": 0,
+        "union": 0,
+        "total": 646191.7
+      },
+      "variance": {
+        "paye": 83235.61,
+        "pension": -29260.08,
+        "nhf": 0,
+        "union": 0,
+        "total": 53975.53,
+        "gross": 665134.83,
+        "taxable": 332633.91
+      },
+      "earningVariances": [
+        {
+          "code": "MGTBASIC",
+          "sage": 665001.83,
+          "hris": 0,
+          "delta": -665001.83
+        },
+        {
+          "code": "MGTFURNTAX",
+          "sage": 106400.29,
+          "hris": 0,
+          "delta": -106400.29
+        },
+        {
+          "code": "MGTHOUSE",
+          "sage": 532001.47,
+          "hris": 0,
+          "delta": -532001.47
+        },
+        {
+          "code": "MGTOTHALLTAX",
+          "sage": 771402.13,
+          "hris": 0,
+          "delta": -771402.13
+        },
+        {
+          "code": "MGTTRANS",
+          "sage": 399001.1,
+          "hris": 0,
+          "delta": -399001.1
+        },
+        {
+          "code": "MGTUTILITYTAX",
+          "sage": 102942.28,
+          "hris": 0,
+          "delta": -102942.28
+        },
+        {
+          "code": "SNMBASIC",
+          "sage": 0,
+          "hris": 665001.83,
+          "delta": 665001.83
+        },
+        {
+          "code": "SNMHOUSE",
+          "sage": 0,
+          "hris": 332500.92,
+          "delta": 332500.92
+        },
+        {
+          "code": "SNMFURN",
+          "sage": 0,
+          "hris": 249375.69,
+          "delta": 249375.69
+        },
+        {
+          "code": "SNMOTHERALL",
+          "sage": 0,
+          "hris": 1429753.93,
+          "delta": 1429753.93
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 0,
+          "hris": 232750.64,
+          "delta": 232750.64
+        },
+        {
+          "code": "SNMUTILITY",
+          "sage": 0,
+          "hris": 332500.92,
+          "delta": 332500.92
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNMBASIC",
+          "amount": 665001.83
+        },
+        {
+          "code": "SNMHOUSE",
+          "amount": 332500.92
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 249375.69
+        },
+        {
+          "code": "SNMOTHERALL",
+          "amount": 1429753.93
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 232750.64
+        },
+        {
+          "code": "SNMUTILITY",
+          "amount": 332500.92
+        },
+        {
+          "code": "REFUND",
+          "amount": 0.01
+        }
+      ]
+    },
+    {
+      "employee": "P0455",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 2576749.11,
+        "taxable": 2576749.1,
+        "paye": 464535.82,
+        "pension": 127680.35,
+        "nhf": 0,
+        "union": 0,
+        "total": 592216.17
+      },
+      "hris": {
+        "gross": 3241883.94,
+        "taxable": 2909383.01,
+        "paye": 547771.43,
+        "pension": 98420.27,
+        "nhf": 0,
+        "union": 0,
+        "total": 646191.7
+      },
+      "variance": {
+        "paye": 83235.61,
+        "pension": -29260.08,
+        "nhf": 0,
+        "union": 0,
+        "total": 53975.53,
+        "gross": 665134.83,
+        "taxable": 332633.91
+      },
+      "earningVariances": [
+        {
+          "code": "MGTBASIC",
+          "sage": 665001.83,
+          "hris": 0,
+          "delta": -665001.83
+        },
+        {
+          "code": "MGTFURNTAX",
+          "sage": 106400.29,
+          "hris": 0,
+          "delta": -106400.29
+        },
+        {
+          "code": "MGTHOUSE",
+          "sage": 532001.47,
+          "hris": 0,
+          "delta": -532001.47
+        },
+        {
+          "code": "MGTOTHALLTAX",
+          "sage": 771402.13,
+          "hris": 0,
+          "delta": -771402.13
+        },
+        {
+          "code": "MGTTRANS",
+          "sage": 399001.1,
+          "hris": 0,
+          "delta": -399001.1
+        },
+        {
+          "code": "MGTUTILITYTAX",
+          "sage": 102942.28,
+          "hris": 0,
+          "delta": -102942.28
+        },
+        {
+          "code": "SNMBASIC",
+          "sage": 0,
+          "hris": 665001.83,
+          "delta": 665001.83
+        },
+        {
+          "code": "SNMHOUSE",
+          "sage": 0,
+          "hris": 332500.92,
+          "delta": 332500.92
+        },
+        {
+          "code": "SNMFURN",
+          "sage": 0,
+          "hris": 249375.69,
+          "delta": 249375.69
+        },
+        {
+          "code": "SNMOTHERALL",
+          "sage": 0,
+          "hris": 1429753.93,
+          "delta": 1429753.93
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 0,
+          "hris": 232750.64,
+          "delta": 232750.64
+        },
+        {
+          "code": "SNMUTILITY",
+          "sage": 0,
+          "hris": 332500.92,
+          "delta": 332500.92
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNMBASIC",
+          "amount": 665001.83
+        },
+        {
+          "code": "SNMHOUSE",
+          "amount": 332500.92
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 249375.69
+        },
+        {
+          "code": "SNMOTHERALL",
+          "amount": 1429753.93
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 232750.64
+        },
+        {
+          "code": "SNMUTILITY",
+          "amount": 332500.92
+        },
+        {
+          "code": "REFUND",
+          "amount": 0.01
+        }
+      ]
+    },
+    {
+      "employee": "P0420",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 2117698.78,
+        "taxable": 2107934.66,
+        "paye": 324922.73,
+        "pension": 63994.73,
+        "nhf": 10809.92,
+        "union": 0,
+        "total": 399727.38
+      },
+      "hris": {
+        "gross": 2109861.59,
+        "taxable": 2109861.59,
+        "paye": 388570.93,
+        "pension": 63692.06,
+        "nhf": 0,
+        "union": 0,
+        "total": 452262.99
+      },
+      "variance": {
+        "paye": 63648.2,
+        "pension": -302.67,
+        "nhf": -10809.92,
+        "union": 0,
+        "total": 52535.61,
+        "gross": -7837.19,
+        "taxable": 1926.93
+      },
+      "earningVariances": [
+        {
+          "code": "SNMFURN",
+          "sage": 162148.82,
+          "hris": 158095.1,
+          "delta": -4053.72
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 151338.9,
+          "hris": 147555.43,
+          "delta": -3783.47
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "REFUND",
+          "amount": 9764.12
+        },
+        {
+          "code": "SNMBASICSALARY",
+          "amount": 432396.85
+        },
+        {
+          "code": "SNMHOUS",
+          "amount": 216198.43
+        },
+        {
+          "code": "SNMOTHALL",
+          "amount": 929653.23
+        },
+        {
+          "code": "SNMUTILITIES",
+          "amount": 216198.43
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 158095.1
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 147555.43
+        }
+      ]
+    },
+    {
+      "employee": "P0448",
+      "category": "permanent",
+      "profile": "junior-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 643954.31,
+        "taxable": 615477.93,
+        "paye": 82442.11,
+        "pension": 18577.34,
+        "nhf": 0,
+        "union": 5261.71,
+        "total": 106281.16
+      },
+      "hris": {
+        "gross": 835831.34,
+        "taxable": 807354.96,
+        "paye": 116979.97,
+        "pension": 18577.34,
+        "nhf": 0,
+        "union": 5261.71,
+        "total": 140819.02
+      },
+      "variance": {
+        "paye": 34537.86,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 34537.86,
+        "gross": 191877.03,
+        "taxable": 191877.03
+      },
+      "earningVariances": [
+        {
+          "code": "JNRMEDICAL",
+          "sage": 0,
+          "hris": 26308.55,
+          "delta": 26308.55
+        },
+        {
+          "code": "JNROTHERALL",
+          "sage": 0,
+          "hris": 156798.96,
+          "delta": 156798.96
+        },
+        {
+          "code": "JNRUTILITY",
+          "sage": 0,
+          "hris": 8769.52,
+          "delta": 8769.52
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "JNRBASIC",
+          "amount": 175390.34
+        },
+        {
+          "code": "JNRHOUSE",
+          "amount": 30517.92
+        },
+        {
+          "code": "JNRMEDICAL",
+          "amount": 26308.55
+        },
+        {
+          "code": "JNROTHERALL",
+          "amount": 156798.96
+        },
+        {
+          "code": "JNRTRANS",
+          "amount": 26308.55
+        },
+        {
+          "code": "JNRUTILITY",
+          "amount": 8769.52
+        },
+        {
+          "code": "PERMEALJNR",
+          "amount": 8800
+        },
+        {
+          "code": "JNRNJIC",
+          "amount": 10000
+        },
+        {
+          "code": "JNRMEDICALTAX",
+          "amount": 26308.55
+        },
+        {
+          "code": "JNRUTILITYTAX",
+          "amount": 8769.52
+        },
+        {
+          "code": "JNROTHALLTAX",
+          "amount": 156798.96
+        },
+        {
+          "code": "REFUND",
+          "amount": 28476.38
+        },
+        {
+          "code": "LEAVEALLOW",
+          "amount": 172584.09
+        }
+      ]
+    },
+    {
+      "employee": "P0425",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 4094663.01,
+        "taxable": 3864057.77,
+        "paye": 727964.05,
+        "pension": 129705.15,
+        "nhf": 0,
+        "union": 0,
+        "total": 857669.2
+      },
+      "hris": {
+        "gross": 3523900.14,
+        "taxable": 3186126.3,
+        "paye": 727964.05,
+        "pension": 99981.06,
+        "nhf": 0,
+        "union": 0,
+        "total": 827945.11
+      },
+      "variance": {
+        "paye": 0,
+        "pension": -29724.09,
+        "nhf": 0,
+        "union": 0,
+        "total": -29724.09,
+        "gross": -570762.87,
+        "taxable": -677931.47
+      },
+      "earningVariances": [
+        {
+          "code": "ARREARS",
+          "sage": 1246445.67,
+          "hris": 0,
+          "delta": -1246445.67
+        },
+        {
+          "code": "MGTBASIC",
+          "sage": 675547.67,
+          "hris": 0,
+          "delta": -675547.67
+        },
+        {
+          "code": "MGTFURN",
+          "sage": 108087.63,
+          "hris": 0,
+          "delta": -108087.63
+        },
+        {
+          "code": "MGTHOUSE",
+          "sage": 540438.13,
+          "hris": 0,
+          "delta": -540438.13
+        },
+        {
+          "code": "MGTOTHERALL",
+          "sage": 783635.29,
+          "hris": 0,
+          "delta": -783635.29
+        },
+        {
+          "code": "MGTTRANS",
+          "sage": 405328.6,
+          "hris": 0,
+          "delta": -405328.6
+        },
+        {
+          "code": "MGTUTILITY",
+          "sage": 104574.78,
+          "hris": 0,
+          "delta": -104574.78
+        },
+        {
+          "code": "SNMBASIC",
+          "sage": 0,
+          "hris": 675547.67,
+          "delta": 675547.67
+        },
+        {
+          "code": "SNMHOUSE",
+          "sage": 0,
+          "hris": 337773.84,
+          "delta": 337773.84
+        },
+        {
+          "code": "SNMFURN",
+          "sage": 0,
+          "hris": 253330.38,
+          "delta": 253330.38
+        },
+        {
+          "code": "SNMOTHERALL",
+          "sage": 0,
+          "hris": 1452427.49,
+          "delta": 1452427.49
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 0,
+          "hris": 236441.68,
+          "delta": 236441.68
+        },
+        {
+          "code": "SNMUTILITY",
+          "sage": 0,
+          "hris": 337773.84,
+          "delta": 337773.84
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNMBASIC",
+          "amount": 675547.67
+        },
+        {
+          "code": "SNMHOUSE",
+          "amount": 337773.84
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 253330.38
+        },
+        {
+          "code": "SNMOTHERALL",
+          "amount": 1452427.49
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 236441.68
+        },
+        {
+          "code": "SNMUTILITY",
+          "amount": 337773.84
+        },
+        {
+          "code": "REFUND",
+          "amount": 230605.24
+        }
+      ]
+    },
+    {
+      "employee": "P0370",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 1412873.07,
+        "taxable": 1412873.06,
+        "paye": 225751.42,
+        "pension": 70009.19,
+        "nhf": 0,
+        "union": 0,
+        "total": 295760.61
+      },
+      "hris": {
+        "gross": 1777577.21,
+        "taxable": 1595261.59,
+        "paye": 267422.2,
+        "pension": 53965.42,
+        "nhf": 0,
+        "union": 0,
+        "total": 321387.62
+      },
+      "variance": {
+        "paye": 41670.78,
+        "pension": -16043.77,
+        "nhf": 0,
+        "union": 0,
+        "total": 25627.01,
+        "gross": 364704.14,
+        "taxable": 182388.53
+      },
+      "earningVariances": [
+        {
+          "code": "MGTBASIC",
+          "sage": 364631.22,
+          "hris": 0,
+          "delta": -364631.22
+        },
+        {
+          "code": "MGTFURN",
+          "sage": 58341,
+          "hris": 0,
+          "delta": -58341
+        },
+        {
+          "code": "MGTHOUSE",
+          "sage": 291704.98,
+          "hris": 0,
+          "delta": -291704.98
+        },
+        {
+          "code": "MGTOTHERALL",
+          "sage": 422972.22,
+          "hris": 0,
+          "delta": -422972.22
+        },
+        {
+          "code": "MGTTRANS",
+          "sage": 218778.73,
+          "hris": 0,
+          "delta": -218778.73
+        },
+        {
+          "code": "MGTUTILITY",
+          "sage": 56444.91,
+          "hris": 0,
+          "delta": -56444.91
+        },
+        {
+          "code": "SNMBASIC",
+          "sage": 0,
+          "hris": 364631.22,
+          "delta": 364631.22
+        },
+        {
+          "code": "SNMHOUSE",
+          "sage": 0,
+          "hris": 182315.61,
+          "delta": 182315.61
+        },
+        {
+          "code": "SNMFURN",
+          "sage": 0,
+          "hris": 136736.71,
+          "delta": 136736.71
+        },
+        {
+          "code": "SNMOTHERALL",
+          "sage": 0,
+          "hris": 783957.12,
+          "delta": 783957.12
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 0,
+          "hris": 127620.93,
+          "delta": 127620.93
+        },
+        {
+          "code": "SNMUTILITY",
+          "sage": 0,
+          "hris": 182315.61,
+          "delta": 182315.61
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNMBASIC",
+          "amount": 364631.22
+        },
+        {
+          "code": "SNMHOUSE",
+          "amount": 182315.61
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 136736.71
+        },
+        {
+          "code": "SNMOTHERALL",
+          "amount": 783957.12
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 127620.93
+        },
+        {
+          "code": "SNMUTILITY",
+          "amount": 182315.61
+        },
+        {
+          "code": "REFUND",
+          "amount": 0.01
+        }
+      ]
+    },
+    {
+      "employee": "P0433",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 1118738.31,
+        "taxable": 1118738.31,
+        "paye": 165528,
+        "pension": 55434.54,
+        "nhf": 7218.04,
+        "union": 0,
+        "total": 228180.58
+      },
+      "hris": {
+        "gross": 1407517.61,
+        "taxable": 1263156.83,
+        "paye": 198523.68,
+        "pension": 42730.79,
+        "nhf": 7218.04,
+        "union": 0,
+        "total": 248472.51
+      },
+      "variance": {
+        "paye": 32995.68,
+        "pension": -12703.75,
+        "nhf": 0,
+        "union": 0,
+        "total": 20291.93,
+        "gross": 288779.3,
+        "taxable": 144418.52
+      },
+      "earningVariances": [
+        {
+          "code": "MGTBASIC",
+          "sage": 288721.56,
+          "hris": 0,
+          "delta": -288721.56
+        },
+        {
+          "code": "MGTFURN",
+          "sage": 46195.45,
+          "hris": 0,
+          "delta": -46195.45
+        },
+        {
+          "code": "MGTHOUSE",
+          "sage": 230977.25,
+          "hris": 0,
+          "delta": -230977.25
+        },
+        {
+          "code": "MGTOTHERALL",
+          "sage": 334917.01,
+          "hris": 0,
+          "delta": -334917.01
+        },
+        {
+          "code": "MGTTRANS",
+          "sage": 173232.94,
+          "hris": 0,
+          "delta": -173232.94
+        },
+        {
+          "code": "MGTUTILITY",
+          "sage": 44694.1,
+          "hris": 0,
+          "delta": -44694.1
+        },
+        {
+          "code": "SNMBASIC",
+          "sage": 0,
+          "hris": 288721.56,
+          "delta": 288721.56
+        },
+        {
+          "code": "SNMHOUSE",
+          "sage": 0,
+          "hris": 144360.78,
+          "delta": 144360.78
+        },
+        {
+          "code": "SNMFURN",
+          "sage": 0,
+          "hris": 108270.59,
+          "delta": 108270.59
+        },
+        {
+          "code": "SNMOTHERALL",
+          "sage": 0,
+          "hris": 620751.35,
+          "delta": 620751.35
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 0,
+          "hris": 101052.55,
+          "delta": 101052.55
+        },
+        {
+          "code": "SNMUTILITY",
+          "sage": 0,
+          "hris": 144360.78,
+          "delta": 144360.78
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNMBASIC",
+          "amount": 288721.56
+        },
+        {
+          "code": "SNMHOUSE",
+          "amount": 144360.78
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 108270.59
+        },
+        {
+          "code": "SNMOTHERALL",
+          "amount": 620751.35
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 101052.55
+        },
+        {
+          "code": "SNMUTILITY",
+          "amount": 144360.78
+        }
+      ]
+    },
+    {
+      "employee": "P0463",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 6051741.02,
+        "taxable": 6045353.56,
+        "paye": 1282750.59,
+        "pension": 182684.55,
+        "nhf": 0,
+        "union": 0,
+        "total": 1465435.14
+      },
+      "hris": {
+        "gross": 6001495.8,
+        "taxable": 5995108.34,
+        "paye": 1270405.29,
+        "pension": 181820.5,
+        "nhf": 0,
+        "union": 0,
+        "total": 1452225.79
+      },
+      "variance": {
+        "paye": -12345.3,
+        "pension": -864.05,
+        "nhf": 0,
+        "union": 0,
+        "total": -13209.35,
+        "gross": -50245.22,
+        "taxable": -50245.22
+      },
+      "earningVariances": [
+        {
+          "code": "ARREARS",
+          "sage": 27872.53,
+          "hris": 0,
+          "delta": -27872.53
+        },
+        {
+          "code": "SNMFURN",
+          "sage": 462883.16,
+          "hris": 451311.08,
+          "delta": -11572.08
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 432024.28,
+          "hris": 421223.67,
+          "delta": -10800.61
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "REFUND",
+          "amount": 6387.46
+        },
+        {
+          "code": "SNMBASICSALARY",
+          "amount": 1234355.08
+        },
+        {
+          "code": "SNMHOUS",
+          "amount": 617177.54
+        },
+        {
+          "code": "SNMOTHALL",
+          "amount": 2653863.43
+        },
+        {
+          "code": "SNMUTILITIES",
+          "amount": 617177.54
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 451311.08
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 421223.67
+        }
+      ]
+    },
+    {
+      "employee": "P0315",
+      "category": "permanent",
+      "profile": "senior-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 571224.3,
+        "taxable": 571224.3,
+        "paye": 73565.67,
+        "pension": 23637.26,
+        "nhf": 0,
+        "union": 5391.9,
+        "total": 102594.83
+      },
+      "hris": {
+        "gross": 593224.3,
+        "taxable": 593224.3,
+        "paye": 77525.67,
+        "pension": 25797.26,
+        "nhf": 0,
+        "union": 5391.9,
+        "total": 108714.83
+      },
+      "variance": {
+        "paye": 3960,
+        "pension": 2160,
+        "nhf": 0,
+        "union": 0,
+        "total": 6120,
+        "gross": 22000,
+        "taxable": 22000
+      },
+      "earningVariances": [
+        {
+          "code": "PERMEAL",
+          "sage": 0,
+          "hris": 22000,
+          "delta": 22000
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNRBASIC",
+          "amount": 215675.97
+        },
+        {
+          "code": "SNRHOUSE",
+          "amount": 58481.37
+        },
+        {
+          "code": "SNRMEDICAL",
+          "amount": 26596.58
+        },
+        {
+          "code": "SNROTHERALL",
+          "amount": 169533.75
+        },
+        {
+          "code": "SNRTRANS",
+          "amount": 21308.37
+        },
+        {
+          "code": "SNRUTILITY",
+          "amount": 10628.26
+        },
+        {
+          "code": "PERMEAL",
+          "amount": 22000
+        },
+        {
+          "code": "SNRNJIC",
+          "amount": 15000
+        },
+        {
+          "code": "TCMTRANSPORT",
+          "amount": 27000
+        },
+        {
+          "code": "TCMMEAL",
+          "amount": 27000
+        }
+      ]
+    },
+    {
+      "employee": "P0080",
+      "category": "permanent",
+      "profile": "junior-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": true,
+      "sage": {
+        "gross": 524513.42,
+        "taxable": 522780.92,
+        "paye": 65209.54,
+        "pension": 21616.83,
+        "nhf": 0,
+        "union": 6122.59,
+        "total": 92948.96
+      },
+      "hris": {
+        "gross": 524513.41,
+        "taxable": 522780.91,
+        "paye": 64291.15,
+        "pension": 21616.83,
+        "nhf": 5102.16,
+        "union": 6122.59,
+        "total": 97132.73
+      },
+      "variance": {
+        "paye": -918.39,
+        "pension": 0,
+        "nhf": 5102.16,
+        "union": 0,
+        "total": 4183.77,
+        "gross": -0.01,
+        "taxable": -0.01
+      },
+      "hrisEarningCodes": [
+        {
+          "code": "JNRBASIC",
+          "amount": 204086.4
+        },
+        {
+          "code": "JNRHOUSE",
+          "amount": 35511.03
+        },
+        {
+          "code": "JNRMEDICAL",
+          "amount": 30612.96
+        },
+        {
+          "code": "JNROTHERALL",
+          "amount": 182453.24
+        },
+        {
+          "code": "JNRTRANS",
+          "amount": 30612.96
+        },
+        {
+          "code": "JNRUTILITY",
+          "amount": 10204.32
+        },
+        {
+          "code": "PERMEALJNR",
+          "amount": 8800
+        },
+        {
+          "code": "JNRNJIC",
+          "amount": 10000
+        },
+        {
+          "code": "REFUND",
+          "amount": 1732.5
+        },
+        {
+          "code": "STOCKCOUNT",
+          "amount": 10500
+        }
+      ]
+    },
+    {
+      "employee": "P0364",
+      "category": "permanent",
+      "profile": "senior-management-permanent",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 3607040.09,
+        "taxable": 3607040.09,
+        "paye": 701428.37,
+        "pension": 109506.04,
+        "nhf": 18497.64,
+        "union": 0,
+        "total": 829432.05
+      },
+      "hris": {
+        "gross": 3593629.31,
+        "taxable": 3593629.31,
+        "paye": 698463.02,
+        "pension": 108988.1,
+        "nhf": 18497.64,
+        "union": 0,
+        "total": 825948.76
+      },
+      "variance": {
+        "paye": -2965.35,
+        "pension": -517.94,
+        "nhf": 0,
+        "union": 0,
+        "total": -3483.29,
+        "gross": -13410.78,
+        "taxable": -13410.78
+      },
+      "earningVariances": [
+        {
+          "code": "SNMFURN",
+          "sage": 277464.62,
+          "hris": 270528.01,
+          "delta": -6936.61
+        },
+        {
+          "code": "SNMTRANS",
+          "sage": 258966.98,
+          "hris": 252492.81,
+          "delta": -6474.17
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "SNMBASICSALARY",
+          "amount": 739905.66
+        },
+        {
+          "code": "SNMHOUS",
+          "amount": 369952.83
+        },
+        {
+          "code": "SNMOTHALL",
+          "amount": 1590797.17
+        },
+        {
+          "code": "SNMUTILITIES",
+          "amount": 369952.83
+        },
+        {
+          "code": "SNMFURN",
+          "amount": 270528.01
+        },
+        {
+          "code": "SNMTRANS",
+          "amount": 252492.81
+        }
+      ]
+    },
+    {
+      "employee": "L2776",
+      "category": "lumpsum",
+      "profile": "contract-lumpsum",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": false,
+      "sage": {
+        "gross": 183349.93,
+        "taxable": 182490.48,
+        "paye": 11123.58,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 11123.58
+      },
+      "hris": {
+        "gross": 191849.93,
+        "taxable": 190990.48,
+        "paye": 12398.57,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 12398.57
+      },
+      "variance": {
+        "paye": 1274.99,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 1274.99,
+        "gross": 8500,
+        "taxable": 8500
+      },
+      "earningVariances": [
+        {
+          "code": "MEAL",
+          "sage": 0,
+          "hris": 8500,
+          "delta": 8500
+        }
+      ],
+      "hrisEarningCodes": [
+        {
+          "code": "LUMPSUMBASE",
+          "amount": 176240
+        },
+        {
+          "code": "MEAL",
+          "amount": 8500
+        },
+        {
+          "code": "REFUND",
+          "amount": 859.45
+        },
+        {
+          "code": "STOCKCOUNT",
+          "amount": 6250.48
+        }
+      ]
+    },
+    {
+      "employee": "L2214",
+      "category": "lumpsum",
+      "profile": "contract-lumpsum",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": true,
+      "sage": {
+        "gross": 96455,
+        "taxable": 95500,
+        "paye": 964.55,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 964.55
+      },
+      "hris": {
+        "gross": 96455,
+        "taxable": 95500,
+        "paye": 0,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 0
+      },
+      "variance": {
+        "paye": -964.55,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": -964.55,
+        "gross": 0,
+        "taxable": 0
+      },
+      "hrisEarningCodes": [
+        {
+          "code": "LUMPSUMBASE",
+          "amount": 74500
+        },
+        {
+          "code": "MEAL",
+          "amount": 11000
+        },
+        {
+          "code": "OVT",
+          "amount": 10000
+        },
+        {
+          "code": "REFUND",
+          "amount": 955
+        }
+      ]
+    },
+    {
+      "employee": "L2336",
+      "category": "lumpsum",
+      "profile": "contract-lumpsum",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": true,
+      "sage": {
+        "gross": 96455,
+        "taxable": 95500,
+        "paye": 964.55,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 964.55
+      },
+      "hris": {
+        "gross": 96455,
+        "taxable": 95500,
+        "paye": 0,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 0
+      },
+      "variance": {
+        "paye": -964.55,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": -964.55,
+        "gross": 0,
+        "taxable": 0
+      },
+      "hrisEarningCodes": [
+        {
+          "code": "LUMPSUMBASE",
+          "amount": 74500
+        },
+        {
+          "code": "MEAL",
+          "amount": 11000
+        },
+        {
+          "code": "OVT",
+          "amount": 10000
+        },
+        {
+          "code": "REFUND",
+          "amount": 955
+        }
+      ]
+    },
+    {
+      "employee": "L1940",
+      "category": "lumpsum",
+      "profile": "contract-lumpsum",
+      "matched": false,
+      "deductionMatched": false,
+      "earningsMatched": true,
+      "sage": {
+        "gross": 96202.5,
+        "taxable": 95250,
+        "paye": 962.02,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 962.02
+      },
+      "hris": {
+        "gross": 96202.5,
+        "taxable": 95250,
+        "paye": 0,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": 0
+      },
+      "variance": {
+        "paye": -962.02,
+        "pension": 0,
+        "nhf": 0,
+        "union": 0,
+        "total": -962.02,
+        "gross": 0,
+        "taxable": 0
+      },
+      "hrisEarningCodes": [
+        {
+          "code": "LUMPSUMBASE",
+          "amount": 56250
+        },
+        {
+          "code": "REFUND",
+          "amount": 952.5
+        },
+        {
+          "code": "TCMMEAL",
+          "amount": 39000
+        }
+      ]
+    }
+  ]
+}

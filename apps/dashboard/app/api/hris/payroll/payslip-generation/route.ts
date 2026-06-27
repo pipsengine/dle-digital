@@ -14,6 +14,7 @@ import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { calculateTimesheetPeriod, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage, type PayslipEmployeeIdentity } from '@/lib/payroll-payslip-identity-store';
+import { resolvePayCurrency } from '@/lib/payroll-currency';
 import { buildExcelHtml, excelMimeType } from '@/lib/excel-export';
 
 type Role = 'Super Admin' | 'HR Director' | 'HR Manager' | 'Payroll Officer' | 'Finance Controller' | 'Executive Management' | 'Auditor' | 'Employee';
@@ -361,6 +362,26 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     ];
     const status = statusFrom(issues);
     const deliveryStatus: DeliveryStatus = currentBatch?.status === 'Released' && status !== 'Blocked' ? 'Released' : currentBatch ? status === 'Blocked' ? 'Withheld' : 'Generated' : 'Draft';
+    const resolvedPayCurrency = resolvePayCurrency({
+      payCurrency: identity?.payCurrency || employee.payCurrency,
+      payrollGroup: employee.payrollGroup || identity?.payrollGroup,
+      salaryGrade: employee.salaryGrade || identity?.salaryGrade || employee.jobGrade,
+      jobGrade: employee.jobGrade,
+      businessUnit: employee.businessUnit || identity?.businessUnit,
+    });
+    const localEarnings = (employee.sageLocalPayrollEarnings || []).map((line) => ({
+      code: line.code,
+      label: line.name,
+      taxable: true,
+      amount: line.amount,
+    }));
+    const localDeductionLines = employee.sageLocalPayrollDeductions?.lines || [];
+    const localDeductions = localDeductionLines.map((line) => ({
+      label: line.name || line.code,
+      amount: line.amount,
+    }));
+    const localGross = employee.localPeriodSalary || localEarnings.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const localTotalDeductions = employee.localLatestDeductions || employee.sageLocalPayrollDeductions?.totalDeductions || localDeductions.reduce((sum, line) => sum + Number(line.amount || 0), 0);
     return {
       payslipId: `PS-${requestedPeriod}-${employee.employeeId}`,
       employeeId: employee.employeeId,
@@ -381,7 +402,16 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
       attendanceHours: dailyRateEmployee ? roundMoney(dailyAttendance.attendanceHours) : null,
       bookedHours: dailyRateEmployee ? roundMoney(dailyAttendance.bookedHours) : null,
       idleHours: dailyRateEmployee ? roundMoney(dailyAttendance.idleHours) : null,
-      payCurrency: identity?.payCurrency || employee.payCurrency || 'NGN',
+      payCurrency: resolvedPayCurrency,
+      localRun: employee.hasDualCurrencyPayroll ? {
+        payrollGroup: employee.localPayrollGroup || 'DLE',
+        payCurrency: employee.localPayCurrency || 'NGN',
+        grossPay: roundMoney(localGross),
+        totalDeductions: roundMoney(localTotalDeductions),
+        netPay: roundMoney(Math.max(0, localGross - localTotalDeductions)),
+        earnings: localEarnings,
+        deductions: localDeductions.filter((item) => item.amount > 0),
+      } : null,
       paymentRun: identity?.paymentRun || employee.paymentRun || 'Monthly',
       paymentType: identity?.paymentType || employee.paymentType || '',
       bankName: identity?.bankName || employee.bankName || 'Not configured',
