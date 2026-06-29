@@ -2,7 +2,8 @@ param(
   [string]$OutputPath = "deployment\iis\site",
   [ValidateSet("ReverseProxy", "HttpPlatform")]
   [string]$HostingMode = "HttpPlatform",
-  [switch]$SkipInstall
+  [switch]$SkipInstall,
+  [switch]$NoStop
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,11 +15,96 @@ $StandalonePath = Join-Path $BuildPath "standalone"
 $ResolvedOutputPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $OutputPath))
 $RuntimeDataBackupPath = Join-Path $RepoRoot "deployment\iis\.runtime-data-backup"
 
+function Get-NormalizedDirectoryPath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  return [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/').ToLowerInvariant()
+}
+
+function Stop-NodeProcessesUsingPath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $target = Get-NormalizedDirectoryPath -Path $Path
+  $stopped = New-Object "System.Collections.Generic.List[string]"
+
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | ForEach-Object {
+    $commandLine = [string]$_.CommandLine
+    if (-not $commandLine) {
+      return
+    }
+
+    $normalizedCommand = $commandLine.ToLowerInvariant()
+    if ($normalizedCommand.Contains($target)) {
+      $processId = $_.ProcessId
+      try {
+        Stop-Process -Id $processId -Force -ErrorAction Stop
+        $stopped.Add("node.exe (PID $processId)")
+      } catch {
+        Write-Warning "Could not stop node.exe PID ${processId}: $($_.Exception.Message)"
+      }
+    }
+  }
+
+  return $stopped
+}
+
+function Stop-IisSitesUsingPath {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $target = Get-NormalizedDirectoryPath -Path $Path
+  $stopped = New-Object "System.Collections.Generic.List[string]"
+
+  if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
+    return $stopped
+  }
+
+  Import-Module WebAdministration -ErrorAction SilentlyContinue
+  if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
+    return $stopped
+  }
+
+  foreach ($site in Get-ChildItem IIS:\Sites) {
+    $sitePath = Get-NormalizedDirectoryPath -Path $site.physicalPath
+    if ($sitePath -ne $target -and -not $sitePath.StartsWith("$target\")) {
+      continue
+    }
+
+    $poolName = [string]$site.applicationPool
+    if ($poolName) {
+      $poolState = (Get-WebAppPoolState -Name $poolName -ErrorAction SilentlyContinue).Value
+      if ($poolState -and $poolState -ne "Stopped") {
+        Stop-WebAppPool -Name $poolName -ErrorAction SilentlyContinue
+        $stopped.Add("IIS app pool '$poolName'")
+      }
+    }
+
+    if ($site.State -ne "Stopped") {
+      Stop-Website -Name $site.Name -ErrorAction SilentlyContinue
+      $stopped.Add("IIS site '$($site.Name)'")
+    }
+  }
+
+  return $stopped
+}
+
+function Stop-PublishTargetLocks {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $actions = @()
+  $actions += Stop-IisSitesUsingPath -Path $Path
+  $actions += Stop-NodeProcessesUsingPath -Path $Path
+
+  if ($actions.Count -gt 0) {
+    Write-Host ("Stopped publish locks: {0}" -f (($actions | Select-Object -Unique) -join ", "))
+    Start-Sleep -Seconds 2
+  }
+}
+
 function Remove-PathWithRetry {
   param(
     [Parameter(Mandatory = $true)][string]$Path,
-    [int]$Attempts = 5,
-    [int]$DelaySeconds = 2
+    [int]$Attempts = 8,
+    [int]$DelaySeconds = 3,
+    [switch]$AttemptStopLocks
   )
 
   if (-not (Test-Path -LiteralPath $Path)) {
@@ -30,8 +116,27 @@ function Remove-PathWithRetry {
       Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
       return
     } catch {
+      if ($AttemptStopLocks -and $Attempt -eq 1) {
+        Stop-PublishTargetLocks -Path $Path
+      }
+
       if ($Attempt -eq $Attempts) {
-        throw "Could not remove '$Path'. Stop IIS/the running dashboard service and close editors or terminals that are browsing the publish folder, then rerun this command. Original error: $($_.Exception.Message)"
+        throw @"
+Could not remove '$Path'.
+
+The build succeeded, but another process is still using files inside the IIS publish folder (usually IIS HttpPlatformHandler, w3wp.exe, or a running node dashboard service).
+
+Fix:
+  1. Stop the IIS site/app pool that points at this folder, or stop the dashboard Windows service.
+  2. Close File Explorer windows and terminals whose current directory is under deployment\iis\site.
+  3. Rerun: npm run publish:iis -- -SkipInstall
+
+Optional manual stop (run as Administrator):
+  Import-Module WebAdministration
+  Get-Website | Where-Object { `$_.physicalPath -like '*deployment\iis\site*' } | ForEach-Object { Stop-WebAppPool `$_.applicationPool; Stop-Website `$_.Name }
+
+Original error: $($_.Exception.Message)
+"@
       }
 
       Start-Sleep -Seconds $DelaySeconds
@@ -50,7 +155,7 @@ function Copy-DirectoryContents {
   }
 
   if (Test-Path -LiteralPath $DestinationPath) {
-    Remove-PathWithRetry -Path $DestinationPath
+    Remove-PathWithRetry -Path $DestinationPath -AttemptStopLocks:(-not $NoStop)
   }
 
   New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
@@ -144,8 +249,12 @@ try {
     Remove-PathWithRetry -Path $RuntimeDataBackupPath
   }
 
+  if (-not $NoStop -and (Test-Path -LiteralPath $ResolvedOutputPath)) {
+    Stop-PublishTargetLocks -Path $ResolvedOutputPath
+  }
+
   if (Test-Path -LiteralPath $ResolvedOutputPath) {
-    Remove-PathWithRetry -Path $ResolvedOutputPath
+    Remove-PathWithRetry -Path $ResolvedOutputPath -AttemptStopLocks:(-not $NoStop)
   }
 
   New-Item -ItemType Directory -Path $ResolvedOutputPath | Out-Null
