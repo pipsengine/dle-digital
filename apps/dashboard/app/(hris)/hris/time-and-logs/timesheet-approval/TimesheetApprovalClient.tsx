@@ -168,6 +168,7 @@ type ApprovalPayload = {
     visibleTimesheetCount?: number;
     awaitingApprovalCount?: number;
     historyTimesheetCount?: number;
+    draftBookedCount?: number;
     writeTarget: string;
   };
   permissions: {
@@ -183,6 +184,7 @@ type ApprovalPayload = {
   pendingTimesheets: TimesheetSummary[];
   historyTimesheets: TimesheetSummary[];
   allTimesheets?: TimesheetSummary[];
+  draftBookedTimesheets?: TimesheetSummary[];
   pagination?: {
     page: number;
     pageSize: number;
@@ -283,8 +285,44 @@ const detailTabs: Array<{ id: DetailTab; label: string }> = [
 ];
 
 function flattenRows(timesheets: TimesheetSummary[]): GridRow[] {
-  return timesheets.flatMap((timesheet) =>
-    timesheet.employeeRows.map((employee) => {
+  return timesheets.flatMap((timesheet) => {
+    if (!timesheet.employeeRows.length) {
+      const primaryProject = timesheet.projectApprovals[0] || null;
+      const currentSla = timesheet.workflowSteps.find((step) => step.stage === timesheet.currentStage);
+      return [{
+        rowKey: `${timesheet.id}:summary`,
+        headerId: timesheet.id,
+        timesheet,
+        employee: {
+          lineId: 'summary',
+          employeeId: '-',
+          employeeNo: '-',
+          employeeName: `${timesheet.workCenterName} crew summary`,
+          department: '—',
+          businessUnit: '—',
+          employmentType: '—',
+          location: '—',
+          clockIn: null,
+          clockOut: null,
+          attendanceHours: timesheet.totalHours,
+          productiveHours: timesheet.productiveHours,
+          idleHours: 0,
+          overtimeHours: timesheet.overtimeHours,
+          totalHours: timesheet.totalHours,
+          variance: 0,
+          validationStatus: 'Incomplete',
+          activities: [],
+        },
+        primaryProject,
+        labourCost: timesheet.labourCost,
+        validationScore: 70,
+        approvalLabel: approvalLabelFor(timesheet),
+        approvalTone: approvalToneFor(timesheet),
+        sla: currentSla?.slaStatus || 'On Track',
+        regularHours: Math.max(0, timesheet.productiveHours - timesheet.overtimeHours),
+      }];
+    }
+    return timesheet.employeeRows.map((employee) => {
       const primaryProject = timesheet.projectApprovals[0] || null;
       const labourCost = employee.activities.reduce((sum, activity) => sum + activity.labourCost, 0);
       const currentSla = timesheet.workflowSteps.find((step) => step.stage === timesheet.currentStage);
@@ -301,8 +339,8 @@ function flattenRows(timesheets: TimesheetSummary[]): GridRow[] {
         sla: currentSla?.slaStatus || 'On Track',
         regularHours: Math.max(0, employee.productiveHours - employee.overtimeHours),
       };
-    }),
-  );
+    });
+  });
 }
 
 function stageWaitingForScope(scope: string, stage: string | null) {
@@ -430,6 +468,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   };
 
   const workspaceTimesheets = useMemo(() => payload?.allTimesheets || [], [payload?.allTimesheets]);
+  const draftBookedTimesheets = useMemo(() => payload?.draftBookedTimesheets || [], [payload?.draftBookedTimesheets]);
   const serverPagination = payload?.pagination;
   const filteredTimesheets = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -698,6 +737,20 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         </header>
 
         {error ? <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{error}</div> : null}
+        {mode === 'active' && draftBookedTimesheets.length > 0 ? (
+          <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <p className="font-semibold">{draftBookedTimesheets.length} timesheet{draftBookedTimesheets.length === 1 ? '' : 's'} have booked hours but are still in Draft.</p>
+            <p className="mt-1 text-amber-900">
+              Approval starts after submission. Open Timesheet Entry, complete booking, then use <span className="font-semibold">Review &amp; Submit</span>.
+              {' '}
+              {draftBookedTimesheets.slice(0, 3).map((item) => `${item.timesheetDate} · ${item.workCenterName}`).join(' · ')}
+              {draftBookedTimesheets.length > 3 ? ` · +${draftBookedTimesheets.length - 3} more` : ''}
+            </p>
+            <Link href="/hris/time-and-logs/timesheet-entry" className="mt-2 inline-flex h-9 items-center rounded-xl bg-amber-600 px-3 text-xs font-semibold text-white hover:bg-amber-700">
+              Open Timesheet Entry
+            </Link>
+          </div>
+        ) : null}
         {payload?.dataSource ? (
           <div className={`rounded-[18px] border px-4 py-3 text-sm ${payload.dataSource.connected ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
             <span className="font-semibold">{payload.dataSource.system}</span>
@@ -935,7 +988,9 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
                                 ? 'No timesheets match the current filters. Clear filters or switch workspace tabs.'
                                 : mode === 'history'
                                   ? 'No completed or closed timesheets are available in history.'
-                                  : 'No timesheets were returned from DLE_Enterprise for this workspace view.'}
+                                  : draftBookedTimesheets.length
+                                    ? 'No submitted timesheets are in the approval queue yet. Use Review & Submit on Timesheet Entry to release booked hours for approval.'
+                                    : 'No timesheets were returned from DLE_Enterprise for this workspace view.'}
                             </td>
                           </tr>
                         )}

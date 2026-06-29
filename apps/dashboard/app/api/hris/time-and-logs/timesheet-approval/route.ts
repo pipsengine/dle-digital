@@ -10,8 +10,10 @@ import {
   readProjects,
   invalidateTimesheetApprovalWorkspaceCache,
   readTimesheetApprovalPage,
+  readTimesheetApprovalData,
   readTimesheetApprovalWorkspaceStats,
   readTimesheetData,
+  readTimesheetDraftBookedHeaders,
   readTimesheetPayrollUpdates,
   readTimesheetPeriods,
   writeTimesheetPayrollUpdates,
@@ -72,13 +74,22 @@ const nextActionLabel = (status: TimesheetStatus) => {
   return null;
 };
 
-const roleScope = (role: string, actor: string) => {
+const roleScope = (role: string, actor: string, request?: Request) => {
+  if (request?.headers.get('x-auth-global-admin') === '1') return 'enterprise';
   const text = lower(`${role} ${actor}`);
   if (isSuperAdministrator(role) || includesAny(text, ['admin', 'hr', 'human resources', 'payroll'])) return 'enterprise';
   if (includesAny(text, ['cost control', 'cost controller', 'finance'])) return 'cost-control';
   if (includesAny(text, ['project manager', 'pm '])) return 'project-manager';
   if (includesAny(text, ['supervisor', 'foreman', 'site lead'])) return 'supervisor';
   return 'restricted';
+};
+
+const headerMatchesListMode = (status: TimesheetStatus, mode: TimesheetApprovalListMode) => {
+  const normalized = normalizeTimesheetStatus(status);
+  if (normalized === 'Draft') return false;
+  if (mode === 'pending') return activeApprovalStatuses.has(normalized);
+  if (mode === 'history') return !activeApprovalStatuses.has(normalized);
+  return true;
 };
 
 const stageAccess = (stage: ProjectApprovalStage | null, actor: string, role: string) => {
@@ -172,8 +183,12 @@ const workflowSteps = (header: TimesheetHeader) => {
 
 const canSeeHeader = (scope: string, header: TimesheetHeader, projectApprovals: ReturnType<typeof buildProjectTimesheetApprovals>, actor: string) => {
   if (scope === 'enterprise' || scope === 'cost-control') return true;
-  if (scope === 'supervisor') return lower(header.supervisorName).includes(lower(actor)) || lower(actor).includes(lower(header.supervisorName));
-  if (scope === 'project-manager') return projectApprovals.some((item) => lower(item.projectManager).includes(lower(actor)) || lower(actor).includes(lower(item.projectManager)));
+  const actorKey = lower(actor);
+  const supervisorKeys = [header.supervisorName, header.supervisorId].map((value) => lower(value)).filter(Boolean);
+  if (scope === 'supervisor') {
+    return supervisorKeys.some((supervisorKey) => supervisorKey.includes(actorKey) || actorKey.includes(supervisorKey));
+  }
+  if (scope === 'project-manager') return projectApprovals.some((item) => lower(item.projectManager).includes(actorKey) || actorKey.includes(lower(item.projectManager)));
   return false;
 };
 
@@ -347,18 +362,49 @@ const buildPayload = async (request: Request) => {
   }
 
   const { page, pageSize, listMode } = parseListRequest(request);
-  const scope = roleScope(access.role, access.actor);
+  const scope = roleScope(access.role, access.actor, request);
 
-  const [workspaceStats, pageData, projects, payrollUpdates, periods, employeeLookup] = await Promise.all([
+  const [workspaceStats, projects, payrollUpdates, periods, employeeLookup, draftBookedData] = await Promise.all([
     readTimesheetApprovalWorkspaceStats(),
-    readTimesheetApprovalPage({ mode: listMode, page, pageSize }),
     readProjects(),
     readTimesheetPayrollUpdates(),
     readTimesheetPeriods(),
     readTimesheetApprovalEmployeeMeta(),
+    readTimesheetDraftBookedHeaders(),
   ]);
 
-  const { headers, lines, total } = pageData;
+  const useSqlPagination = scope === 'enterprise' || scope === 'cost-control';
+  let headers: TimesheetHeader[];
+  let lines: TimesheetLine[];
+  let total: number;
+
+  if (useSqlPagination) {
+    const pageData = await readTimesheetApprovalPage({ mode: listMode, page, pageSize });
+    headers = pageData.headers;
+    lines = pageData.lines;
+    total = pageData.total;
+  } else {
+    const allData = await readTimesheetApprovalData();
+    const visibleHeaders = allData.headers.filter((header) => {
+      if (!headerMatchesListMode(header.status, listMode)) return false;
+      const headerLines = allData.lines.filter((line) => line.headerId === header.id);
+      const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
+      return canSeeHeader(scope, header, projectApprovals, access.actor);
+    });
+    total = visibleHeaders.length;
+    const start = (page - 1) * pageSize;
+    headers = visibleHeaders.slice(start, start + pageSize);
+    const headerIds = new Set(headers.map((header) => header.id));
+    lines = allData.lines.filter((line) => headerIds.has(line.headerId));
+  }
+
+  const { headers: draftHeaders, lines: draftLines } = draftBookedData;
+  const draftLineByHeader = new Map<string, TimesheetLine[]>();
+  for (const line of draftLines) draftLineByHeader.set(line.headerId, [...(draftLineByHeader.get(line.headerId) || []), line]);
+  const draftBookedTimesheets = draftHeaders
+    .map((header) => buildTimesheetSummary(header, draftLineByHeader.get(header.id) || [], periods, payrollUpdates, projects, employeeLookup, scope, access.actor))
+    .filter(Boolean);
+
   const lineByHeader = new Map<string, TimesheetLine[]>();
   for (const line of lines) lineByHeader.set(line.headerId, [...(lineByHeader.get(line.headerId) || []), line]);
 
@@ -398,6 +444,7 @@ const buildPayload = async (request: Request) => {
       visibleTimesheetCount: total,
       awaitingApprovalCount: workspaceStats.pendingCount,
       historyTimesheetCount: workspaceStats.historyCount,
+      draftBookedCount: draftBookedTimesheets.length,
       writeTarget: 'hris.TimesheetHeaders / hris.TimesheetLines / hris.TimesheetWorkflowEvents',
     },
     permissions: {
@@ -413,6 +460,7 @@ const buildPayload = async (request: Request) => {
     pendingTimesheets,
     historyTimesheets,
     allTimesheets: pageTimesheets,
+    draftBookedTimesheets,
     stats,
     filterOptions: {
       workCenters: workspaceStats.filterOptions.workCenters,

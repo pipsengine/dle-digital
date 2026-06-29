@@ -2086,10 +2086,35 @@ VALUES (@Id,@HeaderId,@EmployeeId,@EmployeeNo,@EmployeeName,@BiometricId,@Attend
 
     await tx.commit();
     invalidateTimesheetDataCache();
+    invalidateTimesheetApprovalWorkspaceCache();
   } catch (error) {
     await tx.rollback();
     throw error;
   }
+}
+
+export async function readTimesheetDraftBookedHeaders(options?: { softFail?: boolean }) {
+  let pool: sql.ConnectionPool;
+  try {
+    pool = await db();
+  } catch (error) {
+    if (options?.softFail) return { headers: [] as TimesheetHeader[], lines: [] as TimesheetLine[] };
+    throw error;
+  }
+
+  const headersResult = await pool.request().query(`
+    SELECT DISTINCT h.*
+    FROM [hris].[TimesheetHeaders] h
+    INNER JOIN [hris].[TimesheetLines] l ON ${joinHeaderToLine}
+    INNER JOIN [hris].[TimesheetProjectAllocations] a ON ${joinLineToAllocation}
+    WHERE h.[Status] = N'Draft' AND a.[Hours] > 0
+    ORDER BY h.[TimesheetDate] DESC, h.[SupervisorName], h.[WorkCenterName]
+  `);
+
+  const headerIds = headersResult.recordset.map((row) => String(row.Id));
+  const { eventsByHeader, lines } = await loadTimesheetChildData(pool, headerIds);
+  const headers = headersResult.recordset.map((row) => mapTimesheetHeaderRow(row, eventsByHeader));
+  return { headers, lines };
 }
 
 export async function readTimesheetPayrollUpdates(): Promise<TimesheetPayrollUpdate[]> {
