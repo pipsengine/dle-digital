@@ -5,11 +5,18 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  getNigeriaLgas,
+  getNigeriaStates,
+  getRegionForState,
+  NIGERIA_REGIONS,
+} from '@/lib/nigeria-locations';
+import {
   AlertTriangle,
   BadgeCheck,
   BriefcaseBusiness,
   Calendar,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
@@ -106,6 +113,7 @@ type DraftPersonal = {
   dateOfBirth: string;
   maritalStatus: string;
   nationality: string;
+  region: string;
   stateOfOrigin: string;
   localGovernmentArea: string;
   religion: string;
@@ -122,7 +130,9 @@ type DraftContact = {
   permanentAddress: string;
   nearestBusStop: string;
   city: string;
+  region: string;
   state: string;
+  localGovernmentArea: string;
   country: string;
   postalCode: string;
   officeExtension: string;
@@ -402,19 +412,22 @@ const SelectField = ({
         </span>
       ) : null}
     </div>
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className={`mt-1 w-full text-sm font-semibold focus:outline-none ${disabled ? 'bg-transparent text-slate-400' : 'bg-white text-slate-900'}`}
-    >
-      <option value="">Select…</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
+    <div className="relative mt-1">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={`w-full appearance-none rounded-lg border border-slate-200 py-2 pl-3 pr-9 text-sm font-semibold focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-blue-100 ${disabled ? 'cursor-not-allowed bg-slate-50 text-slate-400' : 'cursor-pointer bg-white text-slate-900'}`}
+      >
+        <option value="">Select…</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 ${disabled ? 'text-slate-300' : 'text-slate-500'}`} />
+    </div>
   </div>
 );
 
@@ -482,6 +495,7 @@ const makeEmptyDraft = (countryDefault: string): EmployeeDraftPayload => ({
     dateOfBirth: '',
     maritalStatus: '',
     nationality: 'Nigerian',
+    region: '',
     stateOfOrigin: '',
     localGovernmentArea: '',
     religion: '',
@@ -497,7 +511,9 @@ const makeEmptyDraft = (countryDefault: string): EmployeeDraftPayload => ({
     permanentAddress: '',
     nearestBusStop: '',
     city: '',
+    region: '',
     state: '',
+    localGovernmentArea: '',
     country: countryDefault,
     postalCode: '',
     officeExtension: '',
@@ -590,6 +606,12 @@ export default function AddNewEmployeeClient({ initialNow, initialDraftId }: { i
   const nowMs = useMemo(() => new Date(initialNow).getTime(), [initialNow]);
 
   const countryDefault = 'Nigeria';
+  const personalRegion = draft.personal.region || getRegionForState(draft.personal.stateOfOrigin);
+  const personalStateOptions = useMemo(() => getNigeriaStates(personalRegion), [personalRegion]);
+  const personalLgaOptions = useMemo(() => getNigeriaLgas(draft.personal.stateOfOrigin), [draft.personal.stateOfOrigin]);
+  const contactRegion = draft.contact.region || getRegionForState(draft.contact.state);
+  const contactStateOptions = useMemo(() => getNigeriaStates(contactRegion), [contactRegion]);
+  const contactLgaOptions = useMemo(() => getNigeriaLgas(draft.contact.state), [draft.contact.state]);
 
   useEffect(() => {
     const loadOptions = async () => {
@@ -1131,8 +1153,51 @@ export default function AddNewEmployeeClient({ initialNow, initialDraftId }: { i
       />
       <SelectField label="Marital Status" value={draft.personal.maritalStatus} onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, maritalStatus: v } }))} options={['Single', 'Married', 'Divorced', 'Widowed']} />
       <Field label="Nationality" value={draft.personal.nationality} onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, nationality: v } }))} />
-      <Field label="State of Origin" value={draft.personal.stateOfOrigin} onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, stateOfOrigin: v } }))} />
-      <Field label="Local Government Area" value={draft.personal.localGovernmentArea} onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, localGovernmentArea: v } }))} />
+      <SelectField
+        label="Region"
+        value={personalRegion}
+        onChange={(nextRegion) =>
+          setDraft((d) => ({
+            ...d,
+            personal: {
+              ...d.personal,
+              region: nextRegion,
+              stateOfOrigin:
+                nextRegion && d.personal.stateOfOrigin && getRegionForState(d.personal.stateOfOrigin) !== nextRegion
+                  ? ''
+                  : d.personal.stateOfOrigin,
+              localGovernmentArea:
+                nextRegion && d.personal.stateOfOrigin && getRegionForState(d.personal.stateOfOrigin) !== nextRegion
+                  ? ''
+                  : d.personal.localGovernmentArea,
+            },
+          }))
+        }
+        options={[...NIGERIA_REGIONS]}
+      />
+      <SelectField
+        label="State of Origin"
+        value={draft.personal.stateOfOrigin}
+        onChange={(nextState) =>
+          setDraft((d) => ({
+            ...d,
+            personal: {
+              ...d.personal,
+              stateOfOrigin: nextState,
+              region: nextState ? getRegionForState(nextState) : d.personal.region,
+              localGovernmentArea: nextState === d.personal.stateOfOrigin ? d.personal.localGovernmentArea : '',
+            },
+          }))
+        }
+        options={personalStateOptions}
+      />
+      <SelectField
+        label="Local Government Area"
+        value={draft.personal.localGovernmentArea}
+        onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, localGovernmentArea: v } }))}
+        options={personalLgaOptions}
+        disabled={!draft.personal.stateOfOrigin}
+      />
       <Field label="Religion" value={draft.personal.religion} onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, religion: v } }))} />
       <Field label="Languages Spoken" value={draft.personal.languagesSpoken} onChange={(v) => setDraft((d) => ({ ...d, personal: { ...d.personal, languagesSpoken: v } }))} />
       <div className="rounded-2xl border border-slate-200 bg-white p-3 lg:col-span-3">
@@ -1185,7 +1250,49 @@ export default function AddNewEmployeeClient({ initialNow, initialDraftId }: { i
       <Field label="Permanent Address" value={draft.contact.permanentAddress} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, permanentAddress: v } }))} />
       <Field label="Nearest Bus Stop" value={draft.contact.nearestBusStop} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, nearestBusStop: v } }))} />
       <Field label="City" value={draft.contact.city} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, city: v } }))} />
-      <Field label="State" value={draft.contact.state} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, state: v } }))} />
+      <SelectField
+        label="Region"
+        value={contactRegion}
+        onChange={(nextRegion) =>
+          setDraft((d) => ({
+            ...d,
+            contact: {
+              ...d.contact,
+              region: nextRegion,
+              state:
+                nextRegion && d.contact.state && getRegionForState(d.contact.state) !== nextRegion ? '' : d.contact.state,
+              localGovernmentArea:
+                nextRegion && d.contact.state && getRegionForState(d.contact.state) !== nextRegion
+                  ? ''
+                  : d.contact.localGovernmentArea,
+            },
+          }))
+        }
+        options={[...NIGERIA_REGIONS]}
+      />
+      <SelectField
+        label="State"
+        value={draft.contact.state}
+        onChange={(nextState) =>
+          setDraft((d) => ({
+            ...d,
+            contact: {
+              ...d.contact,
+              state: nextState,
+              region: nextState ? getRegionForState(nextState) : d.contact.region,
+              localGovernmentArea: nextState === d.contact.state ? d.contact.localGovernmentArea : '',
+            },
+          }))
+        }
+        options={contactStateOptions}
+      />
+      <SelectField
+        label="Local Government Area"
+        value={draft.contact.localGovernmentArea}
+        onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, localGovernmentArea: v } }))}
+        options={contactLgaOptions}
+        disabled={!draft.contact.state}
+      />
       <Field label="Country" required value={draft.contact.country} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, country: v } }))} error={requiredErrors['contact.country']} placeholder={countryDefault} />
       <Field label="Postal Code" value={draft.contact.postalCode} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, postalCode: v } }))} />
       <Field label="Office Extension" value={draft.contact.officeExtension} onChange={(v) => setDraft((d) => ({ ...d, contact: { ...d.contact, officeExtension: v } }))} />
