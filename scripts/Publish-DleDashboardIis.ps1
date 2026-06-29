@@ -283,14 +283,55 @@ function Copy-IisEnvironmentFile {
     return
   }
 
-  Copy-Item -LiteralPath $EnvSource -Destination (Join-Path $DestinationRoot ".env") -Force
+  $DestinationEnv = Join-Path $DestinationRoot ".env"
+  Copy-Item -LiteralPath $EnvSource -Destination $DestinationEnv -Force
+  Ensure-InternalDeployEnvDefaults -EnvFilePath $DestinationEnv
 
   $DashboardEnvTargetDirectory = Join-Path $DestinationRoot "apps\dashboard"
   if (Test-Path -LiteralPath $DashboardEnvTargetDirectory) {
-    Copy-Item -LiteralPath $EnvSource -Destination (Join-Path $DashboardEnvTargetDirectory ".env") -Force
+    $DashboardEnv = Join-Path $DashboardEnvTargetDirectory ".env"
+    Copy-Item -LiteralPath $EnvSource -Destination $DashboardEnv -Force
+    Ensure-InternalDeployEnvDefaults -EnvFilePath $DashboardEnv
   }
 
   Write-Host "Copied IIS runtime environment from $EnvSource"
+}
+
+function Ensure-InternalDeployEnvDefaults {
+  param(
+    [Parameter(Mandatory = $true)][string]$EnvFilePath
+  )
+
+  if (-not (Test-Path -LiteralPath $EnvFilePath)) { return }
+
+  $Defaults = [ordered]@{
+    'DLE_DEPLOY_ENV' = 'internal'
+    'HRIS_TIMESHEET_OVERTIME_BOOKING_ENABLED' = 'true'
+    'HRIS_TIMESHEET_OVERTIME_DEV_RELAXED' = 'true'
+    'HRIS_TIMESHEET_OVERTIME_RETRO_CORRECTION' = 'true'
+    'HRIS_TIMESHEET_OVERTIME_OPEN_BOOKING' = 'true'
+  }
+
+  $Lines = Get-Content -LiteralPath $EnvFilePath
+  $ExistingKeys = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($Line in $Lines) {
+    if ($Line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') {
+      [void]$ExistingKeys.Add($Matches[1])
+    }
+  }
+
+  $Appended = @()
+  foreach ($Entry in $Defaults.GetEnumerator()) {
+    if ($ExistingKeys.Contains($Entry.Key)) { continue }
+    $Appended += "$($Entry.Key)=$($Entry.Value)"
+  }
+
+  if ($Appended.Count -gt 0) {
+    Add-Content -LiteralPath $EnvFilePath -Value ""
+    Add-Content -LiteralPath $EnvFilePath -Value "# Added by Publish-DleDashboardIis.ps1 for internal UAT parity"
+    Add-Content -LiteralPath $EnvFilePath -Value $Appended
+    Write-Host "Ensured internal deploy defaults in $EnvFilePath"
+  }
 }
 
 function Test-NextTraceFiles {
