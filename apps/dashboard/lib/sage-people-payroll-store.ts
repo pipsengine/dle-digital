@@ -1057,6 +1057,7 @@ FROM #PeriodPayslips pp;
 
 SELECT
   pp.period_code AS period,
+  pp.EmployeeID AS employeeId,
   edef.DefCode AS code,
   COALESCE(NULLIF(LTRIM(RTRIM(edef.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(edef.LongDescription)), ''), edef.DefCode) AS name,
   pel.Total AS amount,
@@ -1068,10 +1069,11 @@ JOIN Payroll.PayslipEarnLine pel
 JOIN Payroll.EarningDef edef
   ON edef.EarningDefID = pel.DefID
 WHERE ISNULL(pel.Total, 0) <> 0
-ORDER BY pp.period_code, edef.DefCode;
+ORDER BY pp.period_code, pp.EmployeeID, edef.DefCode;
 
 SELECT
   pp.period_code AS period,
+  pp.EmployeeID AS employeeId,
   dd.DefCode AS code,
   COALESCE(NULLIF(LTRIM(RTRIM(dd.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(dd.LongDescription)), ''), dd.DefCode) AS name,
   pdl.Total AS amount,
@@ -1082,10 +1084,11 @@ JOIN Payroll.PayslipDeductionLine pdl
 JOIN Payroll.DeductionDef dd
   ON dd.DeductionDefID = pdl.DefID
 WHERE ISNULL(pdl.Total, 0) <> 0
-ORDER BY pp.period_code, dd.DefCode;
+ORDER BY pp.period_code, pp.EmployeeID, dd.DefCode;
 
 SELECT
   pp.period_code AS period,
+  pp.EmployeeID AS employeeId,
   ccd.DefCode AS code,
   COALESCE(NULLIF(LTRIM(RTRIM(ccd.ShortDescription)), ''), NULLIF(LTRIM(RTRIM(ccd.LongDescription)), ''), ccd.DefCode) AS name,
   pccl.Total AS amount,
@@ -1096,15 +1099,16 @@ JOIN Payroll.PayslipCompanyContributionLine pccl
 JOIN Payroll.CompanyContributionDef ccd
   ON ccd.CompanyContributionDefID = pccl.DefID
 WHERE ISNULL(pccl.Total, 0) <> 0
-ORDER BY pp.period_code, ccd.DefCode;
+ORDER BY pp.period_code, pp.EmployeeID, ccd.DefCode;
 
 SELECT
   pp.period_code AS period,
+  pp.EmployeeID AS employeeId,
   SUM(ISNULL(pnp.PaymentAmount, 0)) AS netPay
 FROM #PeriodPayslips pp
 JOIN Payroll.PayslipNetPay pnp
   ON pnp.PayslipID = pp.PayslipID
-GROUP BY pp.period_code;
+GROUP BY pp.period_code, pp.EmployeeID;
 
 DROP TABLE #PeriodPayslips;
 DROP TABLE #MatchedEmployees;
@@ -1121,15 +1125,18 @@ const isPensionDeductionCode = (code: string) => {
   return (upper.includes('PENSION') || upper === 'PENARR' || upper === 'VOLPENS') && upper !== 'SUSPENSION';
 };
 
+const sagePeriodEmployeeKey = (period: string, employeeId: number) => `${period}|${Number(employeeId)}`;
+
 const buildSageEmployeePayslipSnapshots = (
   headers: Array<{ period: string; employeeId: number; payslipId: number; lastCalcDate: string | Date | null }>,
-  earnings: Array<{ period: string; code: string; name: string; amount: number; taxableAmount?: number | null; ytdTotal?: number | null }>,
-  deductions: Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
-  contributions: Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
-  netPayRows: Array<{ period: string; netPay: number }>,
+  earnings: Array<{ period: string; employeeId: number; code: string; name: string; amount: number; taxableAmount?: number | null; ytdTotal?: number | null }>,
+  deductions: Array<{ period: string; employeeId: number; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+  contributions: Array<{ period: string; employeeId: number; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+  netPayRows: Array<{ period: string; employeeId: number; netPay: number }>,
 ) => {
-  const earningsByPeriod = earnings.reduce((map, line) => {
-    const current = map.get(line.period) || [];
+  const earningsByPeriodEmployee = earnings.reduce((map, line) => {
+    const key = sagePeriodEmployeeKey(line.period, line.employeeId);
+    const current = map.get(key) || [];
     current.push({
       code: String(line.code || '').trim(),
       name: String(line.name || line.code || '').trim(),
@@ -1137,40 +1144,45 @@ const buildSageEmployeePayslipSnapshots = (
       taxableAmount: line.taxableAmount === null || line.taxableAmount === undefined ? null : roundSageMoney(line.taxableAmount),
       ytdTotal: line.ytdTotal === null || line.ytdTotal === undefined ? null : roundSageMoney(line.ytdTotal),
     });
-    map.set(line.period, current);
+    map.set(key, current);
     return map;
   }, new Map<string, SageEmployeePayslipLine[]>());
 
-  const deductionsByPeriod = deductions.reduce((map, line) => {
-    const current = map.get(line.period) || [];
+  const deductionsByPeriodEmployee = deductions.reduce((map, line) => {
+    const key = sagePeriodEmployeeKey(line.period, line.employeeId);
+    const current = map.get(key) || [];
     current.push({
       code: String(line.code || '').trim(),
       name: String(line.name || line.code || '').trim(),
       amount: roundSageMoney(line.amount),
       ytdTotal: line.ytdTotal === null || line.ytdTotal === undefined ? null : roundSageMoney(line.ytdTotal),
     });
-    map.set(line.period, current);
+    map.set(key, current);
     return map;
   }, new Map<string, SageEmployeePayslipLine[]>());
 
-  const contributionsByPeriod = contributions.reduce((map, line) => {
-    const current = map.get(line.period) || [];
+  const contributionsByPeriodEmployee = contributions.reduce((map, line) => {
+    const key = sagePeriodEmployeeKey(line.period, line.employeeId);
+    const current = map.get(key) || [];
     current.push({
       code: String(line.code || '').trim(),
       name: String(line.name || line.code || '').trim(),
       amount: roundSageMoney(line.amount),
       ytdTotal: line.ytdTotal === null || line.ytdTotal === undefined ? null : roundSageMoney(line.ytdTotal),
     });
-    map.set(line.period, current);
+    map.set(key, current);
     return map;
   }, new Map<string, SageEmployeePayslipLine[]>());
 
-  const netPayByPeriod = new Map(netPayRows.map((row) => [row.period, roundSageMoney(row.netPay)]));
+  const netPayByPeriodEmployee = new Map(
+    netPayRows.map((row) => [sagePeriodEmployeeKey(row.period, row.employeeId), roundSageMoney(row.netPay)]),
+  );
 
   return headers.map((header) => {
-    const earningLines = earningsByPeriod.get(header.period) || [];
-    const deductionLines = deductionsByPeriod.get(header.period) || [];
-    const contributionLines = contributionsByPeriod.get(header.period) || [];
+    const periodEmployeeKey = sagePeriodEmployeeKey(header.period, header.employeeId);
+    const earningLines = earningsByPeriodEmployee.get(periodEmployeeKey) || [];
+    const deductionLines = deductionsByPeriodEmployee.get(periodEmployeeKey) || [];
+    const contributionLines = contributionsByPeriodEmployee.get(periodEmployeeKey) || [];
     const grossPay = roundSageMoney(earningLines.reduce((sum, line) => sum + line.amount, 0));
     const taxablePay = roundSageMoney(earningLines.reduce((sum, line) => {
       const amount = line.amount;
@@ -1183,7 +1195,7 @@ const buildSageEmployeePayslipSnapshots = (
     const nhf = roundSageMoney(deductionLines.filter((line) => String(line.code || '').toUpperCase() === 'NHF').reduce((sum, line) => sum + line.amount, 0));
     const pensionEmployer = roundSageMoney(contributionLines.filter((line) => String(line.code || '').toUpperCase() === 'PENSION_ER').reduce((sum, line) => sum + line.amount, 0));
     const employerContributions = roundSageMoney(contributionLines.reduce((sum, line) => sum + line.amount, 0));
-    const netPay = netPayByPeriod.get(header.period) ?? roundSageMoney(Math.max(0, grossPay - totalDeductions));
+    const netPay = netPayByPeriodEmployee.get(periodEmployeeKey) ?? roundSageMoney(Math.max(0, grossPay - totalDeductions));
     const ytdGrossEarnings = roundSageMoney(earningLines.reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
     const ytdTaxPaid = roundSageMoney(deductionLines.filter((line) => String(line.code || '').toUpperCase() === 'PAYE').reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
     const ytdPensionContribution = roundSageMoney(deductionLines.filter((line) => isPensionDeductionCode(line.code)).reduce((sum, line) => sum + Number(line.ytdTotal || 0), 0));
@@ -1233,10 +1245,10 @@ export async function readSageEmployeePayslipSnapshotsForPeriods(
     const recordsets = (Array.isArray(result.recordsets) ? result.recordsets : []) as unknown[];
     return buildSageEmployeePayslipSnapshots(
       (recordsets[0] || []) as Array<{ period: string; employeeId: number; payslipId: number; lastCalcDate: string | Date | null }>,
-      (recordsets[1] || []) as Array<{ period: string; code: string; name: string; amount: number; taxableAmount?: number | null; ytdTotal?: number | null }>,
-      (recordsets[2] || []) as Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
-      (recordsets[3] || []) as Array<{ period: string; code: string; name: string; amount: number; ytdTotal?: number | null }>,
-      (recordsets[4] || []) as Array<{ period: string; netPay: number }>,
+      (recordsets[1] || []) as Array<{ period: string; employeeId: number; code: string; name: string; amount: number; taxableAmount?: number | null; ytdTotal?: number | null }>,
+      (recordsets[2] || []) as Array<{ period: string; employeeId: number; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+      (recordsets[3] || []) as Array<{ period: string; employeeId: number; code: string; name: string; amount: number; ytdTotal?: number | null }>,
+      (recordsets[4] || []) as Array<{ period: string; employeeId: number; netPay: number }>,
     );
   } finally {
     await pool.close();

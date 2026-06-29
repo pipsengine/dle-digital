@@ -41,8 +41,8 @@ export const isPermanentPayrollEmployee = (employee: DleEmployeeDirectoryRow) =>
 export const isContractStyleEarningLine = (line: { code?: string; name?: string }) => {
   const code = String(line.code || '').trim().toUpperCase();
   const name = String(line.name || '').trim().toUpperCase();
-  return /^(JCWEEKDAY|JCWEEKDAY_NT|WEEKDAYOVT|PUBHOL|SATEARN|SUNDAYEARN|PER_MEAL|MEAL)/.test(code)
-    || /\b(WEEKDAY EARNING|MEAL ALLOWANCE|PUBLIC HOLIDAY)\b/.test(name);
+  return /^(JCWEEKDAY|JCWEEKDAY_NT|WEEKDAYOVT|PUBHOL|PUBLIC_OVT|SATEARN|SUNDAYEARN|SATURDAY_OVT|SUNDAY_OVT|OVT|PER_MEAL|MEAL)/.test(code)
+    || /\b(WEEKDAY EARNING|MEAL ALLOWANCE|PUBLIC HOLIDAY|SATURDAY OVERTIME|SUNDAY OVERTIME|OVERTIME EARNING)\b/.test(name);
 };
 
 /** Permanent-staff payslip lines use structural MGT/SNR/JNR codes — not contract day-rate JCWEEKDAY rows. */

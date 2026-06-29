@@ -140,6 +140,14 @@ export const syncSagePeriodEarningAdjustments = async (period?: string) => {
     const hasStructural = permanentStyleSageEarnings(snapshot.earningLines);
     const permanentEmployee = employee ? isPermanentPayrollEmployee(employee) : hasStructural;
 
+    for (const [key, row] of [...byKey.entries()]) {
+      if (normalizePayrollPeriod(row.period) !== normalizedPeriod) continue;
+      if (compact(row.employeeCode || row.employeeId) !== identity) continue;
+      if (row.source !== SAGE_PAYSLIP_EARNING_SYNC_SOURCE) continue;
+      byKey.delete(key);
+      changed = true;
+    }
+
     for (const line of snapshot.earningLines) {
       const code = compact(line.code);
       const amount = roundMoney(Number(line.amount || 0));
