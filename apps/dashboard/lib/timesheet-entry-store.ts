@@ -1437,6 +1437,23 @@ const listModeWhereClause = (mode: TimesheetApprovalListMode) => {
   return `[Status] <> N'Draft'`;
 };
 
+const appendApprovalListFilters = (
+  request: sql.Request,
+  whereClause: string,
+  filters?: { status?: string | null; periodId?: string | null },
+) => {
+  let clause = whereClause;
+  if (filters?.status) {
+    request.input('FilterStatus', sql.NVarChar(50), filters.status);
+    clause += ` AND [Status]=@FilterStatus`;
+  }
+  if (filters?.periodId) {
+    request.input('FilterPeriodId', sql.NVarChar(40), filters.periodId);
+    clause += ` AND [PeriodId]=@FilterPeriodId`;
+  }
+  return clause;
+};
+
 const mapTimesheetHeaderRow = (row: any, eventsByHeader: Map<string, TimesheetWorkflowEvent[]>): TimesheetHeader => ({
   id: String(row.Id),
   periodId: row.PeriodId,
@@ -1694,12 +1711,14 @@ export async function readTimesheetApprovalPage(options?: {
   mode?: TimesheetApprovalListMode;
   page?: number;
   pageSize?: number;
+  status?: string | null;
+  periodId?: string | null;
 }) {
   const mode = options?.mode || 'all';
   const page = Math.max(1, Number(options?.page || 1));
   const pageSize = Math.min(100, Math.max(10, Number(options?.pageSize || 50)));
   const offset = (page - 1) * pageSize;
-  const whereClause = listModeWhereClause(mode);
+  const baseWhereClause = listModeWhereClause(mode);
 
   let pool: sql.ConnectionPool;
   try {
@@ -1710,7 +1729,9 @@ export async function readTimesheetApprovalPage(options?: {
     throw new Error(`Timesheet data requires DLE_Enterprise (${detail}). Verify DLE_ENTERPRISE_DB_HOST, DLE_ENTERPRISE_DB_NAME, and credentials on this server.`);
   }
 
-  const countResult = await pool.request().query(`
+  const countRequest = pool.request();
+  const whereClause = appendApprovalListFilters(countRequest, baseWhereClause, options);
+  const countResult = await countRequest.query(`
     SELECT COUNT_BIG(*) AS [Total]
     FROM [hris].[TimesheetHeaders]
     WHERE ${whereClause}
@@ -1720,13 +1741,14 @@ export async function readTimesheetApprovalPage(options?: {
     return { headers: [] as TimesheetHeader[], lines: [] as TimesheetLine[], total: 0, page, pageSize, mode };
   }
 
-  const headersResult = await pool.request()
+  const headersRequest = pool.request()
     .input('offset', sql.Int, offset)
-    .input('pageSize', sql.Int, pageSize)
-    .query(`
+    .input('pageSize', sql.Int, pageSize);
+  const filteredWhereClause = appendApprovalListFilters(headersRequest, baseWhereClause, options);
+  const headersResult = await headersRequest.query(`
       SELECT *
       FROM [hris].[TimesheetHeaders]
-      WHERE ${whereClause}
+      WHERE ${filteredWhereClause}
       ORDER BY [TimesheetDate] DESC, [SupervisorName], [WorkCenterName]
       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
     `);

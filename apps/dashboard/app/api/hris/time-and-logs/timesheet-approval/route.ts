@@ -206,7 +206,26 @@ const parseListRequest = (request: Request) => {
   const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get('pageSize') || 50)));
   const modeParam = String(url.searchParams.get('mode') || 'all').toLowerCase();
   const listMode: TimesheetApprovalListMode = modeParam === 'pending' || modeParam === 'history' ? modeParam : 'all';
-  return { page, pageSize, listMode };
+  const status = String(url.searchParams.get('status') || '').trim() || null;
+  const periodId = String(url.searchParams.get('periodId') || '').trim() || null;
+  return { page, pageSize, listMode, status, periodId };
+};
+
+const statusForWorkflowStage = (stage: string | null) => {
+  switch (stage) {
+    case 'Supervisor':
+      return 'Submitted';
+    case 'Cost Control':
+      return 'Supervisor_Reviewed';
+    case 'Project Manager':
+      return 'Cost_Control_Reviewed';
+    case 'HR':
+      return 'Project_Manager_Reviewed';
+    case 'Payroll Processing':
+      return 'HR_Acknowledged';
+    default:
+      return null;
+  }
 };
 
 const buildStatsFromWorkspace = (workspaceStats: Awaited<ReturnType<typeof readTimesheetApprovalWorkspaceStats>>) => {
@@ -343,6 +362,7 @@ const buildTimesheetSummary = (
     submittedAt: header.submittedAt,
     lastSyncAt: header.lastSyncAt,
     periodName: period.name,
+    periodId: period.id,
     periodStatus: period.status,
     workflowSteps: workflowSteps(header),
     projectApprovals: projectBreakdowns,
@@ -370,7 +390,7 @@ const buildPayload = async (request: Request) => {
     throw new Error('DLE_ENTERPRISE_DB_* environment variables are not fully configured on this server.');
   }
 
-  const { page, pageSize, listMode } = parseListRequest(request);
+  const { page, pageSize, listMode, status, periodId } = parseListRequest(request);
   const scope = roleScope(access.role, access.actor, request);
 
   const [workspaceStats, projects, payrollUpdates, periods, employeeLookup, draftBookedData] = await Promise.all([
@@ -388,7 +408,13 @@ const buildPayload = async (request: Request) => {
   let total: number;
 
   if (useSqlPagination) {
-    const pageData = await readTimesheetApprovalPage({ mode: listMode, page, pageSize });
+    const pageData = await readTimesheetApprovalPage({
+      mode: listMode,
+      page,
+      pageSize,
+      status,
+      periodId,
+    });
     headers = pageData.headers;
     lines = pageData.lines;
     total = pageData.total;
@@ -396,6 +422,8 @@ const buildPayload = async (request: Request) => {
     const allData = await readTimesheetApprovalData();
     const visibleHeaders = allData.headers.filter((header) => {
       if (!headerMatchesListMode(header.status, listMode)) return false;
+      if (status && normalizeTimesheetStatus(header.status) !== normalizeTimesheetStatus(status)) return false;
+      if (periodId && header.periodId !== periodId) return false;
       const headerLines = allData.lines.filter((line) => line.headerId === header.id);
       const projectApprovals = buildProjectTimesheetApprovals(header, headerLines, projects);
       return canSeeHeader(scope, header, projectApprovals, access.actor);
@@ -473,7 +501,12 @@ const buildPayload = async (request: Request) => {
     stats,
     filterOptions: {
       workCenters: workspaceStats.filterOptions.workCenters,
-      periods: workspaceStats.filterOptions.periods,
+      periods: workspaceStats.filterOptions.periods
+        .map((id) => {
+          const period = periods.find((item) => item.id === id);
+          return period ? { id: period.id, label: period.name } : { id, label: id };
+        })
+        .sort((left, right) => left.label.localeCompare(right.label)),
       supervisors: workspaceStats.filterOptions.supervisors,
       projects: Array.from(new Set(pageTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectCode)))).sort(),
       projectManagers: Array.from(new Set(pageTimesheets.flatMap((item) => item!.projectApprovals.map((project) => project.projectManager)))).sort(),

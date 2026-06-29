@@ -140,6 +140,7 @@ type TimesheetSummary = {
   payrollReadyHours: number;
   workforceUtilization: number;
   submittedAt: string | null;
+  periodId: string;
   periodName: string;
   workflowSteps: WorkflowStep[];
   projectApprovals: ProjectApproval[];
@@ -195,7 +196,7 @@ type ApprovalPayload = {
   stats: Record<string, number>;
   filterOptions: {
     workCenters: string[];
-    periods: string[];
+    periods: Array<{ id: string; label: string }>;
     supervisors: string[];
     projects: string[];
     projectManagers: string[];
@@ -318,7 +319,24 @@ const slaRemainingLabel = (step: WorkflowStep | undefined) => {
   return remaining >= 24 ? '1d+' : `${Math.round(remaining)}h left`;
 };
 
-const APPROVAL_WORKSPACE_BUILD = 'pending-queue-v2';
+const APPROVAL_WORKSPACE_BUILD = 'pending-queue-v3';
+
+const WORKFLOW_STAGE_STATUSES: Partial<Record<string, TimesheetStatus>> = {
+  Supervisor: 'Submitted',
+  'Cost Control': 'Supervisor_Reviewed',
+  'Project Manager': 'Cost_Control_Reviewed',
+  HR: 'Project_Manager_Reviewed',
+  'Payroll Processing': 'HR_Acknowledged',
+};
+
+const STATUS_TO_WORKFLOW_STAGE: Partial<Record<string, string>> = {
+  Submitted: 'Supervisor',
+  Supervisor_Reviewed: 'Cost Control',
+  Cost_Control_Reviewed: 'Project Manager',
+  Project_Manager_Reviewed: 'HR',
+  HR_Acknowledged: 'Payroll Processing',
+  Locked: 'Payroll Posted',
+};
 
 const workspaceTabs: Array<{ id: WorkspaceTab; label: string }> = [
   { id: 'timesheets', label: 'Timesheets' },
@@ -439,6 +457,26 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   const [loadingHint, setLoadingHint] = useState('Connecting to DLE_Enterprise…');
   const [pendingViewPrimed, setPendingViewPrimed] = useState(false);
 
+  const applyWorkflowStageFilter = (stage: string) => {
+    setWorkspaceTab('timesheets');
+    setStageFilter(stage);
+    if (stage === 'All') {
+      setStatusFilter('All');
+      return;
+    }
+    setStatusFilter(WORKFLOW_STAGE_STATUSES[stage] || 'All');
+  };
+
+  const applyStatusFilter = (status: string) => {
+    setWorkspaceTab('timesheets');
+    setStatusFilter(status);
+    if (status === 'All') {
+      setStageFilter('All');
+      return;
+    }
+    setStageFilter(STATUS_TO_WORKFLOW_STAGE[status] || 'All');
+  };
+
   const load = async (nextPage = listPage) => {
     setLoading(true);
     setError(null);
@@ -454,7 +492,14 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     const abortTimer = window.setTimeout(() => controller.abort(), 120000);
     try {
       const listMode = mode === 'history' ? 'history' : 'pending';
-      const res = await fetch(`/api/hris/time-and-logs/timesheet-approval?page=${nextPage}&pageSize=${PAGE_SIZE}&mode=${listMode}`, {
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        pageSize: String(PAGE_SIZE),
+        mode: listMode,
+      });
+      if (statusFilter !== 'All') params.set('status', statusFilter);
+      if (periodFilter !== 'All') params.set('periodId', periodFilter);
+      const res = await fetch(`/api/hris/time-and-logs/timesheet-approval?${params.toString()}`, {
         cache: 'no-store',
         signal: controller.signal,
       });
@@ -478,7 +523,11 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   useEffect(() => {
     setListPage(1);
     setPendingViewPrimed(false);
+    setStageFilter('All');
+    setStatusFilter('All');
+    setPeriodFilter('All');
     void load(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   useEffect(() => {
@@ -486,15 +535,27 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     const pendingCount = Number(payload.stats?.pendingApprovals || payload.dataSource?.awaitingApprovalCount || 0);
     if (pendingCount > 0) {
       if ((payload.stats?.pendingSupervisorApproval || 0) > 0) {
-        setStageFilter('Supervisor');
-        setStatusFilter('Submitted');
+        applyWorkflowStageFilter('Supervisor');
+      } else if ((payload.stats?.pendingCostControlReview || 0) > 0) {
+        applyWorkflowStageFilter('Cost Control');
+      } else if ((payload.stats?.pendingProjectManagerApproval || 0) > 0) {
+        applyWorkflowStageFilter('Project Manager');
+      } else if ((payload.stats?.pendingHrApproval || 0) > 0) {
+        applyWorkflowStageFilter('HR');
       } else {
         setStageFilter('All');
         setStatusFilter('All');
       }
     }
     setPendingViewPrimed(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, payload, pendingViewPrimed]);
+
+  useEffect(() => {
+    if (!pendingViewPrimed) return;
+    void load(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, periodFilter, stageFilter, pendingViewPrimed]);
 
   useEffect(() => {
     if (!toast) return;
@@ -560,7 +621,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
       if (term && !searchable.includes(term)) return false;
       if (statusFilter !== 'All' && item.status !== statusFilter) return false;
       if (stageFilter !== 'All' && item.currentStage !== stageFilter) return false;
-      if (periodFilter !== 'All' && item.periodName !== periodFilter) return false;
+      if (periodFilter !== 'All' && item.periodId !== periodFilter) return false;
       if (projectFilter !== 'All' && !item.projectApprovals.some((project) => project.projectCode === projectFilter)) return false;
       if (pmFilter !== 'All' && !item.projectApprovals.some((project) => project.projectManager === pmFilter)) return false;
       if (costFilter !== 'All' && !item.projectApprovals.some((project) => project.costCenter === costFilter)) return false;
@@ -576,7 +637,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     return allGridRows;
   }, [allGridRows, workspaceTab]);
 
-  useEffect(() => setListPage(1), [query, statusFilter, stageFilter, projectFilter, pmFilter, costFilter, periodFilter, workspaceTab, mode]);
+  useEffect(() => setListPage(1), [query, stageFilter, projectFilter, pmFilter, costFilter, workspaceTab, mode]);
 
   const pageCount = serverPagination?.totalPages || 1;
   const totalEntries = serverPagination?.total ?? tabRows.length;
@@ -636,30 +697,38 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   };
 
   const waitingForMe = useMemo(() => {
-    if (scope === 'enterprise' || scope === 'cost-control') {
-      return Number(payload?.stats?.pendingApprovals || payload?.dataSource?.awaitingApprovalCount || 0);
+    const scopedRows = filteredTimesheets.filter((item) => stageWaitingForScope(scope, item.currentStage));
+    if (stageFilter !== 'All' || statusFilter !== 'All' || periodFilter !== 'All') {
+      return scopedRows.length;
     }
-    return filteredTimesheets.filter((item) => stageWaitingForScope(scope, item.currentStage)).length;
-  }, [filteredTimesheets, payload?.dataSource?.awaitingApprovalCount, payload?.stats?.pendingApprovals, scope]);
+    if (scope === 'enterprise' || scope === 'cost-control') {
+      return Number(payload?.stats?.pendingApprovals || payload?.dataSource?.awaitingApprovalCount || scopedRows.length);
+    }
+    return scopedRows.length;
+  }, [filteredTimesheets, payload?.dataSource?.awaitingApprovalCount, payload?.stats?.pendingApprovals, periodFilter, scope, stageFilter, statusFilter]);
   const waitingForOthers = Math.max(0, (payload?.stats?.pendingApprovals || filteredTimesheets.length) - waitingForMe);
   const overdueCount = filteredTimesheets.filter((item) => item.workflowSteps.find((step) => step.stage === item.currentStage)?.slaStatus === 'Breached').length;
   const payrollReadyCount = filteredTimesheets.filter((item) => item.payrollReady).length;
   const slaPct = filteredTimesheets.length ? Math.round(((filteredTimesheets.length - overdueCount) / filteredTimesheets.length) * 100) : 92;
 
   const showPendingApprovalQueue = () => {
-    setWorkspaceTab('timesheets');
-    setStageFilter('Supervisor');
-    setStatusFilter('Submitted');
+    applyWorkflowStageFilter((payload?.stats?.pendingSupervisorApproval || 0) > 0
+      ? 'Supervisor'
+      : (payload?.stats?.pendingCostControlReview || 0) > 0
+        ? 'Cost Control'
+        : (payload?.stats?.pendingProjectManagerApproval || 0) > 0
+          ? 'Project Manager'
+          : 'All');
     setQuery('');
   };
 
   const pipelineStages = [
     { id: 'employee', label: 'Employee', count: filteredTimesheets.filter((item) => item.status === 'Submitted').length, active: false, completed: true },
-    { id: 'supervisor', label: 'Supervisor', count: payload?.stats.pendingSupervisorApproval || 0, active: Boolean((payload?.stats.pendingSupervisorApproval || 0) > 0), completed: false, filterStage: 'Supervisor' as const },
-    { id: 'pm', label: 'Project Manager', count: payload?.stats.pendingProjectManagerApproval || 0, active: false, completed: false, filterStage: 'Project Manager' as const },
-    { id: 'cost', label: 'Cost Control', count: payload?.stats.pendingCostControlReview || 0, active: false, completed: false, filterStage: 'Cost Control' as const },
-    { id: 'hr', label: 'HR', count: payload?.stats.pendingHrApproval || 0, active: false, completed: false, filterStage: 'HR' as const },
-    { id: 'payroll', label: 'Payroll', count: payload?.stats.pendingPayrollProcessing || 0, active: false, completed: false, filterStage: 'Payroll Processing' as const },
+    { id: 'supervisor', label: 'Supervisor', count: payload?.stats.pendingSupervisorApproval || 0, active: stageFilter === 'Supervisor', completed: false, filterStage: 'Supervisor' as const },
+    { id: 'cost', label: 'Cost Control', count: payload?.stats.pendingCostControlReview || 0, active: stageFilter === 'Cost Control', completed: false, filterStage: 'Cost Control' as const },
+    { id: 'pm', label: 'Project Manager', count: payload?.stats.pendingProjectManagerApproval || 0, active: stageFilter === 'Project Manager', completed: false, filterStage: 'Project Manager' as const },
+    { id: 'hr', label: 'HR', count: payload?.stats.pendingHrApproval || 0, active: stageFilter === 'HR', completed: false, filterStage: 'HR' as const },
+    { id: 'payroll', label: 'Payroll', count: payload?.stats.pendingPayrollProcessing || 0, active: stageFilter === 'Payroll Processing', completed: false, filterStage: 'Payroll Processing' as const },
     { id: 'posted', label: 'Posted', count: payload?.stats.payrollPosted || 0, active: false, completed: true },
   ];
 
@@ -880,7 +949,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         {toast ? <div className="rounded-[18px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{toast}</div> : null}
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
-          <PremiumKpiCard label="Waiting For Me" value={formatInt(waitingForMe)} subtitle="Timesheets in your queue" icon={UserCheck} tone="blue" onClick={() => setStageFilter('All')} />
+          <PremiumKpiCard label="Waiting For Me" value={formatInt(waitingForMe)} subtitle="Timesheets in your queue" icon={UserCheck} tone="blue" onClick={showPendingApprovalQueue} />
           <PremiumKpiCard label="Waiting For Others" value={formatInt(waitingForOthers)} subtitle="Pending downstream" icon={Users} tone="slate" />
           <PremiumKpiCard label="Overdue Approvals" value={formatInt(overdueCount)} subtitle="SLA breached" icon={AlertTriangle} tone="red" onClick={() => setWorkspaceTab('exceptions')} />
           <PremiumKpiCard label="Payroll Ready" value={formatInt(payrollReadyCount)} subtitle="Ready for payroll" icon={CheckCircle2} tone="green" onClick={() => setWorkspaceTab('payroll')} />
@@ -894,13 +963,17 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
           <ApprovalPipeline
             stages={pipelineStages}
             onStageSelect={(stage) => {
-              if (stage.filterStage) setStageFilter(stage.filterStage);
+              if (stage.filterStage) applyWorkflowStageFilter(stage.filterStage);
+              else if (stage.id === 'posted') {
+                setStageFilter('All');
+                setStatusFilter('Locked');
+              } else applyWorkflowStageFilter('All');
             }}
             summary={[
               { label: 'SLA BREACHES', value: String(overdueCount) },
               { label: 'AVG TIME AT CURRENT STAGE', value: formatHours(payload?.stats.approvalAgingHours || 0) },
               { label: 'LONGEST WAITING', value: formatHours((payload?.stats.approvalAgingHours || 0) * 1.6) },
-              { label: 'ESCALATED', value: String(Math.max(1, Math.round(overdueCount * 0.3))) },
+              { label: 'ESCALATED', value: String(overdueCount > 0 ? Math.round(overdueCount * 0.3) : 0) },
             ]}
           />
           <AiInsightsPanel items={aiInsights} onViewAll={() => setWorkspaceTab('exceptions')} />
@@ -978,9 +1051,21 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
                   </label>
                   {showFilters ? (
                     <>
-                      <FilterSelect label="Payroll Period" value={periodFilter} onChange={setPeriodFilter} options={['All', ...(payload?.filterOptions.periods || [])]} />
-                      <FilterSelect label="Approval Stage" value={stageFilter} onChange={setStageFilter} options={['All', ...(payload?.filterOptions.workflowStages || [])]} />
-                      <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={['All', ...(payload?.filterOptions.statuses || [])]} />
+                      <label className="min-w-[180px]">
+                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-[#94A3B8]">Payroll Period</span>
+                        <select
+                          value={periodFilter}
+                          onChange={(event) => setPeriodFilter(event.target.value)}
+                          className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm font-medium text-[#0F172A] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-blue-100"
+                        >
+                          <option value="All">All</option>
+                          {(payload?.filterOptions.periods || []).map((period) => (
+                            <option key={period.id} value={period.id}>{period.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <FilterSelect label="Approval Stage" value={stageFilter} onChange={applyWorkflowStageFilter} options={['All', ...(payload?.filterOptions.workflowStages || [])]} />
+                      <FilterSelect label="Status" value={statusFilter} onChange={applyStatusFilter} options={['All', ...(payload?.filterOptions.statuses || [])]} />
                       <FilterSelect label="Project" value={projectFilter} onChange={setProjectFilter} options={['All', ...(payload?.filterOptions.projects || [])]} />
                       <FilterSelect label="Cost Centre" value={costFilter} onChange={setCostFilter} options={['All', ...(payload?.filterOptions.costCenters || [])]} />
                     </>
