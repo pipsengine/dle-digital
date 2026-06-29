@@ -16,22 +16,40 @@ function Get-NormalizedPath {
   return [System.IO.Path]::GetFullPath($TargetDirectory).TrimEnd('\', '/').ToLowerInvariant()
 }
 
-function Import-DotEnv {
-  param([Parameter(Mandatory = $true)][string]$Path)
+function Start-Or-Recycle-WebAppPool {
+  param([Parameter(Mandatory = $true)][string]$PoolName)
 
-  if (-not (Test-Path -LiteralPath $Path)) { return }
-  Get-Content -LiteralPath $Path | ForEach-Object {
-    $line = $_.Trim()
-    if (-not $line -or $line.StartsWith("#") -or $line.IndexOf("=") -lt 1) { return }
-    $key = $line.Substring(0, $line.IndexOf("=")).Trim()
-    $value = $line.Substring($line.IndexOf("=") + 1).Trim()
-    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
-      $value = $value.Substring(1, $value.Length - 2)
-    }
-    if (-not [System.Environment]::GetEnvironmentVariable($key, "Process")) {
-      [System.Environment]::SetEnvironmentVariable($key, $value, "Process")
-    }
+  if ([string]::IsNullOrWhiteSpace($PoolName)) { return }
+
+  $poolState = (Get-WebAppPoolState -Name $PoolName -ErrorAction SilentlyContinue).Value
+  if ($poolState -eq "Started") {
+    Write-Host "Recycling app pool '$PoolName'..."
+    Restart-WebAppPool -Name $PoolName -ErrorAction Stop
+    return
   }
+
+  Write-Host "Starting stopped app pool '$PoolName' (was: $poolState)..."
+  Start-WebAppPool -Name $PoolName -ErrorAction Stop
+}
+
+function Start-Or-Recycle-Website {
+  param([Parameter(Mandatory = $true)][string]$SiteName)
+
+  if ([string]::IsNullOrWhiteSpace($SiteName)) { return }
+
+  $site = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
+  if (-not $site) {
+    Write-Warning "IIS site '$SiteName' was not found."
+    return
+  }
+
+  if ($site.State -eq "Started") {
+    Write-Host "IIS site '$SiteName' is already started."
+    return
+  }
+
+  Write-Host "Starting stopped IIS site '$SiteName'..."
+  Start-Website -Name $SiteName -ErrorAction Stop
 }
 
 function Show-LogTail {
@@ -119,12 +137,14 @@ if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
       foreach ($site in $matchedSites) {
         $poolName = [string]$site.applicationPool
         $physicalPath = if ([string]::IsNullOrWhiteSpace($site.physicalPath)) { "(not set)" } else { $site.physicalPath }
-        Write-Host "Recycling IIS site '$($site.Name)' / app pool '$poolName' (path: $physicalPath)..."
-        if ($poolName) {
-          Restart-WebAppPool -Name $poolName -ErrorAction SilentlyContinue
-        }
-        if ($site.State -ne "Started") {
-          Start-Website -Name $site.Name -ErrorAction SilentlyContinue
+        Write-Host "Repairing IIS site '$($site.Name)' / app pool '$poolName' (path: $physicalPath)..."
+        try {
+          if ($poolName) {
+            Start-Or-Recycle-WebAppPool -PoolName $poolName
+          }
+          Start-Or-Recycle-Website -SiteName $site.Name
+        } catch {
+          Write-Warning "Could not repair IIS site '$($site.Name)': $($_.Exception.Message)"
         }
       }
       Start-Sleep -Seconds 5
