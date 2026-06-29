@@ -59,19 +59,32 @@ type PipelineStage = {
   count: number;
   active: boolean;
   completed: boolean;
+  filterStage?: string;
 };
 
-export function ApprovalPipeline({ stages, summary }: { stages: PipelineStage[]; summary: Array<{ label: string; value: string }> }) {
+export function ApprovalPipeline({
+  stages,
+  summary,
+  onStageSelect,
+}: {
+  stages: PipelineStage[];
+  summary: Array<{ label: string; value: string }>;
+  onStageSelect?: (stage: PipelineStage) => void;
+}) {
   return (
     <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-2">
         {stages.map((stage, index) => (
           <div key={stage.id} className="flex min-w-[120px] flex-1 items-center gap-2">
-            <div className={`flex min-w-[108px] flex-col rounded-xl border px-3 py-2 ${stage.active ? 'border-[#2563EB] bg-blue-50' : stage.completed ? 'border-emerald-200 bg-emerald-50' : 'border-[#E5E7EB] bg-[#F8FAFC]'}`}>
+            <button
+              type="button"
+              onClick={() => onStageSelect?.(stage)}
+              className={`flex min-w-[108px] flex-col rounded-xl border px-3 py-2 text-left transition hover:border-[#2563EB] ${stage.active ? 'border-[#2563EB] bg-blue-50' : stage.completed ? 'border-emerald-200 bg-emerald-50' : 'border-[#E5E7EB] bg-[#F8FAFC]'}`}
+            >
               <p className="text-[11px] font-semibold uppercase tracking-wide text-[#64748B]">{stage.label}</p>
               <p className="mt-1 text-lg font-bold text-[#0F172A]">{stage.count}</p>
               <p className="text-[10px] font-medium text-[#64748B]">{stage.active ? 'Current' : stage.completed ? 'Completed' : 'Waiting'}</p>
-            </div>
+            </button>
             {index < stages.length - 1 ? <ChevronRight className="h-4 w-4 shrink-0 text-[#94A3B8]" /> : null}
           </div>
         ))}

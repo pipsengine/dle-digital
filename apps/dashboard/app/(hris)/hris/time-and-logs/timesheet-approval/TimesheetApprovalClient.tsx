@@ -208,6 +208,50 @@ type ApprovalPayload = {
 
 type ApprovalAction = 'APPROVE' | 'REJECT' | 'RETURN' | 'PROCESS_PAYROLL' | 'POST_PAYROLL';
 type ProjectStage = 'Cost Control' | 'Project Manager';
+
+const ACTIVE_APPROVAL_STATUSES = new Set<TimesheetStatus>([
+  'Submitted',
+  'Supervisor_Reviewed',
+  'Cost_Control_Reviewed',
+  'Project_Manager_Reviewed',
+  'HR_Acknowledged',
+]);
+
+function buildApprovalPlan(timesheet: TimesheetSummary):
+  | { kind: 'header'; headerId: string }
+  | { kind: 'project'; headerId: string; projectSegments: Array<{ headerId: string; projectCode: string; stage: ProjectStage }> }
+  | null {
+  if (timesheet.payrollPosted || timesheet.currentStage === 'Payroll Posted') return null;
+  if (timesheet.currentStage === 'Supervisor' || timesheet.currentStage === 'HR') {
+    return { kind: 'header', headerId: timesheet.id };
+  }
+  if (timesheet.currentStage === 'Cost Control') {
+    const projectSegments = timesheet.projectApprovals
+      .filter((project) => project.costControlStatus === 'Pending')
+      .map((project) => ({ headerId: timesheet.id, projectCode: project.projectCode, stage: 'Cost Control' as ProjectStage }));
+    return projectSegments.length ? { kind: 'project', headerId: timesheet.id, projectSegments } : null;
+  }
+  if (timesheet.currentStage === 'Project Manager') {
+    const projectSegments = timesheet.projectApprovals
+      .filter((project) => project.costControlStatus === 'Approved' && project.projectManagerStatus === 'Pending')
+      .map((project) => ({ headerId: timesheet.id, projectCode: project.projectCode, stage: 'Project Manager' as ProjectStage }));
+    return projectSegments.length ? { kind: 'project', headerId: timesheet.id, projectSegments } : null;
+  }
+  return null;
+}
+
+function approvalBlockedReason(timesheet: TimesheetSummary) {
+  if (timesheet.payrollPosted || timesheet.currentStage === 'Payroll Posted') {
+    return 'This timesheet is already posted to payroll and cannot be approved again.';
+  }
+  if (!ACTIVE_APPROVAL_STATUSES.has(timesheet.status)) {
+    return 'Only timesheets in the active approval workflow can be approved.';
+  }
+  if (!buildApprovalPlan(timesheet)) {
+    return 'No pending approval actions are available for this timesheet at its current stage.';
+  }
+  return null;
+}
 type WorkspaceTab = 'timesheets' | 'exceptions' | 'payroll' | 'cost-centre' | 'allocation';
 type DetailTab = 'overview' | 'timesheet' | 'allocation' | 'history';
 
@@ -401,7 +445,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     const controller = new AbortController();
     const abortTimer = window.setTimeout(() => controller.abort(), 120000);
     try {
-      const listMode = mode === 'history' ? 'history' : 'all';
+      const listMode = mode === 'history' ? 'history' : 'pending';
       const res = await fetch(`/api/hris/time-and-logs/timesheet-approval?page=${nextPage}&pageSize=${PAGE_SIZE}&mode=${listMode}`, {
         cache: 'no-store',
         signal: controller.signal,
@@ -467,7 +511,10 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
     }
   };
 
-  const workspaceTimesheets = useMemo(() => payload?.allTimesheets || [], [payload?.allTimesheets]);
+  const workspaceTimesheets = useMemo(() => {
+    if (mode === 'history') return payload?.historyTimesheets || [];
+    return payload?.allTimesheets || payload?.pendingTimesheets || [];
+  }, [mode, payload?.allTimesheets, payload?.historyTimesheets, payload?.pendingTimesheets]);
   const draftBookedTimesheets = useMemo(() => payload?.draftBookedTimesheets || [], [payload?.draftBookedTimesheets]);
   const serverPagination = payload?.pagination;
   const filteredTimesheets = useMemo(() => {
@@ -546,19 +593,41 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   const selectedHours = selectedRows.reduce((sum, row) => sum + row.employee.totalHours, 0);
   const selectedCost = selectedRows.reduce((sum, row) => sum + row.labourCost, 0);
 
-  const waitingForMe = filteredTimesheets.filter((item) => stageWaitingForScope(scope, item.currentStage)).length;
-  const waitingForOthers = Math.max(0, filteredTimesheets.length - waitingForMe);
+  const focusedApprovalPlan = focusedRow ? buildApprovalPlan(focusedRow.timesheet) : null;
+  const focusedApprovalBlockReason = focusedRow ? approvalBlockedReason(focusedRow.timesheet) : null;
+
+  const approveFocusedTimesheet = () => {
+    if (!focusedRow || !focusedApprovalPlan) return;
+    if (focusedApprovalPlan.kind === 'header') {
+      void act({ action: 'APPROVE', headerId: focusedApprovalPlan.headerId, comment: 'Approved from workspace detail panel.' });
+      return;
+    }
+    void act({
+      action: 'APPROVE',
+      headerIds: [focusedApprovalPlan.headerId],
+      projectSegments: focusedApprovalPlan.projectSegments,
+      comment: 'Approved pending project segments from workspace detail panel.',
+    });
+  };
+
+  const waitingForMe = useMemo(() => {
+    if (scope === 'enterprise' || scope === 'cost-control') {
+      return Number(payload?.stats?.pendingApprovals || payload?.dataSource?.awaitingApprovalCount || 0);
+    }
+    return filteredTimesheets.filter((item) => stageWaitingForScope(scope, item.currentStage)).length;
+  }, [filteredTimesheets, payload?.dataSource?.awaitingApprovalCount, payload?.stats?.pendingApprovals, scope]);
+  const waitingForOthers = Math.max(0, (payload?.stats?.pendingApprovals || filteredTimesheets.length) - waitingForMe);
   const overdueCount = filteredTimesheets.filter((item) => item.workflowSteps.find((step) => step.stage === item.currentStage)?.slaStatus === 'Breached').length;
   const payrollReadyCount = filteredTimesheets.filter((item) => item.payrollReady).length;
   const slaPct = filteredTimesheets.length ? Math.round(((filteredTimesheets.length - overdueCount) / filteredTimesheets.length) * 100) : 92;
 
   const pipelineStages = [
     { id: 'employee', label: 'Employee', count: filteredTimesheets.filter((item) => item.status === 'Submitted').length, active: false, completed: true },
-    { id: 'supervisor', label: 'Supervisor', count: payload?.stats.pendingSupervisorApproval || 0, active: Boolean((payload?.stats.pendingSupervisorApproval || 0) > 0), completed: false },
-    { id: 'pm', label: 'Project Manager', count: payload?.stats.pendingProjectManagerApproval || 0, active: false, completed: false },
-    { id: 'cost', label: 'Cost Control', count: payload?.stats.pendingCostControlReview || 0, active: false, completed: false },
-    { id: 'hr', label: 'HR', count: payload?.stats.pendingHrApproval || 0, active: false, completed: false },
-    { id: 'payroll', label: 'Payroll', count: payload?.stats.pendingPayrollProcessing || 0, active: false, completed: false },
+    { id: 'supervisor', label: 'Supervisor', count: payload?.stats.pendingSupervisorApproval || 0, active: Boolean((payload?.stats.pendingSupervisorApproval || 0) > 0), completed: false, filterStage: 'Supervisor' as const },
+    { id: 'pm', label: 'Project Manager', count: payload?.stats.pendingProjectManagerApproval || 0, active: false, completed: false, filterStage: 'Project Manager' as const },
+    { id: 'cost', label: 'Cost Control', count: payload?.stats.pendingCostControlReview || 0, active: false, completed: false, filterStage: 'Cost Control' as const },
+    { id: 'hr', label: 'HR', count: payload?.stats.pendingHrApproval || 0, active: false, completed: false, filterStage: 'HR' as const },
+    { id: 'payroll', label: 'Payroll', count: payload?.stats.pendingPayrollProcessing || 0, active: false, completed: false, filterStage: 'Payroll Processing' as const },
     { id: 'posted', label: 'Posted', count: payload?.stats.payrollPosted || 0, active: false, completed: true },
   ];
 
@@ -737,6 +806,11 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         </header>
 
         {error ? <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{error}</div> : null}
+        {mode === 'active' ? (
+          <div className="rounded-[18px] border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+            Showing the <span className="font-semibold">pending approval queue</span> only. Posted or completed timesheets are available under <span className="font-semibold">History</span>. Select rows, then use Bulk Approve.
+          </div>
+        ) : null}
         {mode === 'active' && draftBookedTimesheets.length > 0 ? (
           <div className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             <p className="font-semibold">{draftBookedTimesheets.length} timesheet{draftBookedTimesheets.length === 1 ? '' : 's'} have booked hours but are still in Draft.</p>
@@ -776,6 +850,9 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
           <ApprovalPipeline
             stages={pipelineStages}
+            onStageSelect={(stage) => {
+              if (stage.filterStage) setStageFilter(stage.filterStage);
+            }}
             summary={[
               { label: 'SLA BREACHES', value: String(overdueCount) },
               { label: 'AVG TIME AT CURRENT STAGE', value: formatHours(payload?.stats.approvalAgingHours || 0) },
@@ -798,7 +875,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={!selectedRowKeys.length || !canApprove || !smartApprovalCount} onClick={bulkSmartApproval} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#10B981] px-3 text-xs font-semibold text-white disabled:opacity-40">
+                <button type="button" disabled={!selectedRowKeys.length || !canApprove || !smartApprovalCount} onClick={bulkSmartApproval} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#10B981] px-3 text-xs font-semibold text-white disabled:opacity-40" title={!selectedRowKeys.length ? 'Select one or more pending timesheet rows first.' : !smartApprovalCount ? 'Selected rows are not at an approvable workflow stage.' : undefined}>
                   Bulk Approve ({smartApprovalCount || selectedHeaderIds.length})
                 </button>
                 <button type="button" disabled={!selectedRowKeys.length || !canApprove} onClick={() => bulkSmartDecision('RETURN', 'Bulk return for correction.')} className="inline-flex h-10 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 text-xs font-semibold text-amber-700 disabled:opacity-40">
@@ -990,7 +1067,9 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
                                   ? 'No completed or closed timesheets are available in history.'
                                   : draftBookedTimesheets.length
                                     ? 'No submitted timesheets are in the approval queue yet. Use Review & Submit on Timesheet Entry to release booked hours for approval.'
-                                    : 'No timesheets were returned from DLE_Enterprise for this workspace view.'}
+                                    : mode === 'active'
+                                      ? 'No timesheets are currently waiting for approval. Check History for posted timesheets.'
+                                      : 'No timesheets were returned from DLE_Enterprise for this workspace view.'}
                             </td>
                           </tr>
                         )}
@@ -1124,8 +1203,18 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
 
                       {mode === 'active' && canApprove ? (
                         <div className="grid grid-cols-1 gap-2">
-                          <button type="button" disabled={submitting === focusedRow.headerId} onClick={() => void act({ action: 'APPROVE', headerId: focusedRow.headerId, comment: 'Approved from workspace detail panel.' })} className="h-11 rounded-xl bg-[#10B981] text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
-                            Approve
+                          {focusedApprovalBlockReason ? (
+                            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{focusedApprovalBlockReason}</p>
+                          ) : null}
+                          <button
+                            type="button"
+                            disabled={submitting === focusedRow.headerId || !focusedApprovalPlan}
+                            onClick={approveFocusedTimesheet}
+                            className="h-11 rounded-xl bg-[#10B981] text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                          >
+                            {focusedApprovalPlan?.kind === 'project'
+                              ? `Approve ${focusedApprovalPlan.projectSegments.length} Project${focusedApprovalPlan.projectSegments.length === 1 ? '' : 's'}`
+                              : 'Approve'}
                           </button>
                           <div className="grid grid-cols-2 gap-2">
                             <button type="button" onClick={() => void act({ action: 'RETURN', headerId: focusedRow.headerId, comment: 'Returned for correction.' })} className="h-11 rounded-xl border border-amber-200 bg-amber-50 text-sm font-semibold text-amber-700">
