@@ -122,8 +122,8 @@ export const deriveHrisRole = (roles: string[]): HrisRole => {
   return 'Viewer';
 };
 
-export const resolveAccessContext = (request: Request): HrisAccessContext => {
-  const accPermissions = permissionsFromRequest(request);
+export const resolveAccessContext = (request: Request, accPermissionsOverride?: string[]): HrisAccessContext => {
+  const accPermissions = accPermissionsOverride ?? permissionsFromRequest(request);
   const isGlobalAdmin = request.headers.get('x-auth-global-admin') === '1';
   const roleHeader = request.headers.get('x-hris-role')?.trim() as HrisRole | undefined;
   const role = roleHeader && knownRoles.includes(roleHeader) ? roleHeader : deriveHrisRole((request.headers.get('x-auth-roles') || '').split(',').map((item) => item.trim()).filter(Boolean));

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { effectivePermissionsForUser } from '@/lib/auth/access-control-store';
 import { AUTH_COOKIE, isPublicPath, verifySessionToken } from '@/lib/auth/session';
 import { canAccessRoute } from '@/lib/access/route-access';
 import { deriveHrisRole } from '@/lib/hris-access';
@@ -39,9 +38,7 @@ export async function middleware(request: NextRequest) {
     }
 
     const roles = session.roles;
-    const permissions = session.isGlobalAdmin
-      ? ['*']
-      : await effectivePermissionsForUser(session.sub, roles).catch(() => session.permissions);
+    const permissions = session.isGlobalAdmin ? ['*'] : session.permissions;
 
     if ((!pathname.startsWith('/api') || pathname.startsWith('/api/hris')) && !canAccessRoute({ ...session, permissions }, pathname)) {
       return denied(request, 403);

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { permissionsForRequest } from '@/lib/auth/request-permissions';
 import { getUiPermissions, hasAccTimesheetStageApprove, permissionsFromRequest, resolveAccessContext } from '@/lib/hris-access';
 import {
   advanceProjectTimesheetApproval,
@@ -92,10 +93,10 @@ const headerMatchesListMode = (status: TimesheetStatus, mode: TimesheetApprovalL
   return true;
 };
 
-const stageAccess = (stage: ProjectApprovalStage | null, actor: string, role: string, request?: Request) => {
+const stageAccess = (stage: ProjectApprovalStage | null, actor: string, role: string, request?: Request, acc?: string[]) => {
   if (isSuperAdministrator(role)) return true;
-  const acc = request ? permissionsFromRequest(request) : [];
-  if (stage && hasAccTimesheetStageApprove(acc, stage)) return true;
+  const accPerms = acc ?? (request ? permissionsFromRequest(request) : []);
+  if (stage && hasAccTimesheetStageApprove(accPerms, stage)) return true;
   const text = lower(`${actor} ${role}`);
   if (stage === 'Supervisor') return includesAny(text, ['supervisor', 'foreman', 'site lead']);
   if (stage === 'Cost Control') return includesAny(text, ['cost control', 'cost controller', 'finance', 'cost']);
@@ -105,20 +106,20 @@ const stageAccess = (stage: ProjectApprovalStage | null, actor: string, role: st
   return false;
 };
 
-const requireHeaderStageAccess = (header: TimesheetHeader, action: ApprovalAction, actor: string, role: string, request?: Request) => {
+const requireHeaderStageAccess = (header: TimesheetHeader, action: ApprovalAction, actor: string, role: string, request?: Request, acc?: string[]) => {
   if (isSuperAdministrator(role)) return;
   const stage = currentStageForStatus(header.status);
   const actorRole = lower(`${actor} ${role}`);
   const supervisorText = lower(header.supervisorName || header.supervisorId || '');
 
   if (action === 'PROCESS_PAYROLL' || action === 'POST_PAYROLL') {
-    if (!stageAccess('Payroll', actor, role, request) && !includesAny(actorRole, ['payroll', 'hr', 'human resources'])) {
+    if (!stageAccess('Payroll', actor, role, request, acc) && !includesAny(actorRole, ['payroll', 'hr', 'human resources'])) {
       throw new Error('Only HR or Payroll can process payroll-ready timesheets.');
     }
     return;
   }
   if (stage === 'Payroll Processing') {
-    if (!stageAccess('Payroll', actor, role, request) && !includesAny(actorRole, ['payroll', 'hr', 'human resources'])) {
+    if (!stageAccess('Payroll', actor, role, request, acc) && !includesAny(actorRole, ['payroll', 'hr', 'human resources'])) {
       throw new Error('Only HR or Payroll can return or reject payroll-ready timesheets.');
     }
     return;
@@ -126,20 +127,20 @@ const requireHeaderStageAccess = (header: TimesheetHeader, action: ApprovalActio
 
   if (stage === 'Supervisor') {
     const isAssignedSupervisor = supervisorText && (supervisorText.includes(lower(actor)) || lower(actor).includes(supervisorText));
-    if (!isAssignedSupervisor && !stageAccess('Supervisor', actor, role, request)) throw new Error('Only the assigned supervisor can complete supervisor review.');
+    if (!isAssignedSupervisor && !stageAccess('Supervisor', actor, role, request, acc)) throw new Error('Only the assigned supervisor can complete supervisor review.');
     return;
   }
   if (stage === 'HR') {
-    if (!stageAccess('HR', actor, role, request)) throw new Error('Only HR can approve consolidated project timesheets.');
+    if (!stageAccess('HR', actor, role, request, acc)) throw new Error('Only HR can approve consolidated project timesheets.');
     return;
   }
   throw new Error('This workflow stage requires project-level approval or a different role owner.');
 };
 
-const requireProjectStageAccess = (stage: ProjectApprovalStage, actor: string, role: string, request?: Request) => {
+const requireProjectStageAccess = (stage: ProjectApprovalStage, actor: string, role: string, request?: Request, acc?: string[]) => {
   if (isSuperAdministrator(role)) return;
   if (stage !== 'Cost Control' && stage !== 'Project Manager') return;
-  if (!stageAccess(stage, actor, role, request)) throw new Error(`Only ${stage} can perform this project-level approval.`);
+  if (!stageAccess(stage, actor, role, request, acc)) throw new Error(`Only ${stage} can perform this project-level approval.`);
 };
 
 const employeeMeta = (lookup: Map<string, TimesheetApprovalEmployeeMeta>, line: TimesheetLine) => {
@@ -361,7 +362,8 @@ const buildTimesheetSummary = (
 };
 
 const buildPayload = async (request: Request) => {
-  const access = resolveAccessContext(request);
+  const livePermissions = await permissionsForRequest(request);
+  const access = resolveAccessContext(request, livePermissions);
   const uiPermissions = getUiPermissions(access);
   const dbMeta = describeDleEnterpriseDatabase();
   if (!dbMeta.configured) {
@@ -596,7 +598,8 @@ const invalidateApprovalCaches = () => {
 };
 
 export async function PATCH(request: Request) {
-  const access = resolveAccessContext(request);
+  const livePermissions = await permissionsForRequest(request);
+  const access = resolveAccessContext(request, livePermissions);
   const permissions = getUiPermissions(access);
   if (!permissions.canApproveTimesheet) return err(403, 'You do not have permission to approve timesheets.');
 
@@ -628,7 +631,7 @@ export async function PATCH(request: Request) {
     const applyHeader = async (headerId: string, headerList = headers) => {
       const header = headerList.find((item) => item.id === headerId);
       if (!header) throw new Error(`Timesheet ${headerId} was not found.`);
-      requireHeaderStageAccess(header, payload.action!, access.actor, access.role, request);
+      requireHeaderStageAccess(header, payload.action!, access.actor, access.role, request, livePermissions);
       if (payload.action === 'PROCESS_PAYROLL' || payload.action === 'POST_PAYROLL') {
         payrollHeaderIds.push(headerId);
         return;
@@ -639,7 +642,7 @@ export async function PATCH(request: Request) {
     if (payload.projectSegments?.length) {
       for (const segment of payload.projectSegments) {
         requireProjectSegmentSequence(segment);
-        requireProjectStageAccess(segment.stage, access.actor, access.role, request);
+        requireProjectStageAccess(segment.stage, access.actor, access.role, request, livePermissions);
         await advanceProjectTimesheetApproval(segment.headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, {
           projectCode: segment.projectCode,
           stage: segment.stage as 'Project Manager' | 'Cost Control',
@@ -652,7 +655,7 @@ export async function PATCH(request: Request) {
     if (payload.projectCode && payload.stage && payload.stage !== 'HR' && payload.stage !== 'Payroll') {
       if (!payload.headerId) return err(400, 'Timesheet header ID is required.');
       requireProjectSegmentSequence({ headerId: payload.headerId, projectCode: payload.projectCode, stage: payload.stage });
-      requireProjectStageAccess(payload.stage, access.actor, access.role, request);
+      requireProjectStageAccess(payload.stage, access.actor, access.role, request, livePermissions);
       await advanceProjectTimesheetApproval(payload.headerId, payload.action as 'APPROVE' | 'REJECT' | 'RETURN', access.actor, {
         projectCode: payload.projectCode,
         stage: payload.stage as 'Project Manager' | 'Cost Control',
