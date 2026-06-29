@@ -15,6 +15,7 @@ $StandalonePath = Join-Path $BuildPath "standalone"
 $script:ResolvedOutputPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $OutputPath))
 $ResolvedOutputPath = $script:ResolvedOutputPath
 $RuntimeDataBackupPath = Join-Path $RepoRoot "deployment\iis\.runtime-data-backup"
+$script:PublishStoppedIis = $false
 
 function Get-NormalizedDirectoryPath {
   param([Parameter(Mandatory = $true)][string]$TargetDirectory)
@@ -116,6 +117,53 @@ function Stop-IisSitesUsingPath {
   return $stopped
 }
 
+function Start-IisSitesUsingPath {
+  param([Parameter(Mandatory = $true)][string]$TargetDirectory)
+
+  if ([string]::IsNullOrWhiteSpace($TargetDirectory)) {
+    return @()
+  }
+
+  $target = Get-NormalizedDirectoryPath -TargetDirectory $TargetDirectory
+  $started = New-Object "System.Collections.Generic.List[string]"
+
+  if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
+    return $started
+  }
+
+  Import-Module WebAdministration -ErrorAction SilentlyContinue
+  if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
+    return $started
+  }
+
+  foreach ($site in Get-ChildItem IIS:\Sites) {
+    if ([string]::IsNullOrWhiteSpace($site.physicalPath)) {
+      continue
+    }
+
+    $sitePath = Get-NormalizedDirectoryPath -TargetDirectory $site.physicalPath
+    if ($sitePath -ne $target -and -not $sitePath.StartsWith("$target\")) {
+      continue
+    }
+
+    $poolName = [string]$site.applicationPool
+    if ($poolName) {
+      $poolState = (Get-WebAppPoolState -Name $poolName -ErrorAction SilentlyContinue).Value
+      if ($poolState -ne "Started") {
+        Start-WebAppPool -Name $poolName -ErrorAction SilentlyContinue
+        $started.Add("IIS app pool '$poolName'")
+      }
+    }
+
+    if ($site.State -ne "Started") {
+      Start-Website -Name $site.Name -ErrorAction SilentlyContinue
+      $started.Add("IIS site '$($site.Name)'")
+    }
+  }
+
+  return $started
+}
+
 function Stop-PublishTargetLocks {
   param([Parameter(Mandatory = $true)][string]$TargetDirectory)
 
@@ -132,6 +180,7 @@ function Stop-PublishTargetLocks {
 
   if ($stopped.Count -gt 0) {
     Write-Host ("Stopped publish locks: {0}" -f ($stopped -join ", "))
+    $script:PublishStoppedIis = $true
     Start-Sleep -Seconds 2
   }
 }
@@ -341,7 +390,19 @@ try {
 
   Write-Host "IIS deployment package created at $ResolvedOutputPath"
   Write-Host "Hosting mode: $HostingMode"
-  Write-Host "Run Start-DleDashboard.ps1 as a Windows service, then point IIS at this folder."
+
+  if (-not $NoStop -and $script:PublishStoppedIis) {
+    $started = @(Start-IisSitesUsingPath -TargetDirectory $ResolvedOutputPath | Select-Object -Unique)
+    if ($started.Count -gt 0) {
+      Write-Host ("Restarted IIS after publish: {0}" -f ($started -join ", "))
+    } else {
+      Write-Host "Recycle the IIS site/application pool if the dashboard still returns HTTP 503."
+    }
+  } elseif ($HostingMode -eq "ReverseProxy") {
+    Write-Host "Run Start-DleDashboard.ps1 as a Windows service, then point IIS at this folder."
+  } else {
+    Write-Host "If needed, recycle the IIS application pool for the site pointing at this folder."
+  }
 }
 finally {
   Pop-Location
