@@ -178,7 +178,9 @@ export const navigationConfig: NavItem[] = [
       'Statutory',
       'Bank & Finance',
       'Reports',
-    ], 'hris.payroll'),
+    ], 'hris.payroll').map((item) =>
+      item.slug === 'process-payroll' ? { ...item, route: '/payroll-management/payroll-processing' } : item,
+    ),
   },
   {
     id: 'benefits',

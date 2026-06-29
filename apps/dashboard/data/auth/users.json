@@ -21407,9 +21407,9 @@
     "location": "IDI_ORO",
     "employmentStatus": "Active",
     "reportingManager": "0432 - Ms BADETAN",
-    "passwordHash": "f8fb73ca4fbc7fd4a3a95489578c7ac68153b4f64d94d0411e8902a042c373ea",
-    "passwordSalt": "cc876ac52fd3e4e35d79adcd961cd6c6",
-    "status": "Pending First Login",
+    "passwordHash": "af7fcc88a6cf67c6a89b9587ab966dce5863ce2f06ab28ca42e4bda927e01151",
+    "passwordSalt": "36268abf993db6e59e63730b9ca307ef",
+    "status": "Active",
     "roles": [
       "HR Officer"
     ],
@@ -21427,13 +21427,13 @@
       "HUMAN RESOURCES"
     ],
     "moduleAccess": [],
-    "firstLoginRequired": true,
+    "firstLoginRequired": false,
     "passwordResetRequired": false,
     "failedAttempts": 0,
     "lockedUntil": null,
-    "lastLoginAt": null,
+    "lastLoginAt": "2026-06-26T10:25:01.130Z",
     "createdAt": "2026-06-14T12:32:27.882Z",
-    "updatedAt": "2026-06-23T08:15:25.023Z",
+    "updatedAt": "2026-06-26T10:25:29.222Z",
     "disabledAt": null,
     "deleted": false
   },
@@ -22625,9 +22625,9 @@
     "passwordResetRequired": false,
     "failedAttempts": 0,
     "lockedUntil": null,
-    "lastLoginAt": "2026-06-25T07:00:05.043Z",
+    "lastLoginAt": "2026-06-26T09:33:52.987Z",
     "createdAt": "2026-06-14T12:32:39.682Z",
-    "updatedAt": "2026-06-25T07:00:05.043Z",
+    "updatedAt": "2026-06-26T09:33:52.987Z",
     "disabledAt": null,
     "deleted": false
   },
@@ -23646,9 +23646,9 @@
     "passwordResetRequired": false,
     "failedAttempts": 0,
     "lockedUntil": null,
-    "lastLoginAt": "2026-06-26T06:34:00.939Z",
+    "lastLoginAt": "2026-06-29T06:38:54.541Z",
     "createdAt": "2026-06-14T12:32:30.629Z",
-    "updatedAt": "2026-06-26T06:34:00.939Z",
+    "updatedAt": "2026-06-29T06:38:54.541Z",
     "disabledAt": null,
     "deleted": false
   },

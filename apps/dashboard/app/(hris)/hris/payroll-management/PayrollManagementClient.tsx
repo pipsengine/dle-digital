@@ -66,7 +66,16 @@ import {
   UserX,
   WalletCards,
   X,
+  MoreHorizontal,
 } from 'lucide-react';
+
+const employeeInitials = (name: string) =>
+  String(name || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || '?';
 
 type Role = 'Super Admin' | 'System Administrator' | 'HR Director' | 'HR Manager' | 'HR Officer' | 'Payroll Officer' | 'Payroll Supervisor' | 'Finance Controller' | 'Finance Manager' | 'CFO' | 'Executive Director' | 'Executive Management' | 'Auditor' | 'Employee';
 type PayrollRunStatus = 'Draft' | 'Open' | 'Validation' | 'Validated' | 'Computed' | 'Ready for Approval' | 'Submitted' | 'Under Review' | 'Approved' | 'Released' | 'Rejected' | 'Revision Requested' | 'Locked' | 'Posted' | 'Closed' | 'Reopened' | 'Cancelled' | 'Published';
@@ -248,6 +257,7 @@ type SectionId =
   | 'finance-integration'
   | 'reports-analytics';
 type DashboardPanelId = 'ready' | 'gross' | 'deductions' | 'issues' | 'status' | 'approvals';
+type ProcessingKpiPanelId = 'ready' | 'gross' | 'deductions' | 'issues';
 type WorkflowStageId = 'data' | 'validation' | 'computation' | 'approval' | 'release' | 'lock';
 
 type TabConfig = {
@@ -743,7 +753,7 @@ const sectionById = (id?: string) => {
 
 const sectionHref = (id: SectionId) => {
   if (id === 'dashboard') return '/hris/payroll-management/dashboard';
-  if (id === 'process-payroll') return '/hris/payroll-management/process-payroll';
+  if (id === 'process-payroll') return '/hris/payroll-management/payroll-processing';
   if (id === 'salary-management') return '/hris/payroll-management/pay-setup';
   if (id === 'earnings-management') return '/hris/payroll-management/earnings';
   if (id === 'deductions-management') return '/hris/payroll-management/deductions';
@@ -1641,6 +1651,64 @@ const resolveProcessingAction = (id: string): PayrollAction => {
   return pool.find((item) => item.id === id) || action(id, id.replace(/-/g, ' '), 'workflow', payrollMakerRoles);
 };
 
+function ProcessingKpiCard({ title, value, subtitle, icon: Icon, tone, onClick, active = false }: { title: string; value: string; subtitle: string; icon: any; tone: 'blue' | 'green' | 'purple' | 'red'; onClick?: () => void; active?: boolean }) {
+  const tones = {
+    blue: 'border-blue-200 bg-gradient-to-br from-blue-50 to-white',
+    green: 'border-emerald-200 bg-gradient-to-br from-emerald-50 to-white',
+    purple: 'border-violet-200 bg-gradient-to-br from-violet-50 to-white',
+    red: 'border-red-200 bg-gradient-to-br from-red-50 to-white',
+  };
+  const iconTone = {
+    blue: 'bg-blue-100 text-blue-700',
+    green: 'bg-emerald-100 text-emerald-700',
+    purple: 'bg-violet-100 text-violet-700',
+    red: 'bg-red-100 text-red-700',
+  };
+  const Component = onClick ? 'button' : 'article';
+  return (
+    <Component
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`rounded-xl border p-4 text-left shadow-sm transition ${tones[tone]} ${onClick ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/40' : ''} ${active ? 'ring-2 ring-blue-600 ring-offset-2' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-600">{title}</p>
+          <p className="mt-2 text-2xl font-black tracking-tight text-slate-950">{value}</p>
+          <p className="mt-1 text-xs font-semibold text-slate-600">{subtitle}</p>
+        </div>
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconTone[tone]}`}>
+          <Icon className="h-5 w-5" />
+        </span>
+      </div>
+    </Component>
+  );
+}
+
+function WorkflowRingMetric({ label, value, detail, percent, tone, centerText }: { label: string; value: string; detail: string; percent: number; tone: 'blue' | 'green' | 'violet'; centerText?: string }) {
+  const stroke = { blue: '#2563eb', green: '#10b981', violet: '#7c3aed' }[tone];
+  const clamped = Math.max(0, Math.min(100, percent));
+  const dash = `${clamped} ${100 - clamped}`;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+      <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="mt-2 flex items-center gap-3">
+        <div className="relative h-14 w-14 shrink-0">
+          <svg viewBox="0 0 36 36" className="h-14 w-14 -rotate-90">
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke={stroke} strokeWidth="3" strokeDasharray={dash} strokeLinecap="round" />
+          </svg>
+          <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black text-slate-900">{centerText ?? `${clamped}%`}</span>
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-black text-slate-950">{value}</p>
+          <p className="mt-0.5 text-[11px] font-semibold text-slate-600">{detail}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProcessPayrollWorkspace({
   payload,
   canViewMoney,
@@ -1650,6 +1718,8 @@ function ProcessPayrollWorkspace({
   onExcludeFromPayroll,
   onBulkExcludeInvalidContracts,
   excludeBusy,
+  registerViewRequest,
+  onRegisterViewRequestHandled,
 }: {
   payload: PayrollPayload | null;
   canViewMoney: boolean;
@@ -1659,8 +1729,20 @@ function ProcessPayrollWorkspace({
   onExcludeFromPayroll: (employeeId: string) => void;
   onBulkExcludeInvalidContracts: () => void;
   excludeBusy: string;
+  registerViewRequest?: 'ready' | 'issues' | null;
+  onRegisterViewRequestHandled?: () => void;
 }) {
   const [processView, setProcessView] = useState<'ready' | 'issues' | 'outputs' | 'audit'>('ready');
+  const [registerQuery, setRegisterQuery] = useState('');
+
+  useEffect(() => {
+    if (!registerViewRequest) return;
+    setProcessView(registerViewRequest);
+    onRegisterViewRequestHandled?.();
+    window.setTimeout(() => {
+      document.getElementById('payroll-processing-register')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 80);
+  }, [registerViewRequest, onRegisterViewRequestHandled]);
   const currentRun = payrollRunFor(payload);
   const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
   const records = payload?.records || [];
@@ -1738,7 +1820,13 @@ function ProcessPayrollWorkspace({
     netPay: row.netPay,
     fill: ['#2563eb', '#7c3aed', '#f59e0b', '#0891b2', '#16a34a', '#0f172a'][index % 6],
   }));
-  const visibleRows = processView === 'issues' ? issueRows : processView === 'outputs' ? records.filter((record) => record.payrollStatus === 'Ready').slice(0, 20) : readyRows;
+  const registerFilteredRows = useMemo(() => {
+    const base = processView === 'issues' ? issueRows : processView === 'outputs' ? records.filter((record) => record.payrollStatus === 'Ready').slice(0, 20) : readyRows;
+    const q = registerQuery.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((record) => [record.employeeId, record.fullName, record.department, record.payrollGroup, record.employmentType].some((item) => String(item || '').toLowerCase().includes(q)));
+  }, [issueRows, processView, readyRows, records, registerQuery]);
+  const visibleRows = registerFilteredRows;
   const chartTooltip = (value: unknown, name: unknown) => {
     const label = String(name || '');
     const numeric = Number(value || 0);
@@ -1746,82 +1834,152 @@ function ProcessPayrollWorkspace({
     return [number(numeric), label];
   };
 
-  return (
-    <div className="space-y-4">
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-xs font-black uppercase text-slate-500">Payroll Processing Desk</p>
-            <h3 className="mt-1 text-2xl font-black text-slate-950">{payload?.periodLabel || 'Current Period'}</h3>
-            <p className="mt-1 text-sm font-semibold text-slate-600">
-              Run: <span className="font-black text-slate-900">{currentRun?.id || 'Not started'}</span>
-              {' · '}
-              {number(payload?.summary.payrollEligible)} employees
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles[statusTone(status)].chip}`}>{status}</span>
-            {blockedCount > 0 ? (
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles.red.chip}`}>{blockedCount} blocked</span>
-            ) : reviewCount > 0 ? (
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles.amber.chip}`}>{reviewCount} in review (non-blocking)</span>
-            ) : (
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${toneStyles.green.chip}`}>Ready to proceed</span>
-            )}
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
-          <InfoTile label="Progress" value={`${completedCount}/${workflowSteps.length}`} detail="Workflow steps completed" tone={completedCount === workflowSteps.length ? 'green' : 'blue'} />
-          <InfoTile label="Gross Payroll" value={money(payload?.summary.grossPay, canViewMoney)} detail={`${money(payload?.summary.netPay, canViewMoney)} net`} tone="blue" />
-          <InfoTile label="Readiness" value={`${number(readiness)}%`} detail={`${number(payload?.summary.readyEmployees)} ready employees`} tone={readiness >= 95 ? 'green' : 'amber'} />
-          <InfoTile label="Next Step" value={nextStep?.label || (status === 'Closed' ? 'Complete' : '—')} detail={nextStep?.detail || (status === 'Closed' ? 'Period closed' : 'All steps done or waiting')} tone={nextStep ? 'violet' : 'green'} />
-        </div>
-      </section>
+  const displayWorkflowSteps = useMemo(
+    () => workflowSteps
+      .filter((step) => !['post-run', 'close-period'].includes(step.id))
+      .map((step) => ({
+        ...step,
+        label: step.id === 'generate-statutory-schedules' ? 'Statutory Reports' : step.label,
+      })),
+    [workflowSteps],
+  );
 
-      <section className="rounded-lg border border-violet-200 bg-violet-50 p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-black uppercase text-violet-800">Payroll workflow</p>
-            <div className="mt-3 overflow-x-auto pb-1">
-              <div className="flex min-w-max items-center gap-1">
-                {workflowSteps.map((step, index) => (
-                  <div key={step.id} className="flex items-center gap-1">
+  const outputChecklistPanel = (
+    <section className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm">
+      <h3 className="text-sm font-bold text-[#0F172A]">Output checklist</h3>
+      <div className="mt-3 space-y-2">
+        {workflowSteps.filter((step) => step.phase === 'output' || step.id === 'close-period').map((step) => (
+          <button
+            key={step.id}
+            type="button"
+            disabled={step.done || (!step.enabled && !step.done)}
+            onClick={() => step.enabled && fire(step.id)}
+            className="flex w-full items-center gap-3 rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2.5 text-left transition hover:bg-white disabled:cursor-default"
+          >
+            <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 ${step.done ? 'border-emerald-500 bg-emerald-500' : 'border-slate-300 bg-white'}`}>
+              {step.done ? <CheckCircle2 className="h-3 w-3 text-white" /> : null}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-slate-900">{step.label}</p>
+            </div>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${step.done ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
+              {step.done ? 'Done' : 'Wait'}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+
+  const openIssuesPanel = (
+    <section className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm">
+      <h3 className="text-sm font-bold text-[#0F172A]">Open issues ({issueRows.length})</h3>
+      <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto pr-1">
+        {(payload?.exceptions || []).slice(0, 8).map((item) => (
+          <div key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <p className="text-[11px] font-bold leading-snug text-slate-900">{item.issue}</p>
+            <p className="mt-1 text-[10px] font-semibold text-slate-500">{item.employeeName} · {item.employeeId}</p>
+            <button type="button" onClick={() => setProcessView('issues')} className="mt-2 rounded-md bg-violet-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-violet-700">
+              Review
+            </button>
+          </div>
+        ))}
+        {!payload?.exceptions?.length ? <p className="text-xs font-semibold text-emerald-700">No open issues.</p> : null}
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="rounded-xl border border-[#E5E7EB] bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-[#0F172A]">Payroll Workflow</h2>
+              <p className="mt-0.5 text-xs font-semibold text-slate-500">Run: {currentRun?.id || 'Not started'} · {number(payload?.summary.payrollEligible)} employees</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Compliance Status</span>
+              {(payload?.controls || []).map((control) => (
+                <span key={control.id} className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-200">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {control.status}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <WorkflowRingMetric
+              label="Progress"
+              value={`${completedCount} / ${workflowSteps.length}`}
+              detail="Workflow steps completed"
+              percent={workflowSteps.length ? Math.round((completedCount / workflowSteps.length) * 100) : 0}
+              centerText={`${completedCount}/${workflowSteps.length}`}
+              tone="blue"
+            />
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Gross Payroll</p>
+              <p className="mt-2 text-base font-bold text-slate-950">{money(payload?.summary.grossPay, canViewMoney)}</p>
+              <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">{money(payload?.summary.netPay, canViewMoney)} net</p>
+            </div>
+            <WorkflowRingMetric
+              label="Readiness"
+              value={`${number(readiness)}%`}
+              detail={`${number(payload?.summary.readyEmployees)} ready employees`}
+              percent={readiness}
+              tone="green"
+            />
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-violet-700">Next Step</p>
+              <p className="mt-2 text-base font-bold text-violet-950">{nextStep?.label || '—'}</p>
+              <p className="mt-0.5 text-[11px] font-semibold text-violet-800">{nextStep?.detail || 'Waiting'}</p>
+            </div>
+          </div>
+
+          <div className="mt-6 overflow-x-auto pb-2">
+            <div className="flex min-w-[720px] items-start">
+              {displayWorkflowSteps.map((step, index) => {
+                const isDone = step.done && !step.repeatable;
+                const isActive = step.enabled && !step.done;
+                return (
+                  <div key={step.id} className="flex flex-1 items-start">
+                    {index > 0 ? (
+                      <div className={`mt-4 h-0.5 w-full min-w-[12px] ${displayWorkflowSteps[index - 1].done ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                    ) : null}
                     <button
                       type="button"
                       disabled={!step.enabled && !step.done}
                       onClick={() => step.enabled && fire(step.id)}
-                      title={step.repeatable ? 'Re-run to refresh calculations before submitting' : step.blockedReason || step.detail}
-                      className={`flex min-w-[108px] flex-col items-center rounded-lg border px-2 py-2 text-center transition ${
-                        step.repeatable
-                          ? 'border-cyan-400 bg-cyan-50 text-cyan-950 shadow-sm hover:bg-cyan-100'
-                          : step.done
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-                            : step.enabled
-                              ? 'border-violet-400 bg-white text-violet-950 shadow-sm hover:bg-violet-100'
-                              : 'border-slate-200 bg-slate-50 text-slate-400'
-                      }`}
+                      title={step.blockedReason || step.detail}
+                      className="flex w-[88px] shrink-0 flex-col items-center text-center disabled:cursor-default"
                     >
-                      <span className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black ${step.repeatable ? 'bg-cyan-600 text-white' : step.done ? 'bg-emerald-600 text-white' : step.enabled ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                        {step.repeatable ? <RefreshCcw className="h-3.5 w-3.5" /> : step.done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                      <span className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold ${
+                        isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-violet-600 text-white ring-4 ring-violet-100' : 'bg-white text-slate-400 ring-2 ring-slate-200'
+                      }`}>
+                        {isDone ? <CheckCircle2 className="h-4 w-4" /> : step.repeatable ? <RefreshCcw className="h-3.5 w-3.5" /> : index + 1}
                       </span>
-                      <span className="mt-1 text-[10px] font-black leading-tight">{step.repeatable ? `Re-run ${step.label}` : step.label}</span>
+                      <span className={`mt-2 text-[10px] font-bold leading-tight ${isDone ? 'text-emerald-700' : isActive ? 'text-violet-700' : 'text-slate-500'}`}>{step.label}</span>
                     </button>
-                    {index < workflowSteps.length - 1 ? <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" /> : null}
+                    {index < displayWorkflowSteps.length - 1 ? (
+                      <div className={`mt-4 h-0.5 w-full min-w-[12px] ${isDone ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                    ) : null}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
-          <div className="shrink-0 space-y-2 lg:w-64">
+
+          <div className="mt-5 flex flex-col gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-end">
             {rerunStep ? (
               <button
                 type="button"
                 onClick={() => fire(rerunStep.id)}
                 disabled={busyAction === rerunStep.id}
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-cyan-300 bg-cyan-50 px-4 text-sm font-black text-cyan-900 hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-70"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-bold text-slate-800 hover:bg-slate-50"
               >
                 <RefreshCcw className={`h-4 w-4 ${busyAction === rerunStep.id ? 'animate-spin' : ''}`} />
-                {busyAction === rerunStep.id ? 'Recalculating...' : 'Re-run Payroll'}
+                Re-run Payroll
               </button>
             ) : null}
             {nextStep ? (
@@ -1829,117 +1987,150 @@ function ProcessPayrollWorkspace({
                 type="button"
                 onClick={() => fire(nextStep.id)}
                 disabled={busyAction === nextStep.id}
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-violet-700 px-4 text-sm font-black text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-70"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-violet-700 px-5 text-sm font-bold text-white hover:bg-violet-800"
               >
-                <PlayCircle className={`h-4 w-4 ${busyAction === nextStep.id ? 'animate-spin' : ''}`} />
                 {busyAction === nextStep.id ? 'Working...' : `Next: ${nextStep.label}`}
-              </button>
-            ) : status === 'Closed' ? (
-              <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-center text-sm font-black text-emerald-800">{payload?.periodLabel || 'Payroll period'} is closed.</div>
-            ) : (
-              <div className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-center text-sm font-black text-emerald-800">All workflow steps complete.</div>
-            )}
-            {nextStep?.blockedReason ? <p className="text-[11px] font-bold text-red-700">{nextStep.blockedReason}</p> : null}
-            {status !== 'Closed' && !['Submitted', 'Under Review', ...approvedStatuses].includes(status) ? (
-              <button type="button" onClick={() => fire('approve-entire-workflow')} disabled={Boolean(busyAction)} className="inline-flex min-h-9 w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-[11px] font-black text-slate-700 hover:bg-slate-50">
-                Super Admin: End-to-end approval
+                <ChevronRight className="h-4 w-4" />
               </button>
             ) : null}
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
-        <ChartShell title="Payroll Readiness" detail="Ready, review, and blocked employees" active={processView === 'ready'} onClick={() => setProcessView('ready')}>
-          {readinessData.length ? (
-            <>
+        <aside className="hidden xl:block">{outputChecklistPanel}</aside>
+      </div>
+
+      <aside className="xl:hidden">{outputChecklistPanel}</aside>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-3">
+          <article className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-bold text-[#0F172A]">Payroll Readiness</h3>
+            <div className="mt-3 h-52">
+              {readinessData.length ? (
+                <>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={readinessData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={76} paddingAngle={2}>
+                        {readinessData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                      </Pie>
+                      <Tooltip formatter={chartTooltip} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <ChartLegend rows={readinessData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
+                </>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm font-semibold text-slate-500">No readiness data</div>
+              )}
+            </div>
+          </article>
+
+          <article className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-bold text-[#0F172A]">Payroll Value</h3>
+            <p className="text-[11px] font-semibold text-slate-500">{payload?.periodLabel || 'Current period'}</p>
+            <div className="mt-2 h-52">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={readinessData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={72} paddingAngle={2}>
-                    {readinessData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-                  </Pie>
+                <BarChart data={valueData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 600 }} />
+                  <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${Math.round(Number(v) / 1000000)}M`} />
                   <Tooltip formatter={chartTooltip} />
-                </PieChart>
+                  <Bar dataKey="value" name="Amount" radius={[4, 4, 0, 0]}>
+                    {valueData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
-              <ChartLegend rows={readinessData.map((row) => ({ label: row.name, value: number(row.value), color: row.fill }))} />
-            </>
-          ) : (
-            <div className="flex h-full min-h-40 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm font-black text-slate-700">No readiness data</div>
-          )}
-        </ChartShell>
+            </div>
+          </article>
 
-        <ChartShell title="Payroll Value" detail="Gross, deductions, and net pay" active={processView === 'outputs'} onClick={() => setProcessView('outputs')}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={valueData} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-              <XAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} />
-              <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip formatter={chartTooltip} />
-              <Bar dataKey="value" name="Amount" radius={[5, 5, 0, 0]}>
-                {valueData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartShell>
+          <article className="rounded-xl border border-[#E5E7EB] bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-bold text-[#0F172A]">Category Processing</h3>
+            <div className="mt-3 h-52">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={categoryData} layout="vertical" margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 600 }} width={88} />
+                  <Tooltip formatter={chartTooltip} />
+                  <Bar dataKey="employees" name="Employees" radius={[0, 4, 4, 0]}>
+                    {categoryData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </article>
+        </section>
 
-        <ChartShell title="Category Processing" detail="Employees by payroll category" onClick={() => setProcessView('ready')}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={categoryData} layout="vertical" margin={{ top: 6, right: 8, left: 10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-              <XAxis type="number" hide />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fontWeight: 700 }} width={92} />
-              <Tooltip formatter={chartTooltip} />
-              <Bar dataKey="employees" name="Employees" radius={[0, 5, 5, 0]}>
-                {categoryData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartShell>
-      </section>
+        <aside className="hidden xl:block">{openIssuesPanel}</aside>
+      </div>
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <aside className="xl:hidden">{openIssuesPanel}</aside>
+
+      <section id="payroll-processing-register" className="rounded-xl border border-[#E5E7EB] bg-white shadow-sm">
           <div className="flex flex-col gap-3 border-b border-slate-100 p-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h3 className="text-sm font-black text-slate-950">Payroll Register</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-500">{processView === 'issues' ? 'Records requiring correction.' : 'Payroll-ready employees for this period.'}</p>
+              <h3 className="text-sm font-bold text-[#0F172A]">Payroll Register</h3>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {processView !== 'audit' ? (
+                <label className="inline-flex min-w-[220px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                  <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                  <input
+                    type="search"
+                    value={registerQuery}
+                    onChange={(e) => setRegisterQuery(e.target.value)}
+                    placeholder="Search by name, emp ID..."
+                    className="min-w-0 flex-1 bg-transparent text-xs font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none"
+                  />
+                </label>
+              ) : null}
+              <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50">
+                <Filter className="h-3.5 w-3.5" />
+                Filters
+              </button>
               {[
                 { id: 'ready' as const, label: `Ready (${readyRows.length})` },
                 { id: 'issues' as const, label: `Issues (${issueRows.length})` },
                 { id: 'audit' as const, label: 'Audit' },
               ].map((item) => (
-                <button key={item.id} type="button" onClick={() => setProcessView(item.id)} className={`rounded-lg px-3 py-2 text-xs font-black ${processView === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>
+                <button key={item.id} type="button" onClick={() => setProcessView(item.id)} className={`min-h-9 rounded-lg px-3 text-xs font-bold ${processView === item.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{item.label}</button>
               ))}
               {processView === 'issues' && removableIssueRows.length > 0 ? (
                 <button
                   type="button"
                   onClick={() => onBulkExcludeInvalidContracts()}
                   disabled={Boolean(excludeBusy)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-800 hover:bg-red-100 disabled:cursor-wait disabled:opacity-70"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-800 hover:bg-red-100 disabled:cursor-wait disabled:opacity-70"
                 >
                   <UserX className={`h-3.5 w-3.5 ${excludeBusy === 'exclude-unconfigured-daily-rate-contracts' ? 'animate-pulse' : ''}`} />
-                  {excludeBusy === 'exclude-unconfigured-daily-rate-contracts' ? 'Removing...' : `Remove invalid contracts (${removableIssueRows.length})`}
+                  {excludeBusy === 'exclude-unconfigured-daily-rate-contracts' ? 'Removing...' : `Remove invalid (${removableIssueRows.length})`}
                 </button>
               ) : null}
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-[980px] w-full text-left">
-              <thead className="bg-slate-50 text-xs font-black uppercase text-slate-500">
-                <tr>{['Employee', 'Category', 'Gross', 'Deductions', 'Net', 'Status', 'Detail', ...(processView === 'issues' ? ['Action'] : [])].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}</tr>
+              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <tr>{['Employee', 'Category', 'Gross', 'Deductions', 'Net', 'Status', processView === 'issues' ? 'Action' : ''].map((head, i) => <th key={`${head}-${i}`} className="px-4 py-3 text-left">{head}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {(processView === 'audit' ? [] : visibleRows).slice(0, 18).map((record) => (
-                  <tr key={record.employeeId} className="hover:bg-slate-50">
-                    <td className="px-4 py-3"><p className="text-sm font-black text-slate-950">{record.fullName}</p><p className="text-xs font-semibold text-slate-500">{record.employeeId} - {record.department}</p></td>
+                {(processView === 'audit' ? [] : visibleRows).slice(0, 18).map((record, rowIndex) => (
+                  <tr key={record.employeeId} className={rowIndex % 2 === 0 ? 'bg-white hover:bg-slate-50/80' : 'bg-slate-50/40 hover:bg-slate-50'}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-800">
+                          {employeeInitials(record.fullName)}
+                        </span>
+                        <div>
+                          <p className="text-sm font-bold text-slate-950">{record.fullName}</p>
+                          <p className="text-[11px] font-semibold text-slate-500">{record.employeeId} · {record.department}</p>
+                        </div>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-xs font-bold text-slate-700">{record.employmentType || 'Unassigned'}<br /><span className="text-slate-400">{record.payrollGroup || record.salaryGrade || 'No group'}</span></td>
                     <td className="px-4 py-3 text-sm font-black text-slate-900">{money(record.grossPay, canViewMoney)}</td>
                     <td className="px-4 py-3 text-sm font-black text-violet-700">{money(record.deductions, canViewMoney)}</td>
                     <td className="px-4 py-3 text-sm font-black text-emerald-700">{money(record.netPay, canViewMoney)}</td>
-                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
-                    <td className="px-4 py-3 text-xs font-semibold text-slate-600">{record.exceptions.length ? record.exceptions.slice(0, 2).join('; ') : 'Ready for payroll'}</td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${toneStyles[statusTone(record.payrollStatus)].chip}`}>{record.payrollStatus}</span></td>
                     {processView === 'issues' ? (
                       <td className="px-4 py-3">
                         {isRemovableDailyRatePayrollRecord(record) ? (
@@ -1957,14 +2148,20 @@ function ProcessPayrollWorkspace({
                           <span className="text-[11px] font-semibold text-slate-400">—</span>
                         )}
                       </td>
-                    ) : null}
+                    ) : (
+                      <td className="px-4 py-3 text-right">
+                        <button type="button" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Row actions">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {processView === 'audit' ? (
                   <tr><td colSpan={7} className="px-4 py-4">
                     <div className="max-h-80 space-y-2 overflow-y-auto">
                       {(payload?.auditTrail || []).slice(0, 12).map((item) => (
-                        <div key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                           <p className="text-xs font-black text-slate-950">{item.action}</p>
                           <p className="mt-1 text-[11px] font-semibold text-slate-600">{item.user} · {new Date(item.at).toLocaleString('en-GB')}</p>
                         </div>
@@ -1973,56 +2170,10 @@ function ProcessPayrollWorkspace({
                     </div>
                   </td></tr>
                 ) : null}
-                {!visibleRows.length && processView !== 'audit' ? <tr><td colSpan={processView === 'issues' ? 8 : 7} className="px-4 py-6 text-sm font-black text-slate-700">No records in this view.</td></tr> : null}
+                {!visibleRows.length && processView !== 'audit' ? <tr><td colSpan={7} className="px-4 py-6 text-sm font-black text-slate-700">No records in this view.</td></tr> : null}
               </tbody>
             </table>
           </div>
-        </div>
-
-        <aside className="space-y-4">
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-black text-slate-950">Output checklist</h3>
-            <p className="mt-1 text-xs font-semibold text-slate-500">Tap a pending item to run that step.</p>
-            <div className="mt-3 space-y-2">
-              {workflowSteps.filter((step) => step.phase === 'output' || step.id === 'close-period').map((step) => (
-                <button
-                  key={step.id}
-                  type="button"
-                  disabled={step.done || (!step.enabled && !step.done)}
-                  onClick={() => step.enabled && fire(step.id)}
-                  className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition ${step.done ? 'border-emerald-200 bg-emerald-50' : step.enabled ? 'border-violet-200 bg-violet-50 hover:bg-violet-100' : 'border-slate-200 bg-slate-50 opacity-80'}`}
-                >
-                  <div>
-                    <p className="text-xs font-black text-slate-950">{step.label}</p>
-                    <p className="mt-0.5 text-[11px] font-semibold text-slate-600">{step.done ? 'Completed' : step.blockedReason || step.detail}</p>
-                  </div>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${step.done ? toneStyles.green.chip : step.enabled ? toneStyles.violet.chip : toneStyles.slate.chip}`}>
-                    {step.done ? 'Done' : step.enabled ? 'Run' : 'Wait'}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          {issueRows.length > 0 ? (
-            <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
-              <h3 className="text-sm font-black text-slate-950">Open issues ({issueRows.length})</h3>
-              <p className="mt-1 text-xs font-semibold text-slate-600">
-                Review items do not block posting or close. Blocked items must be fixed before calculate/submit.
-                {removableIssueRows.length > 0 ? ` ${removableIssueRows.length} contract employee(s) have no daily rate or timesheet — remove them from payroll if they should not be paid this period.` : ''}
-              </p>
-              <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-                {(payload?.exceptions || []).slice(0, 6).map((item) => (
-                  <div key={item.id} className={`rounded-lg border p-2 ${item.severity === 'High' ? toneStyles.red.card : toneStyles.amber.card}`}>
-                    <p className="text-xs font-black text-slate-950">{item.employeeName}</p>
-                    <p className="text-[11px] font-semibold text-slate-700">{item.issue}</p>
-                  </div>
-                ))}
-              </div>
-              <button type="button" onClick={() => setProcessView('issues')} className="mt-3 text-xs font-black text-violet-700 hover:underline">View all in register →</button>
-            </section>
-          ) : null}
-        </aside>
       </section>
     </div>
   );
@@ -4026,6 +4177,8 @@ export default function PayrollManagementClient({
   const [actionReason, setActionReason] = useState('');
   const [auditOpen, setAuditOpen] = useState(false);
   const [dashboardPanel, setDashboardPanel] = useState<DashboardPanelId>('ready');
+  const [processingKpiPanel, setProcessingKpiPanel] = useState<ProcessingKpiPanelId | null>(null);
+  const [registerViewRequest, setRegisterViewRequest] = useState<'ready' | 'issues' | null>(null);
   const [fixIssue, setFixIssue] = useState<PayrollException | null>(null);
   const [viewPeriod, setViewPeriod] = useState<string | null>(null);
   const loadSeq = useRef(0);
@@ -4050,6 +4203,18 @@ export default function PayrollManagementClient({
     window.setTimeout(() => {
       document.getElementById('payroll-dashboard-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 50);
+  };
+
+  const toggleProcessingKpiPanel = (panel: ProcessingKpiPanelId) => {
+    setProcessingKpiPanel((current) => {
+      const next = current === panel ? null : panel;
+      if (next) {
+        window.setTimeout(() => {
+          document.getElementById('processing-kpi-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 50);
+      }
+      return next;
+    });
   };
 
   const load = async (periodOverride?: string | null) => {
@@ -4820,6 +4985,188 @@ export default function PayrollManagementClient({
     );
   }
 
+  if (section.id === 'payroll-processing') {
+    const payrollRunView = activeTab.id === 'payroll-run';
+    const totalEmployees = payload?.summary.totalEmployees || 0;
+    const readyEmployees = payload?.summary.readyEmployees || 0;
+    const readyPct = totalEmployees ? Math.round((readyEmployees / totalEmployees) * 100) : 0;
+    const deductionPct = payload?.summary.grossPay ? Math.round(((payload.summary.deductions || 0) / payload.summary.grossPay) * 1000) / 10 : 0;
+    const runStatus = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
+
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A]">
+        <div className="border-b border-[#E5E7EB] bg-white px-4 py-5 sm:px-6">
+          <div className="mx-auto max-w-[1600px]">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-500">HRIS / Payroll Management / Process Payroll</p>
+                <h1 className="mt-1 text-[28px] font-bold tracking-tight text-slate-950 sm:text-[32px]">Payroll Processing</h1>
+                <p className="mt-1 text-sm font-medium text-slate-600">
+                  {payload?.periodLabel || 'Loading'} payroll run · {payload?.dataSource?.source || 'DLE_Enterprise HRIS'} · {number(payload?.dataSource?.employeeCount || totalEmployees)} employees
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-100">Period: {payload?.periodLabel || 'Loading'}</span>
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-100">Run: {runStatus}</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Loaded: {new Date(lastLoaded).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Source: {payload?.dataSource?.source || 'DLE_Enterprise HRIS'}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                  <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                  {loading ? 'Refreshing' : 'Refresh'}
+                </button>
+                <button type="button" onClick={exportCsv} disabled={!payload?.permissions.canExport} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#1E3A8A] px-4 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50">
+                  <Download className="h-4 w-4" />
+                  Export CSV
+                </button>
+                <button type="button" onClick={exportExcel} disabled={!payload?.permissions.canExport} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Export Excel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={`mx-auto max-w-[1600px] px-4 py-6 sm:px-6 ${loading ? 'opacity-70' : ''}`}>
+          {error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-800">{error}</div> : null}
+          {toast ? <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">{toast}</div> : null}
+          {payload?.toleranceMode ? (
+            <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
+              <p className="font-black">May payroll tolerance is active for {payload.periodLabel}.</p>
+              <p className="mt-1 font-semibold">
+                Timesheet gaps, pension setup, and Sage variance checks are deferred to June ({number(payload.deferredExceptionCount || payload.summary.deferredExceptionCount)} items).
+              </p>
+            </div>
+          ) : null}
+
+          {payrollRunView ? (
+            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <ProcessingKpiCard title="Ready Employees" value={number(readyEmployees)} subtitle={`${readyPct}% of total employees`} icon={Users} tone="blue" active={processingKpiPanel === 'ready'} onClick={() => toggleProcessingKpiPanel('ready')} />
+              <ProcessingKpiCard title="Gross Pay" value={money(payload?.summary.grossPay, canViewMoney)} subtitle={`Net Pay: ${money(payload?.summary.netPay, canViewMoney)}`} icon={Banknote} tone="green" active={processingKpiPanel === 'gross'} onClick={() => toggleProcessingKpiPanel('gross')} />
+              <ProcessingKpiCard title="Deductions" value={money(payload?.summary.deductions, canViewMoney)} subtitle={`${deductionPct}% of gross pay`} icon={ReceiptText} tone="purple" active={processingKpiPanel === 'deductions'} onClick={() => toggleProcessingKpiPanel('deductions')} />
+              <ProcessingKpiCard title="Issues" value={number(payload?.summary.exceptionCount)} subtitle={`${number(payload?.summary.blockedEmployees)} blocked • ${number(payload?.summary.reviewEmployees)} review`} icon={AlertTriangle} tone="red" active={processingKpiPanel === 'issues'} onClick={() => toggleProcessingKpiPanel('issues')} />
+            </div>
+          ) : null}
+
+          {payrollRunView && processingKpiPanel ? (
+            <section id="processing-kpi-details" className="mb-5 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Payroll summary detail</p>
+                  <p className="text-sm font-bold text-slate-950">
+                    {{
+                      ready: 'Ready employees',
+                      gross: 'Gross payroll composition',
+                      deductions: 'Deduction and statutory liability',
+                      issues: 'Payroll issues and exceptions',
+                    }[processingKpiPanel]}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setProcessingKpiPanel(null)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800" aria-label="Close detail panel">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <DashboardDetailPanel
+                panel={processingKpiPanel}
+                payload={payload}
+                records={payload?.records || []}
+                workflow={[]}
+                currentRun={currentRun}
+                canViewMoney={canViewMoney}
+                setQuery={setQuery}
+                setStatus={setStatus}
+                setActivePanel={(panel) => setProcessingKpiPanel(panel as ProcessingKpiPanelId)}
+                onFixIssue={setFixIssue}
+                onShowInRegister={(panel) => {
+                  setRegisterViewRequest(panel === 'issues' ? 'issues' : 'ready');
+                  setProcessingKpiPanel(null);
+                }}
+                onClearFilters={() => setQuery('')}
+              />
+            </section>
+          ) : null}
+
+          {!payrollRunView ? (
+            <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+              <div className="flex min-w-max gap-1">
+                {section.tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTabs((prev) => ({ ...prev, [section.id]: tab.id }))}
+                    className={`min-h-10 rounded-lg px-3 text-xs font-black transition-colors ${activeTab.id === tab.id ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <details className="mb-4 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+              <summary className="cursor-pointer text-xs font-black text-slate-700">Other payroll modules (period, validation, approval, closing…)</summary>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {section.tabs.filter((tab) => tab.id !== 'payroll-run').map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTabs((prev) => ({ ...prev, [section.id]: tab.id }))}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700 hover:bg-white"
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+
+          <div>
+            {activeTab.id === 'payroll-period-management' ? (
+              <PayrollPeriodManagementPanel
+                payload={payload}
+                activeTabId={periodTab}
+                setActiveTabId={setPeriodTab}
+                busyAction={busyAction}
+                role={role}
+                onSelectPeriod={(period) => {
+                  setViewPeriod(period);
+                  void load(period);
+                }}
+                onPeriodAction={(action, period, reason) => void runAction(action, reason, period)}
+              />
+            ) : activeTab.id === 'payroll-run' ? (
+              <ProcessPayrollWorkspace payload={payload} canViewMoney={canViewMoney} onAction={triggerAction} busyAction={busyAction} role={role} onExcludeFromPayroll={(employeeId) => void excludeFromPayrollRun(employeeId)} onBulkExcludeInvalidContracts={() => void bulkExcludeInvalidContracts()} excludeBusy={excludeBusy} registerViewRequest={registerViewRequest} onRegisterViewRequestHandled={() => setRegisterViewRequest(null)} />
+            ) : (
+              <FeaturePanel tab={activeTab} section={section} payload={payload} canViewMoney={canViewMoney} />
+            )}
+          </div>
+        </div>
+
+        {confirmAction ? (
+          <ConfirmationModal
+            actionItem={confirmAction}
+            payload={payload}
+            reason={actionReason}
+            setReason={setActionReason}
+            onCancel={() => setConfirmAction(null)}
+            onConfirm={confirmSensitiveAction}
+          />
+        ) : null}
+        {fixIssue ? (
+          <IssueFixDrawer
+            issue={fixIssue}
+            record={(payload?.records || []).find((record) => record.employeeId === fixIssue.employeeId)}
+            busy={busyAction === `fix-${fixIssue.id}`}
+            onClose={() => setFixIssue(null)}
+            onSubmit={(values) => void fixPayrollIssue(fixIssue, values)}
+          />
+        ) : null}
+        {auditOpen ? <AuditPanel payload={payload} onClose={() => setAuditOpen(false)} /> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -5553,6 +5900,8 @@ function DashboardDetailPanel({
   setStatus,
   setActivePanel,
   onFixIssue,
+  onShowInRegister,
+  onClearFilters,
 }: {
   panel: DashboardPanelId;
   payload: PayrollPayload | null;
@@ -5564,6 +5913,8 @@ function DashboardDetailPanel({
   setStatus: (value: string) => void;
   setActivePanel: (value: DashboardPanelId) => void;
   onFixIssue: (issue: PayrollException) => void;
+  onShowInRegister?: (panel: DashboardPanelId) => void;
+  onClearFilters?: () => void;
 }) {
   const readyRows = records.filter((record) => record.payrollStatus === 'Ready');
   const issueRows = records.filter((record) => record.exceptionCount > 0 || record.payrollStatus !== 'Ready');
@@ -5656,8 +6007,17 @@ function DashboardDetailPanel({
           <p className="mt-1 text-xs font-semibold text-slate-500">{subtitle}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => { setQuery(''); setStatus('All'); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Clear filters</button>
-          <button type="button" onClick={() => setStatus(panel === 'issues' ? 'Blocked' : 'Ready')} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800">Show in register</button>
+          <button type="button" onClick={() => { onClearFilters ? onClearFilters() : (setQuery(''), setStatus('All')); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">Clear filters</button>
+          <button
+            type="button"
+            onClick={() => {
+              if (onShowInRegister) onShowInRegister(panel);
+              else setStatus(panel === 'issues' ? 'Blocked' : 'Ready');
+            }}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white hover:bg-slate-800"
+          >
+            Show in register
+          </button>
         </div>
       </div>
 

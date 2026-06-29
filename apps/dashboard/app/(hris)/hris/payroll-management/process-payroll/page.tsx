@@ -1,10 +1,5 @@
-import type { Metadata } from 'next';
-import PayrollManagementClient from '../PayrollManagementClient';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Payroll Management',
-};
-
-export default function PayrollManagementHubPage() {
-  return <PayrollManagementClient initialNow={new Date().toISOString()} initialSection="process-payroll" />;
+export default function PayrollProcessingRedirectPage() {
+  redirect('/hris/payroll-management/payroll-processing');
 }
