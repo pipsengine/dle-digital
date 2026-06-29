@@ -245,7 +245,7 @@ export default function RolesPermissionsClient() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Unable to save permissions.');
-      setNotice(publish ? 'Permissions published and will be enforced on the next authorized request or refreshed session.' : 'Draft saved.');
+      setNotice(publish ? 'Permissions published. They take effect on the user\'s next page load or API request.' : 'Draft saved.');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save permissions.');

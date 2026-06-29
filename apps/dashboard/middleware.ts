@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { effectivePermissionsForUser } from '@/lib/auth/access-control-store';
 import { AUTH_COOKIE, isPublicPath, verifySessionToken } from '@/lib/auth/session';
 import { canAccessRoute } from '@/lib/access/route-access';
+import { deriveHrisRole } from '@/lib/hris-access';
 
 const denied = (request: NextRequest, status = 403) => {
   if (request.nextUrl.pathname.startsWith('/api')) {
@@ -36,12 +38,15 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    if ((!pathname.startsWith('/api') || pathname.startsWith('/api/hris')) && !canAccessRoute(session, pathname)) {
+    const roles = session.roles;
+    const permissions = session.isGlobalAdmin
+      ? ['*']
+      : await effectivePermissionsForUser(session.sub, roles).catch(() => session.permissions);
+
+    if ((!pathname.startsWith('/api') || pathname.startsWith('/api/hris')) && !canAccessRoute({ ...session, permissions }, pathname)) {
       return denied(request, 403);
     }
 
-    const roles = session.roles;
-    const permissions = session.permissions;
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set('x-auth-user', session.username || '');
     requestHeaders.set('x-auth-roles', roles.join(','));
@@ -49,7 +54,7 @@ export async function middleware(request: NextRequest) {
     requestHeaders.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
     requestHeaders.set('x-hris-actor', session.fullName || session.username || 'HRIS User');
     if (!requestHeaders.get('x-hris-role')) {
-      requestHeaders.set('x-hris-role', roles.includes('Super Administrator') ? 'Super Administrator' : 'OrganizationAdmin');
+      requestHeaders.set('x-hris-role', deriveHrisRole(roles));
     }
 
     const response = NextResponse.next({ request: { headers: requestHeaders } });

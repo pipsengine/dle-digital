@@ -259,6 +259,11 @@ permissionCatalog.push(
   node('Page Access', 'Attendance', 'Mobile Attendance', 'Mobile Attendance Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.mobile'),
   node('Page Access', 'Attendance', 'Site Attendance', 'Site Attendance Page', 'Page', 'L2 - Manager', 'Location', 'page.hris.attendance.site'),
 
+  node('Page Access', 'Time & Logs', 'Timesheet Entry', 'Timesheet Entry Page', 'Page', 'L2 - Supervisor', 'Team', 'page.hris.time-and-logs.timesheet-entry'),
+  node('Page Access', 'Time & Logs', 'Timesheet Approval', 'Timesheet Approval Page', 'Page', 'L2 - Manager', 'Team', 'page.hris.time-and-logs.timesheet-approval'),
+  node('Page Access', 'Time & Logs', 'Timesheet Reports', 'Timesheet Reports Page', 'Page', 'L2 - Manager', 'Company', 'page.hris.time-and-logs.timesheet-reports'),
+  node('Page Access', 'Time & Logs', 'Timesheet Period', 'Timesheet Period Page', 'Page', 'L2 - HR Admin', 'Company', 'page.hris.time-and-logs.timesheet-period'),
+
   node('Timesheet', 'Entry', 'Timesheet Entry', 'Capture and Save Timesheet Lines', 'Workflow', 'L2 - Supervisor', 'Team', 'timesheet.entry'),
   node('Timesheet', 'Submission', 'Timesheet Submission', 'Submit Timesheet for Approval', 'Workflow', 'L2 - Supervisor', 'Team', 'timesheet.submission'),
   node('Timesheet', 'Supervisor Review', 'Supervisor Approval', 'Approve/Return/Reject Supervisor Stage', 'Workflow', 'L2 - Supervisor', 'Team', 'timesheet.supervisor'),
@@ -349,11 +354,81 @@ permissionCatalog.push(
 
 const allCatalogPermissions = () => permissionCatalog.flatMap((item) => accessActions.map((action) => `${item.permissionPrefix}.${action}`));
 
-const defaultTemplates = (): PermissionTemplate[] => [
-  { id: 'tpl-read-only', name: 'Read Only', description: 'View, export, print, and download only.', permissions: allCatalogPermissions().filter((item) => /\.(view|export|print|download)$/.test(item)), dataScope: 'Company', approvalLevel: 'L1 - User' },
-  { id: 'tpl-module-admin', name: 'Module Administrator', description: 'Operational administration without security override.', permissions: allCatalogPermissions().filter((item) => !item.startsWith('security.') && !item.startsWith('audit.') && !item.startsWith('admin.roles.')), dataScope: 'Company', approvalLevel: 'L2 - Manager' },
-  { id: 'tpl-approver', name: 'Approver', description: 'Workflow review and decision permissions.', permissions: allCatalogPermissions().filter((item) => /\.(view|approve|reject|export)$/.test(item)), dataScope: 'Team', approvalLevel: 'L2 - Manager' },
-];
+const defaultTemplates = (): PermissionTemplate[] => {
+  const all = allCatalogPermissions();
+  const pick = (...prefixes: string[]) => all.filter((item) => prefixes.some((prefix) => item.startsWith(`${prefix}.`)));
+  return [
+    { id: 'tpl-read-only', name: 'Read Only', description: 'View, export, print, and download only.', permissions: all.filter((item) => /\.(view|export|print|download)$/.test(item)), dataScope: 'Company', approvalLevel: 'L1 - User' },
+    { id: 'tpl-module-admin', name: 'Module Administrator', description: 'Operational administration without security override.', permissions: all.filter((item) => !item.startsWith('security.') && !item.startsWith('audit.') && !item.startsWith('admin.roles.')), dataScope: 'Company', approvalLevel: 'L2 - Manager' },
+    { id: 'tpl-approver', name: 'Approver', description: 'Workflow review and decision permissions.', permissions: all.filter((item) => /\.(view|approve|reject|export)$/.test(item)), dataScope: 'Team', approvalLevel: 'L2 - Manager' },
+    {
+      id: 'tpl-overtime-pm-approver',
+      name: 'Overtime Project Manager Approver',
+      description: 'View overtime requests and approve or reject at the project manager stage.',
+      permissions: [
+        'page.hris.workforce-management.overtime-management.view',
+        'overtime.authorization.view',
+        'overtime.authorization.project-manager.approve',
+        'overtime.authorization.project-manager.reject',
+        'overtime.authorization.export',
+      ],
+      dataScope: 'Company',
+      approvalLevel: 'L2 - Project Manager',
+    },
+    {
+      id: 'tpl-overtime-md-approver',
+      name: 'Overtime MD Approver',
+      description: 'Final executive approval for authorized overtime requests.',
+      permissions: [
+        'page.hris.workforce-management.overtime-management.view',
+        'overtime.authorization.view',
+        'overtime.authorization.md.approve',
+        'overtime.authorization.md.reject',
+        'overtime.authorization.export',
+      ],
+      dataScope: 'Company',
+      approvalLevel: 'L3 - Executive Approver',
+    },
+    {
+      id: 'tpl-timesheet-supervisor-approver',
+      name: 'Timesheet Supervisor Approver',
+      description: 'Review and approve submitted timesheets at the supervisor stage.',
+      permissions: [
+        'page.hris.time-and-logs.timesheet-approval.view',
+        'timesheet.supervisor.approve',
+        'timesheet.supervisor.reject',
+        'timesheet.supervisor.return',
+        'timesheet.view',
+        'timesheet.export',
+        'operations.timesheets.view',
+        'operations.timesheets.approve',
+      ],
+      dataScope: 'Team',
+      approvalLevel: 'L2 - Manager',
+    },
+    {
+      id: 'tpl-timesheet-cost-control-approver',
+      name: 'Timesheet Cost Control Approver',
+      description: 'Validate cost centre and charge codes during timesheet approval.',
+      permissions: pick('timesheet.cost-control', 'timesheet', 'operations.timesheets', 'page.hris.time-and-logs.timesheet-approval').filter((item) => /\.(view|approve|reject|return|export)$/.test(item)),
+      dataScope: 'Company',
+      approvalLevel: 'L3 - Approver',
+    },
+    {
+      id: 'tpl-overtime-requestor',
+      name: 'Overtime Requestor',
+      description: 'Create and submit pre-overtime authorization requests.',
+      permissions: [
+        'page.hris.workforce-management.overtime-management.view',
+        'overtime.authorization.view',
+        'overtime.authorization.create',
+        'overtime.authorization.submit',
+      ],
+      dataScope: 'Company',
+      approvalLevel: 'L2 - Production Manager',
+    },
+  ];
+};
 
 const defaultState = (): AccessControlState => ({ published: [], drafts: [], templates: defaultTemplates(), audit: [] });
 
@@ -418,10 +493,16 @@ const db = async () => {
   return dbReady;
 };
 
+const mergeTemplates = (existing: PermissionTemplate[] = []) => {
+  const defaults = defaultTemplates();
+  const known = new Set(existing.map((item) => item.id));
+  return [...existing, ...defaults.filter((item) => !known.has(item.id))];
+};
+
 const normalizeState = (state: AccessControlState): AccessControlState => ({
   ...defaultState(),
   ...state,
-  templates: state.templates?.length ? state.templates : defaultTemplates(),
+  templates: mergeTemplates(state.templates?.length ? state.templates : defaultTemplates()),
   published: Array.isArray(state.published) ? state.published : [],
   drafts: Array.isArray(state.drafts) ? state.drafts : [],
   audit: Array.isArray(state.audit) ? state.audit : [],

@@ -57,6 +57,7 @@ export const hrisRoutePermissionOptions = (pathname: string): string[] | null =>
   }
   if (path === '/hris/workforce-management/timesheet-entry' || path === '/hris/time-and-logs/timesheet-entry' || path === '/hris/time-and-logs/project-sites') {
     return [
+      'page.hris.time-and-logs.timesheet-entry.view',
       'timesheet.entry.view',
       'timesheet.controls.supervisor-search.view',
       'timesheet.controls.location-search.view',
@@ -75,7 +76,16 @@ export const hrisRoutePermissionOptions = (pathname: string): string[] | null =>
     ];
   }
   if (path === '/hris/workforce-management/timesheet-approval' || path === '/hris/time-and-logs/timesheet-approval') {
-    return ['operations.timesheets.approve', 'timesheet.approve'];
+    return [
+      'page.hris.time-and-logs.timesheet-approval.view',
+      'timesheet.supervisor.approve',
+      'timesheet.cost-control.approve',
+      'timesheet.project-manager.approve',
+      'timesheet.hr.approve',
+      'timesheet.payroll.approve',
+      'operations.timesheets.approve',
+      'timesheet.approve',
+    ];
   }
   if (path === '/hris/workforce-management/timesheet-reports' || path === '/hris/time-and-logs/timesheet-reports') {
     return ['operations.timesheets.view', 'operations.timesheets.export', 'timesheet.view', 'timesheet.export'];
