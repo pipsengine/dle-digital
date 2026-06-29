@@ -298,13 +298,18 @@ const approvalToneFor = (timesheet: TimesheetSummary): SetupTone => {
 };
 
 const approvalLabelFor = (timesheet: TimesheetSummary) => {
-  if (timesheet.payrollPosted) return 'Posted';
+  if (timesheet.payrollPosted || timesheet.status === 'Locked') return 'Posted';
   if (timesheet.payrollProcessed) return 'Payroll Ready';
-  if (timesheet.payrollReady) return 'Approved';
+  if (timesheet.payrollReady) return 'Payroll Ready';
   if (timesheet.status === 'Returned') return 'Returned';
   if (timesheet.status === 'Rejected') return 'Rejected';
-  return timesheet.currentStage === 'Supervisor' ? 'Pending' : timesheet.currentStage || 'Pending';
+  if (timesheet.status === 'Submitted') return 'Awaiting Supervisor';
+  if (timesheet.currentStage) return timesheet.currentStage;
+  return timesheet.statusLabel || 'Pending';
 };
+
+const isPendingApprovalTimesheet = (timesheet: TimesheetSummary) =>
+  !timesheet.payrollPosted && ACTIVE_APPROVAL_STATUSES.has(timesheet.status);
 
 const slaRemainingLabel = (step: WorkflowStep | undefined) => {
   if (!step) return '—';
@@ -430,6 +435,7 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   const [listPage, setListPage] = useState(1);
   const [showFilters, setShowFilters] = useState(true);
   const [loadingHint, setLoadingHint] = useState('Connecting to DLE_Enterprise…');
+  const [pendingViewPrimed, setPendingViewPrimed] = useState(false);
 
   const load = async (nextPage = listPage) => {
     setLoading(true);
@@ -469,8 +475,24 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
 
   useEffect(() => {
     setListPage(1);
+    setPendingViewPrimed(false);
     void load(1);
   }, [mode]);
+
+  useEffect(() => {
+    if (!payload || mode !== 'active' || pendingViewPrimed) return;
+    const pendingCount = Number(payload.stats?.pendingApprovals || payload.dataSource?.awaitingApprovalCount || 0);
+    if (pendingCount > 0) {
+      if ((payload.stats?.pendingSupervisorApproval || 0) > 0) {
+        setStageFilter('Supervisor');
+        setStatusFilter('Submitted');
+      } else {
+        setStageFilter('All');
+        setStatusFilter('All');
+      }
+    }
+    setPendingViewPrimed(true);
+  }, [mode, payload, pendingViewPrimed]);
 
   useEffect(() => {
     if (!toast) return;
@@ -513,7 +535,8 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
 
   const workspaceTimesheets = useMemo(() => {
     if (mode === 'history') return payload?.historyTimesheets || [];
-    return payload?.allTimesheets || payload?.pendingTimesheets || [];
+    const source = payload?.allTimesheets || payload?.pendingTimesheets || [];
+    return source.filter(isPendingApprovalTimesheet);
   }, [mode, payload?.allTimesheets, payload?.historyTimesheets, payload?.pendingTimesheets]);
   const draftBookedTimesheets = useMemo(() => payload?.draftBookedTimesheets || [], [payload?.draftBookedTimesheets]);
   const serverPagination = payload?.pagination;
@@ -620,6 +643,13 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
   const overdueCount = filteredTimesheets.filter((item) => item.workflowSteps.find((step) => step.stage === item.currentStage)?.slaStatus === 'Breached').length;
   const payrollReadyCount = filteredTimesheets.filter((item) => item.payrollReady).length;
   const slaPct = filteredTimesheets.length ? Math.round(((filteredTimesheets.length - overdueCount) / filteredTimesheets.length) * 100) : 92;
+
+  const showPendingApprovalQueue = () => {
+    setWorkspaceTab('timesheets');
+    setStageFilter('Supervisor');
+    setStatusFilter('Submitted');
+    setQuery('');
+  };
 
   const pipelineStages = [
     { id: 'employee', label: 'Employee', count: filteredTimesheets.filter((item) => item.status === 'Submitted').length, active: false, completed: true },
@@ -808,7 +838,17 @@ export default function TimesheetApprovalClient({ mode = 'active' }: { mode?: 'a
         {error ? <div className="rounded-[18px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">{error}</div> : null}
         {mode === 'active' ? (
           <div className="rounded-[18px] border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
-            Showing the <span className="font-semibold">pending approval queue</span> only. Posted or completed timesheets are available under <span className="font-semibold">History</span>. Select rows, then use Bulk Approve.
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p>
+                <span className="font-semibold">Posted</span> means payroll is complete and cannot be approved again.
+                Use the pending queue below for timesheets waiting at Supervisor, Cost Control, Project Manager, or HR.
+              </p>
+              {(payload?.stats?.pendingSupervisorApproval || 0) > 0 ? (
+                <button type="button" onClick={showPendingApprovalQueue} className="inline-flex h-9 shrink-0 items-center rounded-xl bg-[#2563EB] px-3 text-xs font-semibold text-white hover:bg-blue-700">
+                  Show {payload?.stats?.pendingSupervisorApproval} awaiting supervisor
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : null}
         {mode === 'active' && draftBookedTimesheets.length > 0 ? (
