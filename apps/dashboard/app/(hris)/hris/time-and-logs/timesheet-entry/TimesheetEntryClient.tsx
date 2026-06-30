@@ -1331,7 +1331,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
   const displayNotice =
     notice ||
     (error && canBookOvertime && payrollLockMessage.test(error)
-      ? 'Timesheet is posted to payroll. Use the overtime booking bar below to add 2h, 3h, 4h corrections, then re-run payroll.'
+      ? 'Timesheet is posted to payroll. Use the overtime booking bar below to add 1h, 2h, 3h corrections, then re-run payroll.'
       : null);
   const activeSiteDevices = payload?.attendanceWorkCenters.filter((workCenter) => workCenter.location === selectedLocation || workCenter.site === selectedLocation) ?? [];
   const onlineSiteDevices = activeSiteDevices;
@@ -1663,7 +1663,7 @@ export default function TimesheetEntryClient({ variant = 'admin' }: { variant?: 
               <div>
                 <h3 className="text-sm font-black uppercase tracking-widest text-sky-900">Overtime Correction Mode</h3>
                 <p className="mt-1 text-xs font-semibold text-sky-800">
-                  This timesheet is approved or posted to payroll. Use the overtime bar to book 2h, 3h, 4h, etc. for selected employees — changes save immediately and refresh the payroll feed for reprocessing.
+                  This timesheet is approved or posted to payroll. Use the overtime bar to book 1h, 2h, 3h, etc. for selected employees — changes save immediately and refresh the payroll feed for reprocessing.
                 </p>
               </div>
             </div>

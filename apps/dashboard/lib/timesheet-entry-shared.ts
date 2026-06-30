@@ -443,5 +443,5 @@ export type OvertimeBookingOptions = {
   openBooking: boolean;
 };
 
-/** Common overtime increments from site logbooks (m² = 2h, m³ = 3h, …). */
-export const OVERTIME_HOUR_OPTIONS = [2, 3, 4, 5, 6, 8, 10] as const;
+/** Common overtime increments from site logbooks (1h, m² = 2h, m³ = 3h, …). */
+export const OVERTIME_HOUR_OPTIONS = [1, 2, 3, 4, 5, 6, 8, 10] as const;

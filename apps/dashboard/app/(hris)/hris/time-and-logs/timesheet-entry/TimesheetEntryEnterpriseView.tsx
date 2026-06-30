@@ -280,7 +280,7 @@ export function TimesheetEntryEnterpriseView(props: TimesheetEnterpriseViewProps
           <div className="rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-sm text-[#1E40AF]">
             <p className="font-bold">Overtime correction mode</p>
             <p className="mt-1 text-xs font-medium">
-              This timesheet is posted to payroll. Select employees and use the overtime hour buttons (2h, 3h, 4h…) to book corrections — changes save immediately and refresh payroll.
+              This timesheet is posted to payroll. Select employees and use the overtime hour buttons (1h, 2h, 3h…) to book corrections — changes save immediately and refresh payroll.
             </p>
           </div>
         ) : null}

@@ -180,7 +180,7 @@ export default function OvertimeManagementClient({ initialNow }: { initialNow: s
     workCenter: '',
     supervisorCode: '',
     supervisorName: '',
-    requestedHours: '2',
+    requestedHours: '1',
     requestedHeadcount: '1',
     overtimeType: 'Weekday',
     costCenter: 'Managing Director',
@@ -327,7 +327,7 @@ export default function OvertimeManagementClient({ initialNow }: { initialNow: s
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Unable to submit overtime authorization.');
       setPayload(json.data);
       setToast('Overtime authorization submitted to the Project Manager.');
-      setAuthorizationForm((current) => ({ ...current, projectCode: '', projectName: '', workCenter: '', supervisorCode: '', supervisorName: '', requestedHours: '2', requestedHeadcount: '1', reason: '', details: '' }));
+      setAuthorizationForm((current) => ({ ...current, projectCode: '', projectName: '', workCenter: '', supervisorCode: '', supervisorName: '', requestedHours: '1', requestedHeadcount: '1', reason: '', details: '' }));
     } catch (event) {
       setError(event instanceof Error ? event.message : 'Unable to submit overtime authorization.');
     } finally {
