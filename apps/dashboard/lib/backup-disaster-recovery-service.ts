@@ -50,11 +50,32 @@ const backupFilePath = (location: string, databaseName: string) => {
 
 const backupDirectory = (location: string) => (/\.bak$/i.test(location.trim()) ? path.win32.dirname(location.trim()) : location.trim());
 
-const ensureBackupDirectory = (location: string) => {
-  const directory = backupDirectory(location);
-  if (!directory) throw new Error('Backup location is empty.');
-  if (!existsSync(directory)) {
-    mkdirSync(directory, { recursive: true });
+/** Create backup folder on the SQL Server host — not on the app server. */
+const ensureSqlServerBackupDirectory = async (pool: sql.ConnectionPool, directory: string) => {
+  const cleaned = directory.trim();
+  if (!cleaned) throw new Error('Backup location is empty.');
+  await pool.request()
+    .input('DirPath', sql.NVarChar(4000), cleaned)
+    .query(`
+BEGIN TRY
+  EXEC master.dbo.xp_create_subdir @DirPath;
+END TRY
+BEGIN CATCH
+  IF ERROR_NUMBER() NOT IN (183, 517) THROW;
+END CATCH
+`);
+};
+
+/** Best-effort local folder creation for paths reachable from the app host. Failures are ignored for SQL Server paths. */
+const ensureLocalBackupDirectory = (filePath: string) => {
+  try {
+    const directory = backupDirectory(filePath);
+    if (!directory || directory.startsWith('\\\\')) return;
+    const root = path.win32.parse(directory).root;
+    if (root && !existsSync(root)) return;
+    if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
+  } catch {
+    // Backup path is resolved on SQL Server; local mkdir is optional.
   }
 };
 
@@ -432,6 +453,7 @@ export const runDleEnterpriseRestoreDrill = async (actor: string) => {
   const startedAt = new Date().toISOString();
   await writeBackupDisasterRecoveryState({
     ...initialState,
+    lastOperation: { type: 'restore-drill', status: 'running', message: `Running RESTORE VERIFYONLY on ${backupFile}`, at: startedAt },
     serviceMetrics: metricSnapshot('Running', `Running RESTORE VERIFYONLY on ${backupFile}`),
     executionQueue: compact([jobRecord('Restore readiness drill', 'Running', backupFile, startedAt, 'Restore verification worker'), ...initialState.executionQueue], 20),
   }, actor);
@@ -447,6 +469,7 @@ export const runDleEnterpriseRestoreDrill = async (actor: string) => {
     const latest = await readBackupDisasterRecoveryState();
     const next = await writeBackupDisasterRecoveryState({
       ...latest,
+      lastOperation: { type: 'restore-drill', status: 'success', message: 'Restore drill completed successfully.', at: completedAt },
       serviceMetrics: metricSnapshot('Completed', 'Restore drill completed successfully.', completedAt),
       executionQueue: compact([jobRecord('Restore readiness drill', 'Completed', backupFile, completedAt, 'Restore verification worker'), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
       restoreReadiness: compact([restoreRecord(backupFile, completedAt, 'Passed'), ...latest.restoreReadiness], 20),
@@ -459,6 +482,7 @@ export const runDleEnterpriseRestoreDrill = async (actor: string) => {
     const latest = await readBackupDisasterRecoveryState();
     const next = await writeBackupDisasterRecoveryState({
       ...latest,
+      lastOperation: { type: 'restore-drill', status: 'failed', message, at: failedAt },
       serviceMetrics: metricSnapshot('Failed', message),
       executionQueue: compact([jobRecord('Restore readiness drill', 'Failed', backupFile, failedAt, 'Restore verification worker'), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
       restoreReadiness: compact([restoreRecord(backupFile, failedAt, 'Failed', message), ...latest.restoreReadiness], 20),
@@ -480,17 +504,20 @@ export const runDleEnterpriseFullBackup = async (actor: string) => {
   const databaseResult = await pool.request().query('SELECT DB_NAME() AS databaseName');
   const databaseName = String(databaseResult.recordset[0]?.databaseName || DATABASE_NAME);
   const filePath = backupFilePath(target.location, databaseName);
-  ensureBackupDirectory(filePath);
   const startedAt = new Date().toISOString();
 
   await writeBackupDisasterRecoveryState({
     ...initialState,
+    lastOperation: { type: 'full-backup', status: 'running', message: `Writing backup to ${backupDirectory(filePath)}`, at: startedAt },
     serviceMetrics: metricSnapshot('Running', `Writing backup to ${backupDirectory(filePath)}`),
     executionQueue: compact([jobRecord('DLE_Enterprise Full Database Backup', 'Running', filePath, startedAt), ...initialState.executionQueue], 20),
   }, actor);
 
   const startedMs = Date.now();
   try {
+    await ensureSqlServerBackupDirectory(pool, backupDirectory(filePath));
+    ensureLocalBackupDirectory(filePath);
+
     const request = pool.request();
     (request as typeof request & { timeout: number }).timeout = Number(process.env.DLE_ENTERPRISE_BACKUP_TIMEOUT_MS || 900000);
     await request
@@ -514,10 +541,12 @@ RESTORE VERIFYONLY FROM DISK = @BackupPath WITH CHECKSUM;
     } : item);
     const next = await writeBackupDisasterRecoveryState({
       ...latest,
+      lastOperation: { type: 'full-backup', status: 'success', message: `Full backup completed in ${elapsedSeconds}s. Verified with RESTORE VERIFYONLY.`, at: completedAt },
       serviceMetrics: metricSnapshot('Completed', `Full backup completed in ${elapsedSeconds}s`, completedAt),
       replicationTargets: nextTargets,
       executionQueue: compact([jobRecord('DLE_Enterprise Full Database Backup', 'Completed', filePath, completedAt), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
       restoreReadiness: compact([restoreRecord(filePath, completedAt, 'Passed'), ...latest.restoreReadiness], 20),
+      incidents: latest.incidents.filter((incident) => !/full database backup|mkdir|EINVAL/i.test(incident.message)),
       audit: compact([{ at: completedAt, actor, action: 'Full database backup completed', detail: filePath }, ...latest.audit], 100),
     }, actor);
     return enrichBackupDisasterRecoveryState(next);
@@ -527,6 +556,7 @@ RESTORE VERIFYONLY FROM DISK = @BackupPath WITH CHECKSUM;
     const latest = await readBackupDisasterRecoveryState();
     const next = await writeBackupDisasterRecoveryState({
       ...latest,
+      lastOperation: { type: 'full-backup', status: 'failed', message, at: failedAt },
       serviceMetrics: metricSnapshot('Failed', message),
       executionQueue: compact([jobRecord('DLE_Enterprise Full Database Backup', 'Failed', filePath, failedAt), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
       incidents: compact([incidentRecord(message, failedAt), ...latest.incidents], 50),

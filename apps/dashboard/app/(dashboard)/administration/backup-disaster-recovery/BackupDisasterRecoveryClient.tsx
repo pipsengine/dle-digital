@@ -154,6 +154,48 @@ const policiesEqual = (left: BackupPolicy[], right: BackupPolicy[]) =>
 const locationsEqual = (left: Record<string, string>, right: Record<string, string>) =>
   JSON.stringify(left) === JSON.stringify(right);
 
+const criticalAlertMessage = (state: BackupDisasterRecoveryState): { message: string; severity: 'failed' | 'warning' } | null => {
+  if (state.lastOperation?.status === 'failed' && state.lastOperation.message.trim()) {
+    return { message: state.lastOperation.message.trim(), severity: 'failed' };
+  }
+  const incident = state.incidents.find((item) => /critical/i.test(item.severity));
+  if (incident?.message.trim()) return { message: incident.message.trim(), severity: 'failed' };
+  const warningIncident = state.incidents.find((item) => /warning/i.test(item.severity));
+  if (warningIncident?.message.trim()) return { message: warningIncident.message.trim(), severity: 'warning' };
+  const backupMetric = state.serviceMetrics.find((item) => item.label === 'Backup Service');
+  if (backupMetric?.value === 'Failed') {
+    return { message: backupMetric.detail.trim() || 'The last backup attempt failed.', severity: 'failed' };
+  }
+  if (backupMetric?.value === 'No backup') {
+    return { message: 'No full backup has been recorded yet. Click Run Full Backup to create tonight\'s backup.', severity: 'warning' };
+  }
+  return null;
+};
+
+function CriticalAlertBanner({ message, severity, onDismiss }: { message: string; severity: 'failed' | 'warning'; onDismiss?: () => void }) {
+  const failed = severity === 'failed';
+  return (
+    <div className={`rounded-lg border-2 px-4 py-4 shadow-sm ${failed ? 'border-red-300 bg-red-50' : 'border-amber-300 bg-amber-50'}`} role="alert">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${failed ? 'text-red-700' : 'text-amber-700'}`} />
+        <div className="min-w-0 flex-1">
+          <p className={`text-sm font-black uppercase tracking-normal ${failed ? 'text-red-800' : 'text-amber-900'}`}>
+            {failed ? 'Backup failed' : 'Backup action required tonight'}
+          </p>
+          <p className={`mt-1 text-sm font-bold leading-6 ${failed ? 'text-red-900' : 'text-amber-950'}`}>{message}</p>
+          <p className={`mt-2 text-xs font-semibold ${failed ? 'text-red-700' : 'text-amber-800'}`}>
+            Backups are written on SQL Server (<strong>X3ADMIN\SAGEX3V11</strong>) at the path you configure — not on your PC.
+            The folder is created automatically on the server when you run a backup.
+          </p>
+        </div>
+        {onDismiss ? (
+          <button type="button" onClick={onDismiss} className={`rounded-lg border bg-white px-2 py-1 text-xs font-black ${failed ? 'border-red-200 text-red-700' : 'border-amber-200 text-amber-800'}`}>Dismiss</button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 async function parseApiResponse<T>(response: Response): Promise<{ data?: T; error?: string }> {
   const json = await response.json().catch(() => ({}));
   if (!response.ok || json.status === 'error') {
@@ -170,11 +212,14 @@ export default function BackupDisasterRecoveryClient({ initialState }: { initial
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<'success' | 'error' | 'info'>('info');
+  const [dismissedAlert, setDismissedAlert] = useState<string | null>(null);
   const policyPanelRef = useRef<HTMLElement | null>(null);
 
   const savedLocationDrafts = useMemo(() => locationDraftsFrom(state.replicationTargets), [state.replicationTargets]);
   const policiesDirty = !policiesEqual(policyDrafts, state.backupPolicies);
   const locationsDirty = !locationsEqual(locationDrafts, savedLocationDrafts);
+  const criticalAlert = useMemo(() => criticalAlertMessage(state), [state]);
+  const showCriticalAlert = Boolean(criticalAlert && criticalAlert.message !== dismissedAlert);
 
   useEffect(() => {
     setState(initialState);
@@ -315,8 +360,17 @@ export default function BackupDisasterRecoveryClient({ initialState }: { initial
         return;
       }
       applyState(parsed.data);
-      const failed = parsed.data.executionQueue?.[0]?.status === 'Failed';
-      showMessage(failed ? 'Backup failed. Review Alerts & Incidents for the SQL Server error.' : 'Backup completed and RESTORE VERIFYONLY passed.', failed ? 'error' : 'success');
+      const failed = parsed.data.lastOperation?.status === 'failed'
+        || parsed.data.executionQueue?.[0]?.status === 'Failed';
+      const errorDetail = parsed.data.lastOperation?.message
+        || parsed.data.incidents?.[0]?.message
+        || 'Backup failed.';
+      if (failed) {
+        setDismissedAlert(null);
+        showMessage(errorDetail, 'error');
+        return;
+      }
+      showMessage('Backup completed and RESTORE VERIFYONLY passed.', 'success');
     } catch (error) {
       showMessage(error instanceof Error ? error.message : 'Backup could not be started.', 'error');
     } finally {
@@ -383,6 +437,10 @@ export default function BackupDisasterRecoveryClient({ initialState }: { initial
             </div>
           </div>
         </section>
+
+        {showCriticalAlert && criticalAlert ? (
+          <CriticalAlertBanner message={criticalAlert.message} severity={criticalAlert.severity} onDismiss={() => setDismissedAlert(criticalAlert.message)} />
+        ) : null}
 
         {message ? (
           <div className={`rounded-lg border px-4 py-3 text-sm font-bold ${messageClass}`}>

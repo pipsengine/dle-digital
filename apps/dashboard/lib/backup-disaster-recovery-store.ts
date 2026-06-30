@@ -90,6 +90,7 @@ const normalizeState = (value: unknown): BackupDisasterRecoveryState => {
       : fallback.incidents,
     restoreReadiness: Array.isArray(parsed.restoreReadiness) ? parsed.restoreReadiness.filter((item) => !SEEDED_RESTORE_CONTROLS.has(item.control)) : fallback.restoreReadiness,
     audit: Array.isArray(parsed.audit) ? parsed.audit : fallback.audit,
+    lastOperation: parsed.lastOperation && typeof parsed.lastOperation === 'object' ? parsed.lastOperation : fallback.lastOperation,
     updatedAt: parsed.updatedAt || fallback.updatedAt,
     updatedBy: parsed.updatedBy || fallback.updatedBy,
   };

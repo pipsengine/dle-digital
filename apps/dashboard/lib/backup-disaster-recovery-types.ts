@@ -63,6 +63,13 @@ export type BackupAuditEvent = {
   detail: string;
 };
 
+export type BackupLastOperation = {
+  type: 'full-backup' | 'restore-drill' | 'configuration';
+  status: 'success' | 'failed' | 'running';
+  message: string;
+  at: string;
+};
+
 export type BackupDisasterRecoveryState = {
   schemaVersion: 1;
   serviceMetrics: BackupMetric[];
@@ -74,6 +81,7 @@ export type BackupDisasterRecoveryState = {
   incidents: BackupIncident[];
   restoreReadiness: BackupRestoreReadiness[];
   audit: BackupAuditEvent[];
+  lastOperation?: BackupLastOperation | null;
   updatedAt: string;
   updatedBy: string;
 };

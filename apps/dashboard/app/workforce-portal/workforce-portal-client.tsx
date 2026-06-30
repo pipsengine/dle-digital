@@ -118,6 +118,7 @@ type Payload = {
     workflows: SimpleRecord[];
     allowance: SimpleRecord[];
     approvals: SimpleRecord[];
+    pendingApprovalCount?: number;
     reports: SimpleRecord[];
     notifications: SimpleRecord[];
     security: SimpleRecord[];
@@ -808,7 +809,7 @@ const calcLeaveDays = (from: string, to: string, basis: string) => {
   return days;
 };
 
-function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initialNow }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string }) => Promise<void>; saving?: boolean; initialNow: string }) {
+function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction, saving, initialNow }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { requestId: string; leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string; attachmentNames: string[] }) => Promise<void>; onLeaveAction?: (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => Promise<void>; saving?: boolean; initialNow: string }) {
   const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
   const [leaveType, setLeaveType] = useState('Annual Leave');
   const [startDate, setStartDate] = useState('');
@@ -819,6 +820,10 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initia
   const [contact, setContact] = useState(employee?.phone || '');
   const [address, setAddress] = useState(employee?.location || '');
   const [ack, setAck] = useState(false);
+  const [draftRequestId] = useState(() => `ess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const [attachmentNames, setAttachmentNames] = useState<string[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [approvalComment, setApprovalComment] = useState('');
   const selected = (payload?.leave.balances || []).find((item) => String(item.type) === leaveType) || payload?.leave.balances?.[0];
   const relieverOptions = payload?.leave.relieverOptions || [];
   const selectedReliever = relieverOptions.find((item) => item.employeeId === reliever || item.employeeCode === reliever);
@@ -830,7 +835,7 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initia
   const validations = [
     ...(days > balance ? ['Selected days exceed available balance.'] : []),
     ...(leaveType === 'Annual Leave' && String(selected?.eligibilityStatus || '').toLowerCase().includes('locked') ? ['Annual Leave is available only after confirmation of appointment.'] : []),
-    ...(leaveRequiresAttachment(leaveType) ? ['Attachment is mandatory for this leave type.'] : []),
+    ...(leaveRequiresAttachment(leaveType) && attachmentNames.length === 0 ? ['Upload supporting document before submit.'] : []),
     ...(usesCarryForward && endDate > `${new Date().getFullYear()}-03-31` ? ['Carry Forward Leave must be consumed on or before 31 March.'] : []),
     ...(leaveType === 'Annual Leave' && days > 0 && days < 10 ? ['This request does not qualify for Leave Allowance.'] : []),
     ...(!reason.trim() ? ['Reason is required.'] : []),
@@ -838,6 +843,21 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initia
     ...(!handover.trim() ? ['Handover notes are required.'] : []),
     ...(!ack ? ['Policy acknowledgement is required before submission.'] : []),
   ];
+
+  const uploadAttachment = async (file: File) => {
+    setUploadingAttachment(true);
+    try {
+      const form = new FormData();
+      form.set('requestId', draftRequestId);
+      form.set('file', file);
+      const res = await fetch('/api/workforce-portal/leave-attachments', { method: 'POST', body: form });
+      const json = (await res.json()) as ApiResponse<{ fileName: string }>;
+      if (!res.ok || json.status !== 'success' || !json.data?.fileName) throw new Error(json.error || 'Unable to upload attachment');
+      setAttachmentNames((current) => [...current, json.data!.fileName]);
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
 
   const openApply = (type?: string) => {
     if (type) setLeaveType(type);
@@ -881,7 +901,20 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initia
               <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Leave address / location" className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold md:col-span-2" />
               <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason" className="min-h-24 rounded-lg border border-slate-200 p-3 text-sm font-bold md:col-span-2" />
               <textarea value={handover} onChange={(e) => setHandover(e.target.value)} placeholder="Handover notes" className="min-h-24 rounded-lg border border-slate-200 p-3 text-sm font-bold md:col-span-2" />
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-bold text-slate-600 md:col-span-2">Attachment upload placeholder {leaveRequiresAttachment(leaveType) ? '(mandatory for this leave type)' : '(optional)'}</div>
+              <label className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm font-bold text-slate-600 md:col-span-2">
+                <span>Supporting documents {leaveRequiresAttachment(leaveType) ? '(mandatory)' : '(optional)'}</span>
+                <input
+                  type="file"
+                  className="mt-2 block w-full text-xs font-semibold"
+                  disabled={uploadingAttachment || saving}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void uploadAttachment(file);
+                    event.currentTarget.value = '';
+                  }}
+                />
+                {attachmentNames.length ? <p className="mt-2 text-xs font-semibold text-emerald-700">{attachmentNames.join(', ')}</p> : null}
+              </label>
               <label className="flex items-start gap-2 text-sm font-bold text-slate-700 md:col-span-2"><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-1" /> I acknowledge Dorman Long leave policy, balance, allowance, reliever, and audit requirements.</label>
             </div>
           </div>
@@ -893,7 +926,7 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initia
             {!validations.length ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">{'Ready to submit. Workflow: Employee Request -> Line Manager / Lead / Supervisor -> HR Manager / Head -> requester and reliever notifications.'}</div> : null}
             <button
               type="button"
-              onClick={() => onLeaveSubmitted?.({ leaveType, startDate, endDate, days, reason, relieverEmployeeId: reliever, relieverName: selectedReliever?.fullName || '', handover })}
+              onClick={() => onLeaveSubmitted?.({ requestId: draftRequestId, leaveType, startDate, endDate, days, reason, relieverEmployeeId: reliever, relieverName: selectedReliever?.fullName || '', handover, attachmentNames })}
               disabled={saving || Boolean(validations.filter((item) => !item.includes('does not qualify')).length)}
               className="h-11 w-full rounded-lg bg-blue-600 text-sm font-black text-white disabled:bg-slate-200 disabled:text-slate-500"
             >
@@ -906,7 +939,29 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, saving, initia
       {active === 'My Applications' && <DataList rows={(payload?.requests.filter((item) => item.category === 'Leave').map((item) => ({ id: item.id, title: item.title, status: item.status, submittedAt: item.submittedAt, updatedAt: item.updatedAt, reliever: item.relieverName || 'Reliever not configured', workflow: item.workflow?.map((step) => `${step.stage}: ${step.status}`).join(' | ') || item.approvers.join(', ') })) || [])} titleKey="title" subtitleKeys={['status', 'submittedAt', 'updatedAt', 'reliever', 'workflow']} />}
       {active === 'Leave Calendar' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Calendar" rows={payload?.leave.calendar || []} keys={['label', 'from', 'to', 'status', 'scope']} /><InfoListLike title="Notifications" rows={payload?.leave.notifications || []} keys={['title', 'channel', 'status']} /></section>}
       {active === 'Leave History' && <DataList rows={payload?.leave.history || []} titleKey="type" subtitleKeys={['from', 'to', 'days', 'approvalStage', 'allowanceStatus']} />}
-      {active === 'Approvals' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Approval Workflow" rows={payload?.leave.workflows || []} keys={['stage', 'owner', 'status', 'sla']} /><InfoListLike title="Manager/HR Queue" rows={payload?.leave.approvals || []} keys={['employee', 'type', 'days', 'stage', 'status', 'conflict']} /></section>}
+      {active === 'Approvals' && (
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <InfoListLike title="Approval Workflow" rows={payload?.leave.workflows || []} keys={['stage', 'owner', 'status', 'sla']} />
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-sm font-black text-slate-950">Manager/HR Queue ({payload?.leave.pendingApprovalCount || 0})</h3>
+            <div className="mt-4 space-y-3">
+              {(payload?.leave.approvals || []).map((item, index) => (
+                <div key={String(item.id || index)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-sm font-black text-slate-950">{String(item.employee)} — {String(item.type)}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">{String(item.startDate || '')} to {String(item.endDate || '')} · {String(item.days)} day(s) · {String(item.stage)}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Reliever: {String(item.reliever)} · {String(item.conflict)}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" disabled={saving} onClick={() => onLeaveAction?.({ requestId: String(item.id), action: 'approve', comment: approvalComment })} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-200 disabled:text-slate-500">Approve</button>
+                    <button type="button" disabled={saving} onClick={() => onLeaveAction?.({ requestId: String(item.id), action: 'reject', comment: approvalComment })} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-200 disabled:text-slate-500">Reject</button>
+                  </div>
+                </div>
+              ))}
+              {!payload?.leave.approvals?.length ? <p className="text-sm font-semibold text-slate-500">No leave requests are awaiting your approval.</p> : null}
+            </div>
+            <textarea value={approvalComment} onChange={(e) => setApprovalComment(e.target.value)} placeholder="Optional approval / rejection comment" className="mt-4 min-h-20 w-full rounded-lg border border-slate-200 p-3 text-sm font-semibold" />
+          </section>
+        </section>
+      )}
       {active === 'Policy & Entitlement' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Payroll & Allowance" rows={payload?.leave.allowance || []} keys={['label', 'value', 'status']} /><InfoListLike title="Reports & RBAC" rows={[...(payload?.leave.reports || []), ...(payload?.leave.security || [])]} keys={['title', 'role', 'access', 'format', 'status']} /></section>}
         </>
       )}
@@ -1002,7 +1057,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
     }
   };
 
-  const submitLeaveApplication = async (input: { leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string }) => {
+  const submitLeaveApplication = async (input: { requestId: string; leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string; attachmentNames: string[] }) => {
     if (!payload) return;
     setSaving(true);
     setToast('');
@@ -1015,6 +1070,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           category: 'Leave Application',
           title: `${input.leaveType} ${input.startDate} to ${input.endDate}`,
           priority: 'Normal',
+          requestId: input.requestId,
           leaveType: input.leaveType,
           startDate: input.startDate,
           endDate: input.endDate,
@@ -1023,6 +1079,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
           relieverEmployeeId: input.relieverEmployeeId,
           relieverName: input.relieverName,
           handover: input.handover,
+          attachmentNames: input.attachmentNames,
         }),
       });
       const json = (await res.json()) as ApiResponse<{ request: EssRequest }>;
@@ -1031,6 +1088,32 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to submit leave application');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitLeaveApproval = async (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => {
+    if (!payload) return;
+    setSaving(true);
+    setToast('');
+    setError('');
+    try {
+      const res = await fetch('/api/workforce-portal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: input.action === 'approve' ? 'approve-leave' : 'reject-leave',
+          requestId: input.requestId,
+          comment: input.comment,
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<{ request: EssRequest; leaveAllowance?: string }>;
+      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to process leave approval');
+      setToast(json.data?.leaveAllowance || `Leave request ${input.action === 'approve' ? 'approved' : 'rejected'}.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to process leave approval');
     } finally {
       setSaving(false);
     }
@@ -1111,7 +1194,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
       {tab !== 'dashboard' && tab !== 'profile' && tab !== 'payroll' && (
         <div className="space-y-4">
           {tab === 'leave' && widgets && (
-            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} saving={saving} initialNow={initialNow} />
+            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} onLeaveAction={submitLeaveApproval} saving={saving} initialNow={initialNow} />
           )}
 
           {tab === 'time' && widgets && (

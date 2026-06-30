@@ -16,6 +16,7 @@ export const defaultBackupDisasterRecoveryState = (): BackupDisasterRecoveryStat
   incidents: [],
   restoreReadiness: [],
   audit: [],
+  lastOperation: null,
   updatedAt: new Date().toISOString(),
   updatedBy: 'System',
 });

@@ -373,6 +373,32 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
     void load(section, role);
   }, [section, role]);
 
+  const runApplicationAction = async (applicationId: string, actionId: 'approve' | 'reject') => {
+    setBusyAction(`${actionId}:${applicationId}`);
+    setToast('');
+    try {
+      const res = await fetch('/api/hris/leave-management', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-hris-role': role },
+        body: JSON.stringify({
+          action: actionId,
+          section,
+          actor: role,
+          record: applicationId,
+          reason: `${actionId === 'approve' ? 'Approved' : 'Rejected'} from Leave Approval Queue`,
+        }),
+      });
+      const json = (await res.json()) as ApiResponse<{ message: string; payload: Payload }>;
+      if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `${actionId} failed`);
+      setToast(json.data.message);
+      setPayload(json.data.payload);
+    } catch (event) {
+      setToast(event instanceof Error ? event.message : `${actionId} failed`);
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const runAction = async (action: LeaveAction) => {
     if (action.id === 'view-audit-trail' || action.id === 'view-history') {
       setAuditOpen(true);
@@ -664,7 +690,7 @@ export default function LeaveManagementClient({ initialNow, initialSection = 'da
           />
         ) : null}
         {!isDashboard && section === 'applications' ? <ApplicationView rows={filteredApplications} /> : null}
-        {!isDashboard && section === 'approvals' ? <ApprovalView rows={filteredApplications} /> : null}
+        {!isDashboard && section === 'approvals' ? <ApprovalView rows={filteredApplications} busyAction={busyAction} onAction={(applicationId, actionId) => void runApplicationAction(applicationId, actionId)} /> : null}
         {!isDashboard && section === 'leave-calendar' ? <CalendarView payload={payload} /> : null}
         {!isDashboard && section === 'leave-balances' ? <BalanceView rows={filteredBalances} /> : null}
         {!isDashboard && section === 'leave-types' ? <LeaveTypeView payload={payload} /> : null}
@@ -703,15 +729,32 @@ function ApplicationView({ rows }: { rows: AppRecord[] }) {
   );
 }
 
-function ApprovalView({ rows }: { rows: AppRecord[] }) {
-  const approvalRows = rows.filter((item) => !['Approved', 'Completed', 'Cancelled', 'Rejected'].includes(item.status));
+function ApprovalView({ rows, busyAction, onAction }: { rows: AppRecord[]; busyAction: string; onAction: (applicationId: string, action: 'approve' | 'reject') => void }) {
+  const approvalRows = rows.filter((item) => !['Approved', 'Completed', 'Cancelled', 'Rejected', 'Terminated'].includes(item.status));
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <TableHeader title="Leave Approval Queue" detail="Employee -> Supervisor -> Manager -> HR -> Final Approval, with configurable matrix controls." />
       <div className="overflow-x-auto">
-        <table className="min-w-[1100px] w-full divide-y divide-slate-100">
-          <thead className="bg-slate-50"><tr>{['Request', 'Employee', 'Manager', 'Type', 'Duration', 'Approval Status', 'Stage', 'Action Risk'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>)}</tr></thead>
-          <tbody className="divide-y divide-slate-100 bg-white">{approvalRows.map((item) => <tr key={item.id} className="hover:bg-slate-50"><td className="px-4 py-3 text-sm font-black text-slate-900">{item.id}</td><td className="px-4 py-3"><div className="font-black text-slate-950">{item.fullName}</div><div className="text-xs font-semibold text-slate-500">{item.department}</div></td><td className="px-4 py-3 text-sm font-bold text-slate-700">{item.managerName}</td><td className="px-4 py-3 text-sm font-bold text-slate-700">{item.leaveType}</td><td className="px-4 py-3 text-sm font-bold text-slate-700">{item.days} days</td><td className="px-4 py-3"><Chip value={item.approvalStatus} /></td><td className="px-4 py-3 text-sm font-bold text-slate-700">{item.stage}</td><td className="px-4 py-3"><Chip value={item.policyComplianceStatus} /></td></tr>)}</tbody>
+        <table className="min-w-[1240px] w-full divide-y divide-slate-100">
+          <thead className="bg-slate-50"><tr>{['Request', 'Employee', 'Manager', 'Type', 'Duration', 'Approval Status', 'Stage', 'Action Risk', 'Actions'].map((header) => <th key={header} className="px-4 py-3 text-left text-xs font-black uppercase text-slate-500">{header}</th>)}</tr></thead>
+          <tbody className="divide-y divide-slate-100 bg-white">{approvalRows.map((item) => (
+            <tr key={item.id} className="hover:bg-slate-50">
+              <td className="px-4 py-3 text-sm font-black text-slate-900">{item.id}</td>
+              <td className="px-4 py-3"><div className="font-black text-slate-950">{item.fullName}</div><div className="text-xs font-semibold text-slate-500">{item.department}</div></td>
+              <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.managerName}</td>
+              <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.leaveType}</td>
+              <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.days} days<br /><span className="text-xs font-semibold text-slate-500">{item.startDate} to {item.endDate}</span></td>
+              <td className="px-4 py-3"><Chip value={item.approvalStatus} /></td>
+              <td className="px-4 py-3 text-sm font-bold text-slate-700">{item.stage}</td>
+              <td className="px-4 py-3"><Chip value={item.policyComplianceStatus} /></td>
+              <td className="px-4 py-3">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" disabled={busyAction === `approve:${item.id}`} onClick={() => onAction(item.id, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-200 disabled:text-slate-500">Approve</button>
+                  <button type="button" disabled={busyAction === `reject:${item.id}`} onClick={() => onAction(item.id, 'reject')} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-200 disabled:text-slate-500">Reject</button>
+                </div>
+              </td>
+            </tr>
+          ))}</tbody>
         </table>
       </div>
     </section>

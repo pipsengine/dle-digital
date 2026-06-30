@@ -457,7 +457,7 @@ const defaultLeaveTypePolicies: LeaveTypeRule[] = [
 ];
 
 const activeStatus = (status: string) => ['active', 'confirmed', 'probation', 'on leave', 'contract active', 'reactivated'].includes(String(status || '').toLowerCase());
-const isConfirmedPermanent = (employee: DleEmployeeDirectoryRow) => {
+export const isConfirmedPermanent = (employee: DleEmployeeDirectoryRow) => {
   const status = String(employee.status || '').toLowerCase();
   const confirmationDue = employee.confirmationDueDate ? new Date(`${employee.confirmationDueDate}T00:00:00.000Z`).getTime() : null;
   return status.includes('confirmed') || status.includes('on leave') || status.includes('reactivated') || (status === 'active' && confirmationDue !== null && confirmationDue <= Date.now());

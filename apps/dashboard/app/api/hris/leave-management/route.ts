@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { formatLeaveAllowanceAmount } from '@/lib/leave-allowance-policy';
-import { auditLeaveAction, dormantLongPolicy, readLeaveManagementPayload, validateLeaveAction, type LeaveActionId } from '@/lib/leave-management-store';
+import { auditLeaveAction, dormantLongPolicy, readLeaveManagementPayload, validateLeaveAction, type LeaveActionId, type LeaveRole } from '@/lib/leave-management-store';
+import { applyHrisLeaveWorkflowAction, closeLeaveYearRun, processLeaveAccrualRun, processLeaveCarryForwardRun } from '@/lib/leave-workflow-service';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { postLeaveAllowanceOnAnnualLeaveApproval } from '@/lib/payroll-leave-allowance-store';
@@ -100,17 +101,45 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+    const actor = String(body.actor || role);
+    const applicationId = String(body.record || body.applicationId || '').trim();
+    let workflowMessage: string | undefined;
+
+    if (['approve', 'reject', 'bulk-approve', 'bulk-reject', 'cancel', 'withdraw', 'recall'].includes(action) && applicationId) {
+      const workflow = await applyHrisLeaveWorkflowAction({
+        action,
+        applicationId,
+        actor,
+        role: role as LeaveRole,
+        reason: body.reason ? String(body.reason) : undefined,
+      });
+      workflowMessage = `Leave application ${applicationId} updated to ${workflow.status}.`;
+    }
+
+    if (action === 'process-accrual') {
+      const result = await processLeaveAccrualRun(actor);
+      workflowMessage = result.message;
+    }
+    if (action === 'process-carry-forward') {
+      const result = await processLeaveCarryForwardRun(actor);
+      workflowMessage = result.message;
+    }
+    if (action === 'close-year') {
+      const result = await closeLeaveYearRun(actor);
+      workflowMessage = result.message;
+    }
+
     await auditLeaveAction({
-      user: String(body.actor || role),
+      user: actor,
       role: payload.role,
       action,
-      record: String(body.record || section),
+      record: applicationId || String(body.record || section),
       oldValue: body.oldValue ? String(body.oldValue) : null,
-      newValue: body.newValue ? String(body.newValue) : leaveAllowanceMessage || validation.message,
+      newValue: body.newValue ? String(body.newValue) : leaveAllowanceMessage || workflowMessage || validation.message,
       comments: body.comments ? String(body.comments) : undefined,
       reason: body.reason ? String(body.reason) : undefined,
     });
-    return jsonOk({ message: leaveAllowanceMessage || validation.message, payload: await readLeaveManagementPayload(section, role, { forceSync: true }) });
+    return jsonOk({ message: leaveAllowanceMessage || workflowMessage || validation.message, payload: await readLeaveManagementPayload(section, role, { forceSync: true }) });
   } catch (error) {
     return jsonErr(500, error instanceof Error ? error.message : 'Unable to process leave action.');
   }
