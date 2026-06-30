@@ -18,7 +18,7 @@ import {
 import { postLeaveAllowanceOnAnnualLeaveApproval } from '@/lib/payroll-leave-allowance-store';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
-import { sendLeaveApprovalRequestEmail, sendLeaveWorkflowEmail } from '@/lib/mail-service';
+import { sendLeaveApprovalRequestEmail, sendLeaveRelieverAssignmentEmail, sendLeaveWorkflowEmail } from '@/lib/mail-service';
 import { buildEssEmployeeLookupKeys } from '@/lib/ess-dashboard-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { createEnterpriseNotification } from '@/lib/enterprise-notifications-store';
@@ -55,6 +55,8 @@ export type EssLeaveRequest = {
   reason?: string;
   relieverEmployeeId?: string;
   relieverName?: string;
+  lineManagerEmployeeId?: string;
+  lineManagerName?: string;
   handover?: string;
   attachmentNames?: string[];
   workflow?: Array<{ stage: string; owner: string; status: string; actedAt?: string | null; comment?: string | null }>;
@@ -185,11 +187,12 @@ export const leaveWorkflowFor = (
   relieverName: string,
   status: EssLeaveRequestStatus,
   now: string,
+  lineManagerName?: string,
 ) => [
   { stage: 'Employee Request', owner: employee.fullName, status: 'Completed', actedAt: now, comment: 'Submitted from Employee Self-Service.' },
   {
     stage: 'Line Manager / Lead / Supervisor',
-    owner: managerOwnerFor(employee),
+    owner: lineManagerName || managerOwnerFor(employee),
     status: status === 'Line Manager Review' ? 'Current' : status === 'HR Review' || status === 'Approved' ? 'Completed' : 'Pending',
     actedAt: status === 'Line Manager Review' ? null : status === 'HR Review' || status === 'Approved' ? now : null,
     comment: 'Approval validity: 5 working days.',
@@ -220,11 +223,6 @@ export const leaveWorkflowFor = (
 const employeeKeys = (employee: DleEmployeeDirectoryRow) =>
   buildEssEmployeeLookupKeys(employee).map((key) => normalizePayrollMatchKey(key)).filter(Boolean);
 
-export const employeeRequestMatches = (employee: DleEmployeeDirectoryRow, requestEmployeeId: string) => {
-  const lookup = new Set(employeeKeys(employee));
-  return lookup.has(normalizePayrollMatchKey(requestEmployeeId));
-};
-
 const namesMatch = (left: string, right: string) => {
   const a = clean(left).toLowerCase();
   const b = clean(right).toLowerCase();
@@ -232,11 +230,338 @@ const namesMatch = (left: string, right: string) => {
   return a === b || a.includes(b) || b.includes(a);
 };
 
-const resolveLineManagerRecipient = (requester: DleEmployeeDirectoryRow, employees: DleEmployeeDirectoryRow[]) => {
-  const managerName = managerOwnerFor(requester);
-  return employees.find((employee) => namesMatch(employee.fullName, managerName)
-    || namesMatch(employee.fullName, requester.managerName || '')
-    || namesMatch(employee.fullName, requester.departmentHead || '')) || null;
+export const employeeRequestMatches = (employee: DleEmployeeDirectoryRow, requestEmployeeId: string) => {
+  const lookup = new Set(employeeKeys(employee));
+  return lookup.has(normalizePayrollMatchKey(requestEmployeeId));
+};
+
+export const resolveEmployeeReference = (employees: DleEmployeeDirectoryRow[], reference: string) =>
+  employees.find((employee) => employeeRequestMatches(employee, reference)) || null;
+
+export const employeeNotificationCode = (employee: DleEmployeeDirectoryRow) =>
+  compact(employee.employeeCode) || compact(employee.employeeId);
+
+const leaveSystemSession = (actor: string): SessionPayload => ({
+  sub: 'system-leave-workflow',
+  username: 'system-leave-workflow',
+  fullName: actor || 'Leave Workflow',
+  roles: ['System'],
+  permissions: ['*'],
+  status: 'Active',
+  firstLoginRequired: false,
+  passwordResetRequired: false,
+  iat: Math.floor(Date.now() / 1000),
+  exp: Math.floor(Date.now() / 1000) + 3600,
+});
+
+const resolveReliever = (request: EssLeaveRequest, employees: DleEmployeeDirectoryRow[]) => {
+  if (request.relieverEmployeeId) {
+    return resolveEmployeeReference(employees, request.relieverEmployeeId);
+  }
+  const relieverName = compact(request.relieverName);
+  if (!relieverName) return null;
+  return employees.find((employee) => namesMatch(employee.fullName, relieverName)) || null;
+};
+
+const safeLeaveNotification = async (label: string, task: () => Promise<unknown>) => {
+  try {
+    await task();
+  } catch (error) {
+    console.error(`[leave-workflow] ${label} failed`, error);
+  }
+};
+
+const deliverLeaveEmployeeNotification = async (input: {
+  session: SessionPayload;
+  employee: DleEmployeeDirectoryRow;
+  title: string;
+  body: string;
+  severity?: 'info' | 'success' | 'warning' | 'critical';
+  requestId: string;
+  kind?: 'Approval' | 'Workflow' | 'Notification';
+  sendEmail?: () => Promise<unknown>;
+}) => {
+  await createEnterpriseNotification(input.session, {
+    kind: input.kind || 'Workflow',
+    module: 'Leave Management',
+    title: input.title,
+    body: input.body,
+    severity: input.severity || 'info',
+    recipientEmployeeCode: employeeNotificationCode(input.employee),
+    href: '/workforce-portal?tab=leave',
+    channels: ['In-App', 'Email'],
+    metadata: { requestId: input.requestId },
+    actor: input.session.fullName,
+  });
+  if (input.sendEmail) await input.sendEmail();
+};
+
+export const notifyLeaveFinalApproval = async (input: {
+  request: EssLeaveRequest;
+  requester: DleEmployeeDirectoryRow;
+  actorName: string;
+  baseUrl?: string | null;
+}) => {
+  const session = leaveSystemSession(input.actorName);
+  const { employees } = await readPayrollEmployees();
+  const requestLabel = input.request.title || `${input.request.leaveType} leave`;
+  const requesterBody = `${requestLabel} (${input.request.startDate} to ${input.request.endDate}) has received final HR approval.`;
+
+  await safeLeaveNotification('requester final-approval notification', () =>
+    deliverLeaveEmployeeNotification({
+      session,
+      employee: input.requester,
+      title: 'Leave request approved',
+      body: requesterBody,
+      severity: 'success',
+      requestId: input.request.id,
+      sendEmail: () => sendLeaveWorkflowEmail({
+        event: 'approved',
+        request: input.request,
+        requester: input.requester,
+        recipient: input.requester,
+        actorName: input.actorName,
+        baseUrl: input.baseUrl,
+      }),
+    }));
+
+  const reliever = resolveReliever(input.request, employees);
+  if (!reliever) return;
+
+  const relieverBody = `You have been assigned as reliever for ${input.requester.fullName}: ${requestLabel} (${input.request.startDate} to ${input.request.endDate}).`;
+  await safeLeaveNotification('reliever final-approval notification', () =>
+    deliverLeaveEmployeeNotification({
+      session,
+      employee: reliever,
+      title: 'Leave reliever assignment confirmed',
+      body: relieverBody,
+      severity: 'info',
+      requestId: input.request.id,
+      sendEmail: () => sendLeaveRelieverAssignmentEmail({
+        request: input.request,
+        requester: input.requester,
+        reliever,
+        actorName: input.actorName,
+        baseUrl: input.baseUrl,
+      }),
+    }));
+};
+
+export const notifyLeaveRejected = async (input: {
+  request: EssLeaveRequest;
+  requester: DleEmployeeDirectoryRow;
+  actorName: string;
+  reason?: string;
+  baseUrl?: string | null;
+}) => {
+  const session = leaveSystemSession(input.actorName);
+  const requestLabel = input.request.title || `${input.request.leaveType} leave`;
+  const body = `${requestLabel} was rejected by ${input.actorName}.${input.reason ? ` Reason: ${input.reason}` : ''}`;
+
+  await safeLeaveNotification('leave rejection notification', () =>
+    deliverLeaveEmployeeNotification({
+      session,
+      employee: input.requester,
+      title: 'Leave request rejected',
+      body,
+      severity: 'warning',
+      requestId: input.request.id,
+      kind: 'Approval',
+      sendEmail: () => sendLeaveWorkflowEmail({
+        event: 'rejected',
+        request: input.request,
+        requester: input.requester,
+        recipient: input.requester,
+        actorName: input.actorName,
+        extra: input.reason,
+        baseUrl: input.baseUrl,
+      }),
+    }));
+};
+
+export const notifyLeaveAwaitingHrApproval = async (input: {
+  request: EssLeaveRequest;
+  requester: DleEmployeeDirectoryRow;
+  actorName: string;
+  baseUrl?: string | null;
+}) => {
+  const session = leaveSystemSession(input.actorName);
+  const requestLabel = input.request.title || `${input.request.leaveType} leave`;
+
+  await safeLeaveNotification('requester manager-approved notification', () =>
+    deliverLeaveEmployeeNotification({
+      session,
+      employee: input.requester,
+      title: 'Leave request awaiting HR approval',
+      body: `${requestLabel} has been approved by the line manager and is awaiting HR Manager / Head approval.`,
+      severity: 'info',
+      requestId: input.request.id,
+      sendEmail: () => sendLeaveWorkflowEmail({
+        event: 'manager-approved',
+        request: input.request,
+        requester: input.requester,
+        recipient: input.requester,
+        actorName: input.actorName,
+        baseUrl: input.baseUrl,
+      }),
+    }));
+
+  await safeLeaveNotification('hr approval queue notification', () =>
+    createEnterpriseNotification(session, {
+      kind: 'Approval',
+      module: 'Leave Management',
+      title: 'Leave request awaiting HR approval',
+      body: `${requestLabel} has been approved by the line manager and is awaiting HR Manager / Head approval.`,
+      severity: 'warning',
+      recipientRoles: ['HR Manager', 'HR Head', 'HR Officer', 'Leave Administrator'],
+      href: '/workforce-portal?tab=leave',
+      channels: ['In-App', 'Email'],
+      metadata: { requestId: input.request.id },
+      actor: input.actorName,
+    }));
+
+  await safeLeaveNotification('hr approver email', () =>
+    emailLeaveApproversForRequest({ request: input.request, requester: input.requester, baseUrl: input.baseUrl }));
+};
+
+const essLeaveRequestFromDbRow = (row: Record<string, unknown>, employees: DleEmployeeDirectoryRow[]): EssLeaveRequest | null => {
+  const id = compact(row.Id);
+  const employeeId = compact(row.EmployeeId);
+  if (!id || !employeeId) return null;
+  const actingOfficer = compact(row.ActingOfficer);
+  const reliever = actingOfficer
+    ? employees.find((employee) => namesMatch(employee.fullName, actingOfficer) || employeeRequestMatches(employee, actingOfficer))
+    : null;
+  const startDate = dateOnly(row.StartDate);
+  const endDate = dateOnly(row.EndDate);
+  return {
+    id,
+    employeeId,
+    category: 'Leave Application',
+    title: `${compact(row.LeaveType) || 'Leave'} — ${compact(row.FullName) || employeeId}`,
+    status: normalizeEssStatus(compact(row.StatusName)),
+    priority: 'Normal',
+    submittedAt: compact(row.CreatedAt) || new Date().toISOString(),
+    updatedAt: compact(row.UpdatedAt) || new Date().toISOString(),
+    approvers: ['Line Manager / Lead / Supervisor', 'HR Manager / Head'],
+    comments: [],
+    leaveType: compact(row.LeaveType) || 'Annual Leave',
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
+    days: Number(row.Days || 0) || undefined,
+    relieverEmployeeId: reliever ? (reliever.employeeCode || reliever.employeeId) : undefined,
+    relieverName: reliever?.fullName || actingOfficer || undefined,
+  };
+};
+
+const normalizeEssStatus = (status: string): EssLeaveRequestStatus => {
+  if (status === 'Under Review') return 'HR Review';
+  if (status === 'Completed') return 'Approved';
+  if (status === 'Cancelled' || status === 'Withdrawn') return 'Rejected';
+  if (['Approved', 'Rejected', 'Terminated', 'Submitted', 'Draft', 'Line Manager Review', 'HR Review', 'Finance Review', 'Closed'].includes(status)) {
+    return status as EssLeaveRequestStatus;
+  }
+  return 'Submitted';
+};
+
+const loadLeaveRequestSnapshot = async (applicationId: string, employees: DleEmployeeDirectoryRow[]) => {
+  const fromEss = (await readAllEssRequests()).find((item) => item.id === applicationId && /leave/i.test(item.category));
+  if (fromEss) {
+    const requester = resolveEmployeeReference(employees, fromEss.employeeId);
+    if (requester) return { request: fromEss, requester };
+  }
+  const pool = await getDleEnterpriseDbPool();
+  if (!pool) return null;
+  const result = await pool.request()
+    .input('Id', sql.NVarChar(120), applicationId)
+    .query(`
+SELECT TOP 1 [Id],[EmployeeId],[FullName],[LeaveType],[StartDate],[EndDate],[Days],[StatusName],[ActingOfficer],[CreatedAt],[UpdatedAt]
+FROM [hris].[LeaveApplications]
+WHERE [Id]=@Id;`);
+  const request = essLeaveRequestFromDbRow(result.recordset[0] as Record<string, unknown>, employees);
+  if (!request) return null;
+  const requester = resolveEmployeeReference(employees, request.employeeId);
+  if (!requester) return null;
+  return { request, requester };
+};
+
+const resolveLineManagerRecipient = (requester: DleEmployeeDirectoryRow, employees: DleEmployeeDirectoryRow[]) =>
+  resolveLineManagerForEmployee(requester, employees)?.employee || null;
+
+export type ResolvedLineManager = {
+  employee: DleEmployeeDirectoryRow;
+  label: string;
+  source: 'reporting-manager' | 'functional-manager' | 'department-head';
+};
+
+export const resolveLineManagerForEmployee = (
+  requester: DleEmployeeDirectoryRow,
+  employees: DleEmployeeDirectoryRow[],
+): ResolvedLineManager | null => {
+  const inactive = /inactive|terminated|resigned|retired|deceased|suspend/i;
+  const activeEmployees = employees.filter((employee) => !inactive.test(compact(employee.status)));
+  const isSelf = (candidate: DleEmployeeDirectoryRow) =>
+    employeeRequestMatches(candidate, requester.employeeId)
+    || (requester.employeeCode && employeeRequestMatches(candidate, requester.employeeCode));
+
+  const matchReference = (reference: string, source: ResolvedLineManager['source']) => {
+    if (!reference) return null;
+    const found = activeEmployees.find((employee) =>
+      !isSelf(employee)
+      && (employeeRequestMatches(employee, reference) || namesMatch(employee.fullName, reference)),
+    );
+    return found ? { employee: found, label: found.fullName, source } : null;
+  };
+
+  const reportingManager = matchReference(compact(requester.managerName), 'reporting-manager');
+  if (reportingManager) return reportingManager;
+
+  const functionalManager = matchReference(compact(requester.functionalManager), 'functional-manager');
+  if (functionalManager) return functionalManager;
+
+  const departmentHead = matchReference(compact(requester.departmentHead), 'department-head');
+  if (departmentHead) return departmentHead;
+
+  const department = compact(requester.department).toLowerCase();
+  if (!department) return null;
+
+  const departmentHeadName = activeEmployees
+    .filter((employee) => compact(employee.department).toLowerCase() === department && compact(employee.departmentHead))
+    .map((employee) => compact(employee.departmentHead))[0];
+  if (departmentHeadName) {
+    const inferredHead = activeEmployees.find((employee) => !isSelf(employee) && namesMatch(employee.fullName, departmentHeadName));
+    if (inferredHead) return { employee: inferredHead, label: inferredHead.fullName, source: 'department-head' };
+  }
+
+  return null;
+};
+
+export const notifyLineManagerLeaveSubmitted = async (input: {
+  request: EssLeaveRequest;
+  requester: DleEmployeeDirectoryRow;
+  manager: DleEmployeeDirectoryRow;
+  actorName: string;
+  baseUrl?: string | null;
+}) => {
+  const session = leaveSystemSession(input.actorName);
+  const requestLabel = input.request.title || `${input.request.leaveType} leave`;
+  await safeLeaveNotification('line manager submission notification', () =>
+    deliverLeaveEmployeeNotification({
+      session,
+      employee: input.manager,
+      title: 'Leave request awaiting your approval',
+      body: `${input.requester.fullName} submitted ${requestLabel} (${input.request.startDate} to ${input.request.endDate}). Review in ESS Approvals within ${workflowDeadlineDays} working days.`,
+      severity: 'warning',
+      requestId: input.request.id,
+      kind: 'Approval',
+      sendEmail: () => sendLeaveApprovalRequestEmail({
+        request: input.request,
+        requester: input.requester,
+        recipient: input.manager,
+        approverKind: 'line-manager',
+        baseUrl: input.baseUrl,
+      }),
+    }));
 };
 
 const resolveHrRecipients = (employees: DleEmployeeDirectoryRow[]) =>
@@ -286,20 +611,31 @@ export const resolveLeaveApproverKind = (input: {
   request: EssLeaveRequest;
   roles?: string[];
   isGlobalAdmin?: boolean;
+  employees?: DleEmployeeDirectoryRow[];
 }): LeaveApproverKind => {
-  const { actor, requester, request, roles = [], isGlobalAdmin } = input;
+  const { actor, requester, request, roles = [], isGlobalAdmin, employees = [] } = input;
   if (!['Line Manager Review', 'HR Review'].includes(request.status)) return null;
   const roleText = roles.map((role) => role.toLowerCase());
   const isHr = isGlobalAdmin || roleText.some((role) => hrRoles.has(role) || /hr/.test(role));
   if (request.status === 'HR Review' && isHr) return 'hr';
-  const managerName = managerOwnerFor(requester);
+
+  const resolvedManager = employees.length ? resolveLineManagerForEmployee(requester, employees) : null;
+  const isAssignedManager = resolvedManager ? employeeRequestMatches(actor, resolvedManager.employee.employeeId) : false;
+  if (request.lineManagerEmployeeId && employeeRequestMatches(actor, request.lineManagerEmployeeId)) {
+    if (request.status === 'Line Manager Review') return 'line-manager';
+  }
+
+  const managerName = resolvedManager?.label || managerOwnerFor(requester);
   const isManagerRole = roleText.some((role) => managerRoles.has(role) || /manager|supervisor|head/.test(role));
   const isNamedManager = namesMatch(actor.fullName, managerName)
     || namesMatch(actor.fullName, requester.managerName || '')
-    || namesMatch(actor.fullName, requester.departmentHead || '');
+    || namesMatch(actor.fullName, requester.departmentHead || '')
+    || namesMatch(actor.fullName, requester.functionalManager || '');
   const sameDepartmentHead = compact(actor.departmentHead).toLowerCase() === compact(actor.fullName).toLowerCase()
     && compact(actor.department).toLowerCase() === compact(requester.department).toLowerCase();
-  if (request.status === 'Line Manager Review' && (isNamedManager || isManagerRole || sameDepartmentHead || isGlobalAdmin)) return 'line-manager';
+  if (request.status === 'Line Manager Review' && (isAssignedManager || isNamedManager || isManagerRole || sameDepartmentHead || isGlobalAdmin)) {
+    return 'line-manager';
+  }
   return null;
 };
 
@@ -321,7 +657,7 @@ export const pendingLeaveApprovalsForActor = (
     .map((request) => {
       const requester = employeeById.get(request.employeeId) || employees.find((employee) => employeeRequestMatches(employee, request.employeeId)) || null;
       if (!requester) return null;
-      const approverKind = resolveLeaveApproverKind({ actor, requester, request, roles, isGlobalAdmin });
+      const approverKind = resolveLeaveApproverKind({ actor, requester, request, roles, isGlobalAdmin, employees });
       if (!approverKind) return null;
       return {
         id: request.id,
@@ -354,6 +690,36 @@ export const pendingLeaveApprovalsForActor = (
       conflict: string;
       approverKind: LeaveApproverKind;
     }>;
+};
+
+export const listLiveLeaveApprovalNotifications = async (input: {
+  actor: DleEmployeeDirectoryRow;
+  employees: DleEmployeeDirectoryRow[];
+  roles?: string[];
+  isGlobalAdmin?: boolean;
+}) => {
+  const requests = await readAllEssRequests();
+  const queue = pendingLeaveApprovalsForActor(
+    input.actor,
+    requests.filter((item) => /leave/i.test(item.category) && item.startDate && item.endDate),
+    input.employees,
+    input.roles || [],
+    input.isGlobalAdmin,
+  );
+  return queue.map((item) => ({
+    id: `live-leave-${item.id}`,
+    kind: 'Approval' as const,
+    module: 'Leave Management',
+    title: `Leave approval required: ${item.employee}`,
+    body: `${item.type} · ${item.startDate} to ${item.endDate} · ${item.days} day(s) · ${item.stage}`,
+    severity: 'warning' as const,
+    status: 'Unread' as const,
+    href: '/workforce-portal?tab=leave',
+    createdAt: new Date().toISOString(),
+    actor: 'Leave Workflow',
+    channels: ['In-App'] as Array<'In-App' | 'Email' | 'SMS'>,
+    metadata: { requestId: item.id, live: true },
+  }));
 };
 
 export type LeaveCalendarConfig = {
@@ -730,6 +1096,7 @@ export const transitionEssLeaveRequest = async (input: {
       request: found,
       roles: input.roles,
       isGlobalAdmin: input.isGlobalAdmin,
+      employees,
     });
   if (!approverKind) throw new Error('You are not authorized to action this leave request.');
   if (input.action === 'approve' && approverKind === 'line-manager' && found.status !== 'Line Manager Review') {
@@ -795,16 +1162,28 @@ export const transitionEssLeaveRequest = async (input: {
     if (result.posted) allowanceMessage = result.message;
   }
 
-  await sendLeaveWorkflowEmail({
-    event: !approved ? 'rejected' : nextStatus === 'HR Review' ? 'manager-approved' : 'approved',
-    request: updated,
-    requester,
-    actorName: input.actorName,
-    baseUrl: input.baseUrl,
-  });
-
-  if (approved && nextStatus === 'HR Review') {
-    await emailLeaveApproversForRequest({ request: updated, requester, baseUrl: input.baseUrl });
+  if (!approved) {
+    await notifyLeaveRejected({
+      request: updated,
+      requester,
+      actorName: input.actorName,
+      reason: input.comment,
+      baseUrl: input.baseUrl,
+    });
+  } else if (nextStatus === 'HR Review') {
+    await notifyLeaveAwaitingHrApproval({
+      request: updated,
+      requester,
+      actorName: input.actorName,
+      baseUrl: input.baseUrl,
+    });
+  } else if (nextStatus === 'Approved') {
+    await notifyLeaveFinalApproval({
+      request: updated,
+      requester,
+      actorName: input.actorName,
+      baseUrl: input.baseUrl,
+    });
   }
 
   return { request: updated, allowanceMessage };
@@ -866,13 +1245,19 @@ UPDATE [hris].[LeaveApplications]
 SET [StatusName]=@StatusName,[WorkflowStage]=@WorkflowStage,[ApprovalStatus]=@ApprovalStatus,[UpdatedAt]=SYSUTCDATETIME()
 WHERE [Id]=@Id;`);
 
+  const { employees } = await readPayrollEmployees();
+
   if (essRequest && nextEssStatus) {
     const now = new Date().toISOString();
+    const requester = resolveEmployeeReference(employees, essRequest.employeeId);
     const next = requests.map((item) => item.id === input.applicationId
       ? {
           ...item,
           status: nextEssStatus,
           updatedAt: now,
+          workflow: requester
+            ? leaveWorkflowFor(requester, item.relieverName || 'Selected reliever', nextEssStatus, now)
+            : item.workflow,
           comments: [
             ...(item.comments || []),
             { at: now, actor: input.actor, comment: input.reason || `${input.action} recorded from HRIS Leave Management.` },
@@ -883,9 +1268,33 @@ WHERE [Id]=@Id;`);
     invalidateEssPortalCache();
   }
 
-  const { employees } = await readPayrollEmployees();
   const synced = (await readEssLeaveRequests()).find((item) => item.id === input.applicationId);
   if (synced) await upsertEssLeaveRequestToDb(synced, employees);
+
+  const snapshot = await loadLeaveRequestSnapshot(input.applicationId, employees);
+  if (snapshot) {
+    const refreshedRequest = (await readAllEssRequests()).find((item) => item.id === input.applicationId) || snapshot.request;
+    if (nextEssStatus === 'Approved') {
+      await notifyLeaveFinalApproval({
+        request: { ...refreshedRequest, status: 'Approved' },
+        requester: snapshot.requester,
+        actorName: input.actor,
+      });
+    } else if (nextEssStatus === 'Rejected') {
+      await notifyLeaveRejected({
+        request: { ...refreshedRequest, status: 'Rejected' },
+        requester: snapshot.requester,
+        actorName: input.actor,
+        reason: input.reason,
+      });
+    } else if (nextEssStatus === 'HR Review') {
+      await notifyLeaveAwaitingHrApproval({
+        request: { ...refreshedRequest, status: 'HR Review' },
+        requester: snapshot.requester,
+        actorName: input.actor,
+      });
+    }
+  }
 
   return { applicationId: input.applicationId, status: hrisStatus, essStatus: nextEssStatus };
 };
@@ -952,32 +1361,51 @@ export const notifyLeaveWorkflow = async (
     body: string;
     severity?: 'info' | 'success' | 'warning' | 'critical';
     recipientEmployeeCode?: string;
+    recipient?: DleEmployeeDirectoryRow;
     recipientRoles?: string[];
     requestId: string;
     request?: EssLeaveRequest;
     requester?: DleEmployeeDirectoryRow;
+    emailEvent?: 'submitted' | 'manager-approved' | 'approved' | 'rejected';
+    sendEmail?: boolean;
+    baseUrl?: string | null;
   },
   createNotification: typeof createEnterpriseNotification = createEnterpriseNotification,
 ) => {
+  const recipientCode = input.recipient
+    ? employeeNotificationCode(input.recipient)
+    : input.recipientEmployeeCode;
+
   await createNotification(session, {
     kind: 'Approval',
     module: 'Leave Management',
     title: input.title,
     body: input.body,
     severity: input.severity || 'info',
-    recipientEmployeeCode: input.recipientEmployeeCode,
+    recipientEmployeeCode: recipientCode,
     recipientRoles: input.recipientRoles || [],
     href: `/workforce-portal?tab=leave`,
     channels: ['In-App', 'Email'],
     metadata: { requestId: input.requestId },
   });
-  if (input.request && input.requester) {
-    await sendLeaveWorkflowEmail({
-      event: input.title.toLowerCase().includes('reject') ? 'rejected' : input.title.toLowerCase().includes('approved') ? 'approved' : 'submitted',
-      request: input.request,
-      requester: input.requester,
-      actorName: session.fullName || session.username,
-      extra: input.body,
-    });
-  }
+
+  const shouldEmail = input.sendEmail ?? Boolean(input.recipient || input.emailEvent);
+  if (!shouldEmail || !input.request || !input.requester) return;
+
+  const emailRecipient = input.recipient || input.requester;
+  const emailEvent = input.emailEvent
+    || (input.title.toLowerCase().includes('reject') ? 'rejected'
+      : input.title.toLowerCase().includes('approved') ? 'approved'
+        : input.title.toLowerCase().includes('awaiting hr') ? 'manager-approved'
+          : 'submitted');
+
+  await safeLeaveNotification('workflow email', () => sendLeaveWorkflowEmail({
+    event: emailEvent,
+    request: input.request!,
+    requester: input.requester!,
+    recipient: emailRecipient,
+    actorName: session.fullName || session.username,
+    extra: input.body,
+    baseUrl: input.baseUrl,
+  }));
 };

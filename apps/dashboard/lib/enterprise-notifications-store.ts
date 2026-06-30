@@ -34,35 +34,72 @@ type NotificationFile = {
 
 export type NotificationScope = 'all' | 'messages' | 'notifications' | 'approvals';
 
-const dataDir = path.join(process.cwd(), 'data', 'enterprise');
-const dataFile = path.join(dataDir, 'notifications.json');
+const compact = (value: unknown) => String(value || '').trim();
+const normalizeRecipientKey = (value: unknown) => compact(value).toUpperCase();
+
+const resolveNotificationsFile = () => {
+  const override = compact(process.env.DLE_NOTIFICATIONS_PATH);
+  if (override) return override;
+  return path.join(process.cwd(), 'data', 'enterprise', 'notifications.json');
+};
+
+const isStorageAccessError = (error: unknown) => {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EROFS';
+};
 
 const nowIso = () => new Date().toISOString();
 
 const readStore = async (): Promise<NotificationFile> => {
   try {
-    const raw = await fs.readFile(dataFile, 'utf8');
+    const raw = await fs.readFile(resolveNotificationsFile(), 'utf8');
     const parsed = JSON.parse(raw) as NotificationFile;
     return {
       schemaVersion: parsed.schemaVersion || 1,
       notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
     };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return { schemaVersion: 1, notifications: [] };
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { schemaVersion: 1, notifications: [] };
+    if (isStorageAccessError(error)) {
+      console.warn('[enterprise-notifications] Unable to read notifications store; continuing with empty feed.', error);
+      return { schemaVersion: 1, notifications: [] };
+    }
+    throw error;
   }
 };
 
 const writeStore = async (store: NotificationFile) => {
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(dataFile, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
+  try {
+    const dataFile = resolveNotificationsFile();
+    await fs.mkdir(path.dirname(dataFile), { recursive: true });
+    await fs.writeFile(dataFile, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
+    return true;
+  } catch (error) {
+    if (isStorageAccessError(error)) {
+      console.warn('[enterprise-notifications] Unable to persist notifications store.', error);
+      return false;
+    }
+    throw error;
+  }
 };
 
 const ownerMatches = (item: EnterpriseNotification, session: SessionPayload) => {
-  if (item.recipientUserId === session.sub) return true;
-  if (item.recipientUsername.toLowerCase() === session.username.toLowerCase()) return true;
-  if (session.employeeCode && item.recipientEmployeeCode === session.employeeCode) return true;
-  if (item.recipientRoles.some((role) => session.roles.includes(role))) return true;
+  const sessionKeys = new Set([
+    normalizeRecipientKey(session.sub),
+    normalizeRecipientKey(session.username),
+    normalizeRecipientKey(session.employeeCode),
+    normalizeRecipientKey(session.employeeId),
+  ].filter(Boolean));
+
+  const recipientKeys = new Set([
+    normalizeRecipientKey(item.recipientUserId),
+    normalizeRecipientKey(item.recipientUsername),
+    normalizeRecipientKey(item.recipientEmployeeCode),
+  ].filter(Boolean));
+
+  if ([...sessionKeys].some((key) => recipientKeys.has(key))) return true;
+  if (item.recipientRoles.some((role) => session.roles.map((entry) => entry.toLowerCase()).includes(role.toLowerCase()))) return true;
   return false;
 };
 
@@ -227,13 +264,13 @@ export const createEnterpriseNotification = async (
   notification: Pick<EnterpriseNotification, 'title' | 'body' | 'module'> &
     Partial<Omit<EnterpriseNotification, 'id' | 'recipientUserId' | 'recipientUsername' | 'title' | 'body' | 'module' | 'createdAt' | 'status'>>
 ) => {
-  const store = await readStore();
   const id = `ntf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const recipientCode = notification.recipientEmployeeCode || session.employeeCode;
   const record: EnterpriseNotification = {
     id,
-    recipientUserId: notification.recipientEmployeeCode || session.sub,
-    recipientUsername: notification.recipientEmployeeCode || session.username,
-    recipientEmployeeCode: notification.recipientEmployeeCode || session.employeeCode,
+    recipientUserId: recipientCode || session.sub,
+    recipientUsername: recipientCode || session.username,
+    recipientEmployeeCode: recipientCode,
     recipientRoles: notification.recipientRoles || [],
     kind: notification.kind || 'Notification',
     module: notification.module,
@@ -247,7 +284,12 @@ export const createEnterpriseNotification = async (
     channels: notification.channels || ['In-App'],
     metadata: notification.metadata,
   };
-  store.notifications.unshift(record);
-  await writeStore(store);
+  try {
+    const store = await readStore();
+    store.notifications.unshift(record);
+    await writeStore(store);
+  } catch (error) {
+    console.warn('[enterprise-notifications] Notification created in-memory only.', error);
+  }
   return record;
 };

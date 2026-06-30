@@ -18,7 +18,7 @@ const smtpConfigured = () => Boolean(
   && (process.env.DLE_SMTP_USER ? process.env.DLE_SMTP_PASSWORD : true),
 );
 
-const recipientFor = (employee?: DleEmployeeDirectoryRow | null) =>
+export const employeeEmailAddress = (employee?: DleEmployeeDirectoryRow | null) =>
   compact(employee?.officialEmail || employee?.email || employee?.personalEmail);
 
 const button = (href: string, label: string, background: string) =>
@@ -55,15 +55,31 @@ export const sendTransactionalEmail = async (input: { to: string; subject: strin
   return { sent: true };
 };
 
+const leaveDetailLines = (request: EssLeaveRequest) => [
+  `Period: ${request.startDate} to ${request.endDate}`,
+  `Days: ${request.days}`,
+  `Status: ${request.status}`,
+  request.relieverName ? `Reliever: ${request.relieverName}` : '',
+].filter(Boolean);
+
+const leaveDetailHtml = (request: EssLeaveRequest) => `<ul>
+  <li><strong>Period:</strong> ${request.startDate} to ${request.endDate}</li>
+  <li><strong>Days:</strong> ${request.days}</li>
+  <li><strong>Status:</strong> ${request.status}</li>
+  ${request.relieverName ? `<li><strong>Reliever:</strong> ${request.relieverName}</li>` : ''}
+</ul>`;
+
 export const sendLeaveWorkflowEmail = async (input: {
   event: LeaveEmailEvent;
   request: EssLeaveRequest;
   requester: DleEmployeeDirectoryRow;
+  recipient?: DleEmployeeDirectoryRow;
   actorName?: string;
   extra?: string;
   baseUrl?: string | null;
 }) => {
-  const to = recipientFor(input.requester);
+  const recipient = input.recipient || input.requester;
+  const to = employeeEmailAddress(recipient);
   const subjectMap: Record<LeaveEmailEvent, string> = {
     submitted: `Leave request submitted: ${input.request.leaveType}`,
     'manager-approved': `Leave request awaiting HR approval: ${input.request.leaveType}`,
@@ -72,31 +88,68 @@ export const sendLeaveWorkflowEmail = async (input: {
     'approval-request': `Leave approval required: ${input.request.leaveType}`,
   };
   const portalLink = leavePortalUrl(input.baseUrl);
+  const introMap: Record<LeaveEmailEvent, string> = {
+    submitted: 'Your leave request has been submitted and routed for approval.',
+    'manager-approved': 'Your leave request has been approved by your line manager and is awaiting HR final approval.',
+    approved: 'Your leave request has received final approval.',
+    rejected: 'Your leave request has been rejected.',
+    'approval-request': 'A leave request requires your approval.',
+  };
   const text = [
-    `Dear ${input.requester.fullName},`,
+    `Dear ${recipient.fullName},`,
     '',
-    subjectMap[input.event],
-    `Period: ${input.request.startDate} to ${input.request.endDate}`,
-    `Days: ${input.request.days}`,
-    `Status: ${input.request.status}`,
+    introMap[input.event],
+    `Leave type: ${input.request.leaveType}`,
+    ...leaveDetailLines(input.request),
     input.actorName ? `Actioned by: ${input.actorName}` : '',
     input.extra || '',
     `Open leave workspace: ${portalLink}`,
     '',
     'Dorman Long Engineering — Employee Self-Service',
   ].filter(Boolean).join('\n');
-  const html = `<p>Dear <strong>${input.requester.fullName}</strong>,</p>
-<p>${subjectMap[input.event]}</p>
-<ul>
-  <li><strong>Period:</strong> ${input.request.startDate} to ${input.request.endDate}</li>
-  <li><strong>Days:</strong> ${input.request.days}</li>
-  <li><strong>Status:</strong> ${input.request.status}</li>
-</ul>
+  const html = `<p>Dear <strong>${recipient.fullName}</strong>,</p>
+<p>${introMap[input.event]}</p>
+<p><strong>Leave type:</strong> ${input.request.leaveType}</p>
+${leaveDetailHtml(input.request)}
 ${input.actorName ? `<p><strong>Actioned by:</strong> ${input.actorName}</p>` : ''}
 ${input.extra ? `<p>${input.extra}</p>` : ''}
 <p>${button(portalLink, 'Open Leave Workspace', '#2563eb')}</p>
 <p style="color:#64748b;font-size:12px">Dorman Long Engineering — Employee Self-Service</p>`;
   return sendTransactionalEmail({ to, subject: subjectMap[input.event], text, html });
+};
+
+export const sendLeaveRelieverAssignmentEmail = async (input: {
+  request: EssLeaveRequest;
+  requester: DleEmployeeDirectoryRow;
+  reliever: DleEmployeeDirectoryRow;
+  actorName?: string;
+  baseUrl?: string | null;
+}) => {
+  const to = employeeEmailAddress(input.reliever);
+  const portalLink = leavePortalUrl(input.baseUrl);
+  const subject = `Reliever assignment: ${input.requester.fullName} — ${input.request.leaveType}`;
+  const text = [
+    `Dear ${input.reliever.fullName},`,
+    '',
+    `You have been assigned as reliever for ${input.requester.fullName}.`,
+    `Leave type: ${input.request.leaveType}`,
+    ...leaveDetailLines(input.request),
+    input.request.handover ? `Handover notes: ${input.request.handover}` : '',
+    input.actorName ? `Approved by: ${input.actorName}` : '',
+    `Open leave workspace: ${portalLink}`,
+    '',
+    'Please coordinate with the requester before their leave begins.',
+    'Dorman Long Engineering — Employee Self-Service',
+  ].filter(Boolean).join('\n');
+  const html = `<p>Dear <strong>${input.reliever.fullName}</strong>,</p>
+<p>You have been assigned as <strong>reliever</strong> for <strong>${input.requester.fullName}</strong>.</p>
+<p><strong>Leave type:</strong> ${input.request.leaveType}</p>
+${leaveDetailHtml(input.request)}
+${input.request.handover ? `<p><strong>Handover notes:</strong> ${input.request.handover}</p>` : ''}
+${input.actorName ? `<p><strong>Approved by:</strong> ${input.actorName}</p>` : ''}
+<p>${button(portalLink, 'Open Leave Workspace', '#2563eb')}</p>
+<p style="color:#64748b;font-size:12px">Please coordinate with the requester before their leave begins.</p>`;
+  return sendTransactionalEmail({ to, subject, text, html });
 };
 
 export const sendLeaveApprovalRequestEmail = async (input: {
@@ -106,7 +159,7 @@ export const sendLeaveApprovalRequestEmail = async (input: {
   approverKind: LeaveEmailApproverKind;
   baseUrl?: string | null;
 }) => {
-  const to = recipientFor(input.recipient);
+  const to = employeeEmailAddress(input.recipient);
   if (!to) return { sent: false, reason: 'No recipient email.' };
 
   const approveToken = createLeaveEmailActionToken({

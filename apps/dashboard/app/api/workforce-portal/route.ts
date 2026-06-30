@@ -25,8 +25,10 @@ import {
   leaveWorkflowFor,
   managerOwnerFor,
   notifyLeaveWorkflow as notifyLeaveWorkflowCore,
+  notifyLineManagerLeaveSubmitted,
   pendingLeaveApprovalsForActor,
   readAllEssRequests,
+  resolveLineManagerForEmployee,
   syncEssLeaveRequestById,
   transitionEssLeaveRequest,
   validateEssLeaveApplication,
@@ -56,6 +58,8 @@ type EssRequest = {
   reason?: string;
   relieverEmployeeId?: string;
   relieverName?: string;
+  lineManagerEmployeeId?: string;
+  lineManagerName?: string;
   handover?: string;
   attachmentNames?: string[];
   workflow?: Array<{ stage: string; owner: string; status: string; actedAt?: string | null; comment?: string | null }>;
@@ -364,16 +368,7 @@ const writeRequests = writeAllEssRequests;
 
 const notifyLeaveWorkflow = async (
   session: SessionPayload,
-  input: {
-    title: string;
-    body: string;
-    severity?: 'info' | 'success' | 'warning' | 'critical';
-    recipientEmployeeCode?: string;
-    recipientRoles?: string[];
-    requestId: string;
-    request?: EssRequest;
-    requester?: DleEmployeeDirectoryRow;
-  },
+  input: Parameters<typeof notifyLeaveWorkflowCore>[1],
 ) =>
   notifyLeaveWorkflowCore(session, input, createEnterpriseNotification);
 
@@ -1002,7 +997,14 @@ export async function GET(request: Request) {
         ...(currentPeriodReleased && essDisplayPeriod ? [{ id: 'ann-001', title: `${periodTitle(essDisplayPeriod)} payslip is now available`, channel: 'Payroll', publishedAt: dateAdd(-1), priority: 'High' }] : []),
       ],
       notifications: [
-        ...essContext.notifications,
+        ...leaveApprovals.map((item) => ({
+          id: `live-leave-${item.id}`,
+          title: `Leave approval required: ${item.employee}`,
+          type: 'Workflow',
+          status: 'Unread',
+          createdAt: new Date().toISOString(),
+        })),
+        ...essContext.notifications.filter((item) => !String(item.id).startsWith('live-leave-')),
         ...(latestReleasedPayroll && !essContext.notifications.some((item) => /payslip/i.test(item.title))
           ? [{ id: 'ntf-payslip', title: `${latestReleasedPayroll.periodLabel || periodTitle(latestReleasedPayroll.period)} payslip is ready for download`, type: 'Payroll', status: 'Read', createdAt: dateAdd(-1) }]
           : []),
@@ -1241,51 +1243,8 @@ export async function POST(request: Request) {
           roles: session.roles || [],
           isGlobalAdmin: session.isGlobalAdmin,
           comment: compact(body.comment) || undefined,
+          baseUrl: new URL(request.url).origin,
         });
-        const found = result.request;
-        if (action === 'reject-leave') {
-          await notifyLeaveWorkflow(session, {
-            requestId,
-            recipientEmployeeCode: found.employeeId,
-            title: 'Leave request rejected',
-            body: `${found.title} was rejected by ${session.fullName || session.username}.`,
-            severity: 'warning',
-            request: found,
-            requester: employeeSource.employees.find((item) => employeeRequestMatches(item, found.employeeId)),
-          });
-        } else if (found.status === 'HR Review') {
-          await notifyLeaveWorkflow(session, {
-            requestId,
-            recipientRoles: ['HR Manager', 'HR Head', 'HR Officer'],
-            title: 'Leave request awaiting HR approval',
-            body: `${found.title} has been approved by the line manager and is awaiting HR Manager / Head approval.`,
-            severity: 'warning',
-            request: found,
-            requester: employeeSource.employees.find((item) => employeeRequestMatches(item, found.employeeId)),
-          });
-        } else if (found.status === 'Approved') {
-          const requester = employeeSource.employees.find((item) => employeeRequestMatches(item, found.employeeId));
-          await notifyLeaveWorkflow(session, {
-            requestId,
-            recipientEmployeeCode: found.employeeId,
-            title: 'Leave request approved',
-            body: `${found.title} has received final HR approval.`,
-            severity: 'success',
-            request: found,
-            requester,
-          });
-          if (found.relieverEmployeeId) {
-            await notifyLeaveWorkflow(session, {
-              requestId,
-              recipientEmployeeCode: found.relieverEmployeeId,
-              title: 'Leave reliever assignment confirmed',
-              body: `You have been assigned as reliever for ${requester?.fullName || found.employeeId}: ${found.title}.`,
-              severity: 'info',
-              request: found,
-              requester,
-            });
-          }
-        }
         return ok({ request: result.request, leaveAllowance: result.allowanceMessage });
       } catch (error) {
         return err(error instanceof Error && error.message.includes('not authorized') ? 403 : 409, error instanceof Error ? error.message : 'Unable to process leave approval.');
@@ -1337,6 +1296,8 @@ export async function POST(request: Request) {
       : false;
     const initialStatus: EssRequest['status'] = isLeaveRequest ? 'Line Manager Review' : catalogItem?.workflow.includes('Line Manager') ? 'Line Manager Review' : 'Submitted';
     const relieverName = reliever ? reliever.fullName : relieverNameInput;
+    const lineManager = isLeaveRequest ? resolveLineManagerForEmployee(employee, employeeSource.employees) : null;
+    const lineManagerLabel = lineManager?.label || managerOwnerFor(employee);
     const requestId = compact(body.requestId) || `ess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const requestItem: EssRequest = {
       id: requestId,
@@ -1347,7 +1308,7 @@ export async function POST(request: Request) {
       priority: ['Low', 'Normal', 'High'].includes(priority) ? priority : 'Normal',
       submittedAt: now,
       updatedAt: now,
-      approvers: isLeaveRequest ? [managerOwnerFor(employee), 'HR Manager / Head'] : catalogItem?.workflow.slice(1) || ['HR Operations'],
+      approvers: isLeaveRequest ? [lineManagerLabel, 'HR Manager / Head'] : catalogItem?.workflow.slice(1) || ['HR Operations'],
       leaveType: leaveType || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
@@ -1357,9 +1318,11 @@ export async function POST(request: Request) {
       reason: reason || undefined,
       relieverEmployeeId: reliever ? reliever.employeeId : relieverEmployeeId || undefined,
       relieverName: relieverName || undefined,
+      lineManagerEmployeeId: lineManager ? (lineManager.employee.employeeCode || lineManager.employee.employeeId) : undefined,
+      lineManagerName: lineManagerLabel,
       handover: handover || undefined,
       attachmentNames: attachmentNames.length ? attachmentNames : undefined,
-      workflow: isLeaveRequest ? leaveWorkflowFor(employee, relieverName, initialStatus, now) : undefined,
+      workflow: isLeaveRequest ? leaveWorkflowFor(employee, relieverName, initialStatus, now, lineManagerLabel) : undefined,
       comments: [{
         at: now,
         actor: 'Employee Self-Service',
@@ -1382,22 +1345,30 @@ export async function POST(request: Request) {
       } catch (emailError) {
         console.error('Leave approval email failed after submit', emailError);
       }
-      await notifyLeaveWorkflow(session, {
-        requestId: requestItem.id,
-        recipientEmployeeCode: employee.employeeCode || employee.employeeId,
-        title: 'Leave request submitted',
-        body: `${title} has been submitted and routed to ${managerOwnerFor(employee)}. It must be approved within ${workflowDeadlineDays} working days.`,
-        severity: 'success',
-        request: requestItem,
-        requester: employee,
-      });
-      await notifyLeaveWorkflow(session, {
-        requestId: requestItem.id,
-        recipientRoles: ['Supervisor', 'Line Manager', 'Manager'],
-        title: 'Leave request awaiting line manager approval',
-        body: `${employee.fullName} submitted ${title}. Approve, return, or reject within ${workflowDeadlineDays} working days.`,
-        severity: 'warning',
-      });
+      try {
+        await notifyLeaveWorkflow(session, {
+          requestId: requestItem.id,
+          recipient: employee,
+          title: 'Leave request submitted',
+          body: `${title} has been submitted and routed to ${lineManagerLabel}. It must be approved within ${workflowDeadlineDays} working days.`,
+          severity: 'success',
+          request: requestItem,
+          requester: employee,
+          emailEvent: 'submitted',
+          baseUrl,
+        });
+        if (lineManager) {
+          await notifyLineManagerLeaveSubmitted({
+            request: requestItem,
+            requester: employee,
+            manager: lineManager.employee,
+            actorName: session.fullName || session.username,
+            baseUrl,
+          });
+        }
+      } catch (notificationError) {
+        console.error('Leave in-app notification failed after submit', notificationError);
+      }
     }
     return ok({ request: requestItem });
   } catch (error) {
