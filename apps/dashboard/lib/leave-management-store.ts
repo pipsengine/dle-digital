@@ -948,7 +948,7 @@ const upsertEssLeaveRequests = async (pool: sql.ConnectionPool, employees: DleEm
 MERGE [hris].[LeaveApplications] AS target
 USING (SELECT @Id AS [Id]) AS source
 ON target.[Id] = source.[Id]
-WHEN MATCHED THEN UPDATE SET
+WHEN MATCHED AND target.[StatusName] NOT IN (N'Cancelled', N'Rejected', N'Terminated', N'Completed', N'Withdrawn') THEN UPDATE SET
   [SourceSystem]=@SourceSystem,[EmployeeId]=@EmployeeId,[FullName]=@FullName,[Department]=@Department,[ManagerName]=@ManagerName,
   [Location]=@Location,[EmployeeCategory]=@EmployeeCategory,[LeaveType]=@LeaveType,[StartDate]=@StartDate,[EndDate]=@EndDate,
   [Days]=@Days,[StatusName]=@StatusName,[WorkflowStage]=@WorkflowStage,[ApprovalStatus]=@ApprovalStatus,
@@ -1419,7 +1419,9 @@ export function validateLeaveAction(actionId: LeaveActionId, roleInput: string |
     const employeeBalance = payload.balances.find((balance) => balance.employeeId === employeeKey && balance.leaveType === leaveType)
       || payload.balances.find((balance) => balance.employeeId === employeeKey)
       || payload.balances.find((balance) => balance.leaveType === leaveType);
-    const availableBalance = employeeBalance?.currentBalance || 0;
+    const availableBalance = Number.isFinite(Number(body.availableBalance))
+      ? Number(body.availableBalance)
+      : (employeeBalance?.currentBalance || 0);
     if (leaveType === 'Annual Leave' && !fourteenDayPaidLeaveRequest && !confirmed) return { ok: false, status: 409, message: 'Annual Leave is available only after confirmation of appointment.' };
     if (leaveType === 'Annual Leave' && fourteenDayPaidLeaveRequest && requestedDays > dormantLongPolicy.annualContractDays) return { ok: false, status: 409, message: `Contract/Lumpsum/NYSC/IT paid Annual Leave cannot exceed ${dormantLongPolicy.annualContractDays} working days annually.` };
     if (leaveType === 'Annual Leave' && requestedDays >= dormantLongPolicy.allowanceMinimumAnnualDays && body.usesCarryForward) return { ok: false, status: 409, message: 'Leave Allowance applies only to current-year Annual Leave entitlement, not Carry Forward Leave.' };

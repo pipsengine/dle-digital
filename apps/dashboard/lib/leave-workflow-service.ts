@@ -376,6 +376,119 @@ export const readLeaveCalendarConfig = async (): Promise<LeaveCalendarConfig> =>
 const overlapsBlockedPeriod = (startDate: string, endDate: string, config: LeaveCalendarConfig) =>
   config.blockedPeriods.some((period) => startDate <= period.endDate && endDate >= period.startDate);
 
+const leaveDatesOverlap = (startDate: string, endDate: string, otherStart: string, otherEnd: string) =>
+  startDate <= otherEnd && endDate >= otherStart;
+
+const employeeLeaveLookupKeys = (employee: DleEmployeeDirectoryRow) =>
+  new Set(
+    buildEssEmployeeLookupKeys(employee)
+      .flatMap((key) => [key, normalizePayrollMatchKey(key)])
+      .map((key) => compact(key).toUpperCase())
+      .filter(Boolean),
+  );
+
+const recordMatchesEmployeeKeys = (recordEmployeeId: string, keys: Set<string>) => {
+  const candidates = [recordEmployeeId, normalizePayrollMatchKey(recordEmployeeId)]
+    .map((key) => compact(key).toUpperCase())
+    .filter(Boolean);
+  return candidates.some((key) => keys.has(key));
+};
+
+const blockingLeaveStatuses = new Set([
+  'Draft',
+  'Submitted',
+  'Under Review',
+  'Approved',
+  'Line Manager Review',
+  'HR Review',
+  'Finance Review',
+]);
+
+const formatConflictMessage = (input: {
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  source?: string;
+  id?: string;
+}) => {
+  const reference = input.id ? ` (${input.id})` : '';
+  const source = input.source ? ` from ${input.source}` : '';
+  return `Overlapping leave request detected${reference}: ${input.leaveType} ${input.startDate} to ${input.endDate} is ${input.status}${source}. Check My Applications or ask HR to clear the existing record before applying again.`;
+};
+
+export const findConflictingLeaveApplication = async (input: {
+  employee: DleEmployeeDirectoryRow;
+  startDate: string;
+  endDate: string;
+  excludeRequestId?: string;
+}) => {
+  const keys = employeeLeaveLookupKeys(input.employee);
+  await readLeaveApplicationsForReconciliation({ syncEss: true });
+  const payload = await readLeaveManagementPayload('applications', 'Leave Administrator');
+
+  const hrisConflict = payload.applications.find((item) =>
+    recordMatchesEmployeeKeys(item.employeeId, keys)
+    && item.id !== input.excludeRequestId
+    && blockingLeaveStatuses.has(item.status)
+    && leaveDatesOverlap(input.startDate, input.endDate, item.startDate, item.endDate),
+  );
+  if (hrisConflict) {
+    return {
+      id: hrisConflict.id,
+      leaveType: hrisConflict.leaveType,
+      startDate: hrisConflict.startDate,
+      endDate: hrisConflict.endDate,
+      status: hrisConflict.status,
+      source: hrisConflict.sourceSystem || 'HRIS',
+      message: formatConflictMessage({
+        id: hrisConflict.id,
+        leaveType: hrisConflict.leaveType,
+        startDate: hrisConflict.startDate,
+        endDate: hrisConflict.endDate,
+        status: hrisConflict.status,
+        source: hrisConflict.sourceSystem || 'HRIS',
+      }),
+    };
+  }
+
+  const closedRequestIds = new Set(
+    payload.applications
+      .filter((item) => ['Cancelled', 'Rejected', 'Terminated', 'Withdrawn', 'Completed'].includes(item.status))
+      .map((item) => item.id),
+  );
+
+  const essConflict = (await readEssLeaveRequests()).find((item) =>
+    employeeRequestMatches(input.employee, item.employeeId)
+    && item.id !== input.excludeRequestId
+    && !closedRequestIds.has(item.id)
+    && blockingLeaveStatuses.has(item.status)
+    && item.startDate
+    && item.endDate
+    && leaveDatesOverlap(input.startDate, input.endDate, item.startDate, item.endDate),
+  );
+  if (essConflict) {
+    return {
+      id: essConflict.id,
+      leaveType: essConflict.leaveType || 'Leave',
+      startDate: essConflict.startDate || input.startDate,
+      endDate: essConflict.endDate || input.endDate,
+      status: essConflict.status,
+      source: 'ESS',
+      message: formatConflictMessage({
+        id: essConflict.id,
+        leaveType: essConflict.leaveType || 'Leave',
+        startDate: essConflict.startDate || input.startDate,
+        endDate: essConflict.endDate || input.endDate,
+        status: essConflict.status,
+        source: 'ESS',
+      }),
+    };
+  }
+
+  return null;
+};
+
 export const validateEssLeaveApplication = async (input: {
   employee: DleEmployeeDirectoryRow;
   leaveType: string;
@@ -383,6 +496,7 @@ export const validateEssLeaveApplication = async (input: {
   endDate: string;
   days: number;
   relieverEmployeeId: string;
+  excludeRequestId?: string;
 }) => {
   const { employee, leaveType, startDate, endDate, days, relieverEmployeeId } = input;
   const employeeSource = await readPayrollEmployees();
@@ -401,13 +515,20 @@ export const validateEssLeaveApplication = async (input: {
   }
 
   const payload = await readLeaveManagementPayload('applications', 'Leave Administrator');
-  const overlap = payload.applications.some((item) =>
-    item.employeeId === employee.employeeId
-    && !['Rejected', 'Cancelled', 'Terminated', 'Withdrawn', 'Completed'].includes(item.status)
-    && startDate <= item.endDate
-    && endDate >= item.startDate,
+  const conflict = await findConflictingLeaveApplication({
+    employee,
+    startDate,
+    endDate,
+    excludeRequestId: input.excludeRequestId,
+  });
+  if (conflict) return { ok: false as const, status: 409, message: conflict.message };
+
+  const balanceKeys = [...employeeLeaveLookupKeys(employee)];
+  const employeeBalance = payload.balances.find((balance) =>
+    balanceKeys.includes(compact(balance.employeeId).toUpperCase()) && balance.leaveType === leaveType,
+  ) || payload.balances.find((balance) =>
+    balanceKeys.includes(compact(balance.employeeId).toUpperCase()),
   );
-  if (overlap) return { ok: false as const, status: 409, message: 'Overlapping leave request detected.' };
 
   const validation = validateLeaveAction('apply', 'Employee', payload, {
     employeeId: employee.employeeId,
@@ -421,6 +542,7 @@ export const validateEssLeaveApplication = async (input: {
     usesCarryForward: /carry forward/i.test(leaveType),
     overlaps: false,
     blockedPeriod: false,
+    availableBalance: employeeBalance?.currentBalance,
   });
   if (!validation.ok) return { ok: false as const, status: validation.status, message: validation.message };
   return { ok: true as const };
@@ -476,7 +598,7 @@ export const upsertEssLeaveRequestToDb = async (item: EssLeaveRequest, employees
 MERGE [hris].[LeaveApplications] AS target
 USING (SELECT @Id AS [Id]) AS source
 ON target.[Id] = source.[Id]
-WHEN MATCHED THEN UPDATE SET
+WHEN MATCHED AND target.[StatusName] NOT IN (N'Cancelled', N'Rejected', N'Terminated', N'Completed', N'Withdrawn') THEN UPDATE SET
   [SourceSystem]=@SourceSystem,[EmployeeId]=@EmployeeId,[FullName]=@FullName,[Department]=@Department,[ManagerName]=@ManagerName,
   [Location]=@Location,[EmployeeCategory]=@EmployeeCategory,[LeaveType]=@LeaveType,[StartDate]=@StartDate,[EndDate]=@EndDate,
   [Days]=@Days,[StatusName]=@StatusName,[WorkflowStage]=@WorkflowStage,[ApprovalStatus]=@ApprovalStatus,
@@ -488,6 +610,66 @@ WHEN NOT MATCHED THEN INSERT
 VALUES
   (@Id,@SourceSystem,@EmployeeId,@FullName,@Department,@ManagerName,@Location,@EmployeeCategory,@LeaveType,@StartDate,@EndDate,
    @Days,@StatusName,@WorkflowStage,@ApprovalStatus,@PolicyComplianceStatus,@BalanceImpact,@AvailableBalance,@ActingOfficer,@SupportingDocuments,@ExceptionsJson);`);
+};
+
+export const cancelEssLeaveRequest = async (input: {
+  requestId: string;
+  actorName: string;
+  reason?: string;
+  employee?: DleEmployeeDirectoryRow;
+}) => {
+  const requests = await readAllEssRequests();
+  const found = requests.find((item) => item.id === input.requestId && /leave/i.test(item.category));
+  if (!found) {
+    const pool = await getDleEnterpriseDbPool();
+    if (!pool) throw new Error('Leave request not found.');
+    const existing = await pool.request()
+      .input('Id', sql.NVarChar(120), input.requestId)
+      .query(`SELECT TOP 1 [Id],[EmployeeId] FROM [hris].[LeaveApplications] WHERE [Id]=@Id;`);
+    if (!existing.recordset[0]) throw new Error('Leave request not found.');
+    if (input.employee) {
+      const employeeId = String(existing.recordset[0].EmployeeId || '');
+      if (!employeeRequestMatches(input.employee, employeeId)) {
+        throw new Error('You can only withdraw your own leave request.');
+      }
+    }
+  } else if (input.employee && !employeeRequestMatches(input.employee, found.employeeId)) {
+    throw new Error('You can only withdraw your own leave request.');
+  }
+
+  const now = new Date().toISOString();
+  if (found) {
+    await writeAllEssRequests(requests.map((item) => item.id === input.requestId
+      ? {
+          ...item,
+          status: 'Rejected',
+          updatedAt: now,
+          comments: [
+            ...(item.comments || []),
+            {
+              at: now,
+              actor: input.actorName,
+              comment: input.reason || 'Leave request withdrawn to allow re-application.',
+            },
+          ],
+        }
+      : item));
+  }
+
+  const pool = await getDleEnterpriseDbPool();
+  if (pool) {
+    await pool.request()
+      .input('Id', sql.NVarChar(120), input.requestId)
+      .query(`
+UPDATE [hris].[LeaveApplications]
+SET [StatusName]=N'Cancelled',
+    [WorkflowStage]=N'Closed',
+    [ApprovalStatus]=N'Cancelled',
+    [UpdatedAt]=SYSUTCDATETIME()
+WHERE [Id]=@Id;`);
+  }
+  invalidateEssPortalCache();
+  return { requestId: input.requestId, status: 'Cancelled' as const };
 };
 
 export const syncEssLeaveRequestById = async (requestId: string) => {

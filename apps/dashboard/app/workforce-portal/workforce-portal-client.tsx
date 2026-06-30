@@ -61,6 +61,10 @@ type EssRequest = {
   comments: Array<{ at: string; actor: string; comment: string }>;
   relieverEmployeeId?: string;
   relieverName?: string;
+  leaveType?: string;
+  startDate?: string;
+  endDate?: string;
+  days?: number;
   workflow?: Array<{ stage: string; owner: string; status: string; actedAt?: string | null; comment?: string | null }>;
 };
 type LoanProduct = { id: string; label: string; type: string; interestRate: number; maxPrincipalMultiple: number; maxTenorMonths: number };
@@ -808,7 +812,7 @@ const calcLeaveDays = (from: string, to: string, basis: string) => {
   return days;
 };
 
-function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction, saving, initialNow }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { requestId: string; leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string; attachmentNames: string[] }) => Promise<void>; onLeaveAction?: (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => Promise<void>; saving?: boolean; initialNow: string }) {
+function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction, onWithdrawLeave, saving, initialNow }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { requestId: string; leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string; attachmentNames: string[] }) => Promise<void>; onLeaveAction?: (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => Promise<void>; onWithdrawLeave?: (requestId: string) => Promise<void>; saving?: boolean; initialNow: string }) {
   const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
   const [leaveType, setLeaveType] = useState('Annual Leave');
   const [startDate, setStartDate] = useState('');
@@ -831,7 +835,22 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction,
   const balance = Number(selected?.balance || 0);
   const allowanceEligible = leaveType === 'Annual Leave' && days >= 10;
   const usesCarryForward = leaveType === 'Carry Forward Leave';
+  const pendingLeaveRequests = (payload?.requests || []).filter((item) =>
+    /leave/i.test(item.category)
+    && !['Approved', 'Rejected', 'Terminated', 'Closed'].includes(item.status),
+  );
+  const overlappingPendingRequest = pendingLeaveRequests.find((item) =>
+    item.startDate
+    && item.endDate
+    && startDate
+    && endDate
+    && startDate <= item.endDate
+    && endDate >= item.startDate,
+  );
   const validations = [
+    ...(overlappingPendingRequest
+      ? [`You already have a pending leave request (${overlappingPendingRequest.title}) with status ${overlappingPendingRequest.status}. Open My Applications or wait for approval before submitting again.`]
+      : []),
     ...(days > balance ? ['Selected days exceed available balance.'] : []),
     ...(leaveType === 'Annual Leave' && String(selected?.eligibilityStatus || '').toLowerCase().includes('locked') ? ['Annual Leave is available only after confirmation of appointment.'] : []),
     ...(usesCarryForward && endDate > `${new Date().getFullYear()}-03-31` ? ['Carry Forward Leave must be consumed on or before 31 March.'] : []),
@@ -884,6 +903,11 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction,
 
           {active === 'Apply Leave' && (
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
+          {pendingLeaveRequests.length ? (
+            <div className="xl:col-span-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+              You have {pendingLeaveRequests.length} pending leave request(s) awaiting approval. Check <button type="button" onClick={() => setActive('My Applications')} className="font-black text-amber-950 underline">My Applications</button> before submitting another request for the same dates.
+            </div>
+          ) : null}
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-black text-slate-950">Guided Leave Application</h2>
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -934,7 +958,29 @@ function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction,
         </section>
           )}
 
-      {active === 'My Applications' && <DataList rows={(payload?.requests.filter((item) => item.category === 'Leave').map((item) => ({ id: item.id, title: item.title, status: item.status, submittedAt: item.submittedAt, updatedAt: item.updatedAt, reliever: item.relieverName || 'Reliever not configured', workflow: item.workflow?.map((step) => `${step.stage}: ${step.status}`).join(' | ') || item.approvers.join(', ') })) || [])} titleKey="title" subtitleKeys={['status', 'submittedAt', 'updatedAt', 'reliever', 'workflow']} />}
+      {active === 'My Applications' && (
+        <section className="space-y-3">
+          {(payload?.requests.filter((item) => /leave/i.test(item.category)) || []).map((item) => (
+            <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-black text-slate-950">{item.title}</p>
+              <p className="mt-1 text-xs font-semibold text-slate-600">Status: {item.status} · Submitted: {new Date(item.submittedAt).toLocaleString('en-GB')}</p>
+              {['Line Manager Review', 'HR Review', 'Submitted', 'Draft'].includes(item.status) ? (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => onWithdrawLeave?.(item.id)}
+                  className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 disabled:opacity-50"
+                >
+                  Withdraw request
+                </button>
+              ) : null}
+            </div>
+          ))}
+          {!payload?.requests.filter((item) => /leave/i.test(item.category)).length ? (
+            <p className="text-sm font-semibold text-slate-500">No leave applications submitted yet.</p>
+          ) : null}
+        </section>
+      )}
       {active === 'Leave Calendar' && <section className="grid grid-cols-1 gap-4 xl:grid-cols-2"><InfoListLike title="Calendar" rows={payload?.leave.calendar || []} keys={['label', 'from', 'to', 'status', 'scope']} /><InfoListLike title="Notifications" rows={payload?.leave.notifications || []} keys={['title', 'channel', 'status']} /></section>}
       {active === 'Leave History' && <DataList rows={payload?.leave.history || []} titleKey="type" subtitleKeys={['from', 'to', 'days', 'approvalStage', 'allowanceStatus']} />}
       {active === 'Approvals' && (
@@ -1091,6 +1137,28 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
     }
   };
 
+  const withdrawLeaveRequest = async (requestId: string) => {
+    if (!payload) return;
+    setSaving(true);
+    setToast('');
+    setError('');
+    try {
+      const res = await fetch('/api/workforce-portal', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'withdraw-leave', requestId }),
+      });
+      const json = (await res.json()) as ApiResponse<{ message?: string }>;
+      if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Unable to withdraw leave request');
+      setToast(json.data?.message || 'Leave request withdrawn. You can submit again.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to withdraw leave request');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const submitLeaveApproval = async (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => {
     if (!payload) return;
     setSaving(true);
@@ -1192,7 +1260,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
       {tab !== 'dashboard' && tab !== 'profile' && tab !== 'payroll' && (
         <div className="space-y-4">
           {tab === 'leave' && widgets && (
-            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} onLeaveAction={submitLeaveApproval} saving={saving} initialNow={initialNow} />
+            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} onLeaveAction={submitLeaveApproval} onWithdrawLeave={withdrawLeaveRequest} saving={saving} initialNow={initialNow} />
           )}
 
           {tab === 'time' && widgets && (

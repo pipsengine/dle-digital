@@ -30,6 +30,7 @@ import {
   syncEssLeaveRequestById,
   transitionEssLeaveRequest,
   validateEssLeaveApplication,
+  cancelEssLeaveRequest,
   emailLeaveApproversForRequest,
   workflowDeadlineDays,
   writeAllEssRequests,
@@ -1212,6 +1213,22 @@ export async function POST(request: Request) {
     const employee = resolveEssEmployee(employeeSource.employees, session);
     if (!employee) return err(403, 'Employee identity is not linked to the logged-in account.');
 
+    if (action === 'withdraw-leave' || action === 'cancel-leave') {
+      const requestId = compact(body.requestId || body.id);
+      if (!requestId) return err(400, 'requestId is required');
+      try {
+        await cancelEssLeaveRequest({
+          requestId,
+          actorName: session.fullName || session.username,
+          reason: compact(body.comment) || 'Withdrawn from Employee Self-Service.',
+          employee,
+        });
+        return ok({ requestId, status: 'Cancelled', message: 'Leave request withdrawn. You can submit a new application.' });
+      } catch (error) {
+        return err(409, error instanceof Error ? error.message : 'Unable to withdraw leave request.');
+      }
+    }
+
     if (action === 'approve-leave' || action === 'reject-leave') {
       const requestId = compact(body.requestId || body.id);
       if (!requestId) return err(400, 'requestId is required');
@@ -1360,7 +1377,11 @@ export async function POST(request: Request) {
     if (isLeaveRequest) {
       await syncEssLeaveRequestById(requestItem.id);
       const baseUrl = new URL(request.url).origin;
-      await emailLeaveApproversForRequest({ request: requestItem, requester: employee, baseUrl });
+      try {
+        await emailLeaveApproversForRequest({ request: requestItem, requester: employee, baseUrl });
+      } catch (emailError) {
+        console.error('Leave approval email failed after submit', emailError);
+      }
       await notifyLeaveWorkflow(session, {
         requestId: requestItem.id,
         recipientEmployeeCode: employee.employeeCode || employee.employeeId,
