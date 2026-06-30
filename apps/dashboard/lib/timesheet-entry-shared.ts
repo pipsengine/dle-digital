@@ -368,6 +368,21 @@ export const hasDuplicateProjectCodes = (allocations: Array<{ projectCode: strin
   return false;
 };
 
+export const isTimesheetPaidLeaveLine = (line: {
+  projectAllocations?: Array<{ projectCode?: string; hours?: number }> | null;
+  idleAllocations?: Array<{ reasonName?: string; hours?: number }> | null;
+  remarks?: string | null;
+}) => {
+  const projectLeave = (line.projectAllocations || []).some((item) => item.projectCode?.toUpperCase() === 'LEAVE' && Number(item.hours || 0) > 0);
+  const idleLeave = (line.idleAllocations || []).some((item) => item.reasonName?.toLowerCase().includes('leave') && Number(item.hours || 0) > 0);
+  return projectLeave || idleLeave || String(line.remarks || '').toLowerCase().includes('approved paid leave');
+};
+
+export const normalizeEmployeeLineKey = (line: { employeeId?: string | null; employeeNo?: string | null }) => {
+  const value = String(line.employeeId || line.employeeNo || '').trim().toUpperCase();
+  return value.replace(/[^A-Z0-9]/g, '');
+};
+
 export type TimesheetLineValidationStatus = 'Valid' | 'Error' | 'Warning' | 'Incomplete';
 
 export type TimesheetLine = {
@@ -404,6 +419,44 @@ export type TimesheetLine = {
   remarks: string | null;
   validationStatus: TimesheetLineValidationStatus;
   validationMessage: string | null;
+};
+
+const linePersistenceScore = (line: TimesheetLine) =>
+  (line.clockIn ? 1_000 : 0)
+  + Number(line.totalHours || 0) * 10
+  + Number(line.attendanceDuration || 0)
+  + (line.validationStatus === 'Valid' ? 1 : 0);
+
+/** One employee row per timesheet header — keeps the richest row when duplicates are posted. */
+export const dedupeTimesheetLinesByEmployee = <T extends TimesheetLine>(lines: T[]) => {
+  const byEmployee = new Map<string, T>();
+  let duplicateCount = 0;
+  for (const line of lines) {
+    const key = normalizeEmployeeLineKey(line);
+    if (!key) continue;
+    const existing = byEmployee.get(key);
+    if (!existing) {
+      byEmployee.set(key, line);
+      continue;
+    }
+    duplicateCount += 1;
+    byEmployee.set(key, linePersistenceScore(line) >= linePersistenceScore(existing) ? line : existing);
+  }
+  return { lines: Array.from(byEmployee.values()), duplicateCount };
+};
+
+export const validateTimesheetLinesForPersist = (lines: TimesheetLine[]) => {
+  const issues: string[] = [];
+  const deduped = dedupeTimesheetLinesByEmployee(lines);
+  if (deduped.duplicateCount > 0) {
+    issues.push(`${deduped.duplicateCount} duplicate employee row(s) were collapsed before save.`);
+  }
+  for (const line of deduped.lines) {
+    if (hasDuplicateProjectCodes(line.projectAllocations || [])) {
+      issues.push(`${line.employeeName || line.employeeId}: duplicate project code on the same line.`);
+    }
+  }
+  return { ok: issues.length === 0, issues, lines: deduped.lines };
 };
 
 /** Sync line totals from allocation rows and refresh biometric duration from clock times. */

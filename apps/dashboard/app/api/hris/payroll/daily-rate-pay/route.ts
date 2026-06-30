@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { updateEmployeeDailyRatePayInDb } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { isDailyRatePayrollEmployee } from '@/lib/payroll-employee-classification';
-import { calculateTimesheetPeriod, isTimesheetPaidLeaveLine, normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
+import { calculateTimesheetPeriod, isPaidWorkDay, isTimesheetCountableForPayroll, isTimesheetPaidLeaveLine, normalizePaidWorkHours, readTimesheetData, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { calculateContractDayRateEarnings } from '@/lib/payroll-earnings-engine';
 import { activePayrollPeriod, payrollPeriodLabel } from '@/lib/payroll-periods';
@@ -115,13 +115,16 @@ const buildPayload = async (request: Request) => {
   for (const line of lines.filter((item) => periodHeaderIds.has(item.headerId))) {
     const lineKeys = new Set([line.employeeId, line.employeeNo, line.employeeName].map(normalizePayrollMatchKey).filter(Boolean));
     const header = headerById.get(line.headerId);
+    if (!header || !isTimesheetCountableForPayroll(header.status)) continue;
     const paidLeave = isTimesheetPaidLeaveLine(line);
+    const paidDay = isPaidWorkDay(line);
+    const payrollReady = header.status === 'HR_Acknowledged' || header.status === 'Locked';
     const payload = {
-      daysWorked: line.clockIn || paidLeave ? 1 : 0,
+      daysWorked: paidDay ? 1 : 0,
       attendanceHours: normalizePaidWorkHours(num(line.attendanceDuration)),
       bookedHours: normalizePaidWorkHours(num(line.totalHours)),
       idleHours: num(line.idleHours),
-      payrollReady: header?.status === 'HR_Acknowledged' || header?.status === 'Locked',
+      payrollReady: payrollReady && paidDay,
       updateAt: null,
       dateKey: header?.timesheetDate || null,
     };
@@ -153,8 +156,8 @@ const buildPayload = async (request: Request) => {
     const attendance = keys.map((key) => attendanceByKey.get(key)).find(Boolean) || { daysWorked: 0, attendanceHours: 0, bookedHours: 0, idleHours: 0, payrollReadyDays: 0, payrollReadyHours: 0, latestPayrollUpdate: null, source: 'none' as const, anomalyCount: 0, dateKeys: new Set<string>() };
     const { ratePerDay, ratePerHour, hoursPerDay } = derivedDailyRate(employee);
     const payMode = ratePerHour > 0 && ratePerDay <= 0 ? 'Hourly' : 'Daily';
-    const payableDays = Math.min(attendance.payrollReadyDays || attendance.daysWorked, maxPayableDays);
-    const payableHours = Math.min(attendance.payrollReadyHours || attendance.bookedHours || attendance.attendanceHours, maxPayableDays * hoursPerDay);
+    const payableDays = Math.min(attendance.daysWorked, maxPayableDays);
+    const payableHours = Math.min(attendance.bookedHours || attendance.attendanceHours, maxPayableDays * hoursPerDay);
     const dayRateEarnings = calculateContractDayRateEarnings({
       ratePerDay: ratePerDay || ratePerHour * hoursPerDay,
       weekdayDays: payMode === 'Hourly' ? payableHours / hoursPerDay : payableDays,

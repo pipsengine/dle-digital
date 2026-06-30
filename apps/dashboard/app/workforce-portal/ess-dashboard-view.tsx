@@ -15,6 +15,7 @@ import {
   Plane,
   Send,
   WalletCards,
+  ChevronRight,
 } from 'lucide-react';
 import {
   EssCard,
@@ -65,7 +66,16 @@ export type EssDashboardPayload = {
       trainingProgress: { percent: number };
     };
   };
-  notifications?: Array<{ id: string; title: string; type: string; status: string; createdAt: string }>;
+  notifications?: Array<{ id: string; title: string; type: string; status: string; createdAt: string; href?: string }>;
+  approvalQueue?: Array<{
+    id: string;
+    employee: string;
+    type: string;
+    days: number;
+    startDate: string;
+    endDate: string;
+    stage: string;
+  }>;
   birthdays?: Array<{ id: string; fullName: string; department: string; date: string }>;
   anniversaries?: Array<{ id: string; fullName: string; years: number; date: string }>;
   events?: Array<{ id: string; label: string; date: string; type: string }>;
@@ -100,7 +110,7 @@ const notificationIcon = (type: string) => {
 type EssDashboardViewProps = {
   payload: EssDashboardPayload | null;
   initialNow: string;
-  onNavigate: (tab: EssTab) => void;
+  onNavigate: (tab: EssTab, options?: { leaveSection?: string }) => void;
   showSecurityBanner: boolean;
   onDismissSecurity: () => void;
 };
@@ -109,6 +119,7 @@ export function EssDashboardView({ payload, initialNow, onNavigate, showSecurity
   const employee = payload?.employee;
   const widgets = payload?.widgets;
   const analytics = payload?.dashboardAnalytics;
+  const approvalCount = payload?.approvalQueue?.length || 0;
   const firstName = employee?.fullName?.split(' ').find((part) => part.length > 2 && !/^(mr|mrs|ms|dr)\.?$/i.test(part)) || employee?.fullName?.split(' ').pop() || 'there';
 
   const activityRows = analytics?.activityByCategory || [
@@ -165,12 +176,48 @@ export function EssDashboardView({ payload, initialNow, onNavigate, showSecurity
       </div>
 
       {widgets ? (
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${approvalCount > 0 ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
+          {approvalCount > 0 ? (
+            <button type="button" onClick={() => onNavigate('leave', { leaveSection: 'Approvals' })} className="text-left">
+              <EssKpiCard label="Pending Approvals" value={String(approvalCount)} subtitle="Leave requests awaiting your action" icon={ClipboardList} accent="#F59E0B" iconBg="#FFFBEB" />
+            </button>
+          ) : null}
           <EssKpiCard label="Leave Balance" value={`${widgets.leave.balance} days`} subtitle={`${widgets.leave.used}/${widgets.leave.entitlement} used`} icon={CalendarCheck} accent="#10B981" iconBg="#ECFDF5" />
           <EssKpiCard label="Attendance" value={`${widgets.attendance.monthRate}%`} subtitle={`${widgets.attendance.overtimeHours} overtime hours`} icon={Clock} accent="#2563EB" iconBg="#DBEAFE" />
           <EssKpiCard label="Monthly Pay" value={money(widgets.payroll.monthlyPay)} subtitle="Latest released net pay" icon={Banknote} accent="#7C3AED" iconBg="#F5F3FF" />
           <EssKpiCard label="Requests" value={String(widgets.requests.pending)} subtitle={`${widgets.requests.approved} approved, ${widgets.requests.total} total`} icon={ClipboardList} accent="#F59E0B" iconBg="#FFFBEB" />
         </section>
+      ) : null}
+
+      {(payload?.approvalQueue || []).length ? (
+        <EssCard className="p-5 sm:p-6">
+          <EssSectionHeader
+            title="Pending Approvals"
+            action={(
+              <button type="button" onClick={() => onNavigate('leave', { leaveSection: 'Approvals' })} className="text-[13px] font-semibold text-[#2563EB] hover:underline">
+                Open leave approvals
+              </button>
+            )}
+          />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {payload?.approvalQueue?.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onNavigate('leave', { leaveSection: 'Approvals' })}
+                className="rounded-[16px] border border-amber-200 bg-amber-50 p-4 text-left transition hover:border-amber-300 hover:bg-amber-100/70"
+              >
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700">{item.stage}</p>
+                <p className="mt-2 text-[16px] font-bold text-[#0F172A]">{item.employee}</p>
+                <p className="mt-1 text-[13px] font-semibold text-[#475569]">{item.type} · {item.days} day(s)</p>
+                <p className="mt-1 text-[12px] text-[#64748B]">{item.startDate} to {item.endDate}</p>
+                <p className="mt-3 inline-flex items-center gap-1 text-[12px] font-bold text-[#2563EB]">
+                  Review in ESS <ChevronRight className="h-3.5 w-3.5" />
+                </p>
+              </button>
+            ))}
+          </div>
+        </EssCard>
       ) : null}
 
       <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.2fr_0.8fr]">
@@ -226,7 +273,7 @@ export function EssDashboardView({ payload, initialNow, onNavigate, showSecurity
   );
 }
 
-export function EssRightPanel({ payload, onNavigate }: { payload: EssDashboardPayload | null; onNavigate: (tab: EssTab) => void }) {
+export function EssRightPanel({ payload, onNavigate }: { payload: EssDashboardPayload | null; onNavigate: (tab: EssTab, options?: { leaveSection?: string }) => void }) {
   const employee = payload?.employee;
 
   return (
@@ -266,7 +313,46 @@ export function EssRightPanel({ payload, onNavigate }: { payload: EssDashboardPa
         <div className="space-y-2">
           {(payload?.notifications || []).slice(0, 4).map((item) => {
             const { Icon, bg, color } = notificationIcon(item.type);
-            return <EssNotificationItem key={item.id} title={item.title} meta={`${item.type} · ${dateText(item.createdAt)}`} status={item.status} icon={Icon} iconBg={bg} iconColor={color} />;
+            const openItem = () => {
+              if (item.href) {
+                if (item.href.includes('tab=leave')) {
+                  const leaveSection = item.href.includes('leaveSection=Approvals') ? 'Approvals' : 'applications';
+                  onNavigate('leave', { leaveSection });
+                  return;
+                }
+                if (item.href.includes('tab=profile')) {
+                  onNavigate('profile');
+                  return;
+                }
+                if (item.href.includes('tab=payroll')) {
+                  onNavigate('payroll');
+                  return;
+                }
+              }
+              if (/leave|workflow|approval/i.test(`${item.type} ${item.title}`)) {
+                onNavigate('leave', { leaveSection: /approval required/i.test(item.title) ? 'Approvals' : 'applications' });
+                return;
+              }
+              if (/profile/i.test(item.title)) {
+                onNavigate('profile');
+                return;
+              }
+              if (/payroll|payslip/i.test(`${item.type} ${item.title}`)) {
+                onNavigate('payroll');
+              }
+            };
+            return (
+              <EssNotificationItem
+                key={item.id}
+                title={item.title}
+                meta={`${item.type} · ${dateText(item.createdAt)}`}
+                status={item.status}
+                icon={Icon}
+                iconBg={bg}
+                iconColor={color}
+                onClick={openItem}
+              />
+            );
           })}
         </div>
         <div className="mt-3 space-y-1.5">

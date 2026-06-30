@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, Bell, CheckCheck, ChevronRight, Mail, RefreshCcw, ShieldCheck, X } from 'lucide-react';
+import { isLiveNotificationId, normalizeEssNotificationHref } from '@/lib/ess-notification-routing';
 
 type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
 type NotificationKind = 'Notification' | 'Message' | 'Approval' | 'Security' | 'Workflow';
@@ -24,6 +26,12 @@ type NotificationPayload = {
 };
 type ApiResponse = { status: 'success' | 'error'; data?: NotificationPayload; error?: string };
 
+const DISMISS_KEY = 'ess-dismissed-notifications';
+const READ_KEY = 'ess-read-notifications';
+
+const essFetchHeaders = (essMode: boolean): Record<string, string> =>
+  essMode ? { 'x-ess-context': 'workforce-portal' } : {};
+
 const severityClass: Record<NotificationSeverity, string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800',
   success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
@@ -44,32 +52,101 @@ const timeText = (value: string) => {
   return date.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
-export function NotificationCenter({ scope = 'notifications', className = '' }: { scope?: 'notifications' | 'messages' | 'approvals' | 'all'; className?: string }) {
+const readDismissedIds = () => {
+  if (typeof window === 'undefined') return new Set<string>();
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(DISMISS_KEY) || '[]') as string[];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set<string>();
+  }
+};
+
+const writeDismissedIds = (ids: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(DISMISS_KEY, JSON.stringify([...ids]));
+};
+
+const readReadIds = () => {
+  if (typeof window === 'undefined') return new Set<string>();
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(READ_KEY) || '[]') as string[];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set<string>();
+  }
+};
+
+const writeReadIds = (ids: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(READ_KEY, JSON.stringify([...ids]));
+};
+
+export function NotificationCenter({
+  scope = 'notifications',
+  className = '',
+  essMode = false,
+}: {
+  scope?: 'notifications' | 'messages' | 'approvals' | 'all';
+  className?: string;
+  essMode?: boolean;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [payload, setPayload] = useState<NotificationPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
+  const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const inEssPortal = essMode || pathname.startsWith('/workforce-portal');
 
   const isMessages = scope === 'messages';
   const Icon = isMessages ? Mail : Bell;
   const title = isMessages ? 'Messages' : scope === 'approvals' ? 'Approvals' : 'Notifications';
+
+  const resolveHref = useCallback((href?: string) => {
+    if (!href) return undefined;
+    return inEssPortal ? normalizeEssNotificationHref(href) : href;
+  }, [inEssPortal]);
+
+  const visibleItems = useMemo(() => {
+    const items = (payload?.notifications || [])
+      .filter((item) => !dismissedIds.has(item.id))
+      .map((item) => ({
+        ...item,
+        href: resolveHref(item.href),
+        status: readIds.has(item.id) ? 'Read' as const : item.status,
+      }));
+    return items;
+  }, [payload?.notifications, dismissedIds, readIds, resolveHref]);
+
   const unread = useMemo(() => {
-    if (!payload) return 0;
-    if (scope === 'messages') return payload.counts.messages;
-    if (scope === 'approvals') return payload.counts.approvals;
-    if (scope === 'all') return payload.counts.unread;
-    return payload.counts.notifications;
-  }, [payload, scope]);
+    if (!visibleItems.length) return 0;
+    if (scope === 'messages') return visibleItems.filter((item) => item.kind === 'Message' && item.status === 'Unread').length;
+    if (scope === 'approvals') return visibleItems.filter((item) => ['Approval', 'Workflow'].includes(item.kind) && item.status === 'Unread').length;
+    if (scope === 'all') return visibleItems.filter((item) => item.status === 'Unread').length;
+    return visibleItems.filter((item) => item.kind !== 'Message' && item.status === 'Unread').length;
+  }, [visibleItems, scope]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/notifications?scope=${scope}`, { cache: 'no-store' });
+      const res = await fetch(`/api/notifications?scope=${scope}`, { cache: 'no-store', headers: essFetchHeaders(inEssPortal) });
       const json = (await res.json()) as ApiResponse;
       if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || `Unable to load ${title.toLowerCase()}`);
-      setPayload(json.data);
+      const dismissed = readDismissedIds();
+      const read = readReadIds();
+      setDismissedIds(dismissed);
+      setReadIds(read);
+      setPayload({
+        ...json.data,
+        notifications: json.data.notifications
+          .filter((item) => !dismissed.has(item.id))
+          .map((item) => ({ ...item, status: read.has(item.id) ? 'Read' as const : item.status })),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : `Unable to load ${title.toLowerCase()}`);
     } finally {
@@ -101,22 +178,80 @@ export function NotificationCenter({ scope = 'notifications', className = '' }: 
     };
   }, []);
 
-  const update = async (action: 'mark-read' | 'archive' | 'mark-all-read', ids: string[] = []) => {
-    setError('');
-    const res = await fetch('/api/notifications', {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, ids }),
-    });
-    const json = (await res.json()) as ApiResponse;
-    if (!res.ok || json.status !== 'success' || !json.data) {
-      setError(json.error || 'Notification update failed');
-      return;
-    }
-    setPayload(json.data);
+  const markReadLocally = (ids: string[]) => {
+    const next = new Set(readIds);
+    ids.forEach((id) => next.add(id));
+    setReadIds(next);
+    writeReadIds(next);
+    setPayload((current) => current
+      ? {
+          ...current,
+          notifications: current.notifications.map((item) => ids.includes(item.id) ? { ...item, status: 'Read' as const } : item),
+        }
+      : current);
   };
 
-  const items = payload?.notifications || [];
+  const dismissLocally = (ids: string[]) => {
+    const next = new Set(dismissedIds);
+    ids.forEach((id) => next.add(id));
+    setDismissedIds(next);
+    writeDismissedIds(next);
+    setPayload((current) => current
+      ? {
+          ...current,
+          notifications: current.notifications.filter((item) => !ids.includes(item.id)),
+        }
+      : current);
+  };
+
+  const persistUpdate = async (action: 'mark-read' | 'archive' | 'mark-all-read', persistedIds: string[] = []) => {
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...essFetchHeaders(inEssPortal) },
+        body: JSON.stringify({ action, ids: action === 'mark-all-read' ? [] : persistedIds }),
+      });
+      const json = (await res.json()) as ApiResponse;
+      if (!res.ok || json.status !== 'success' || !json.data) throw new Error(json.error || 'Notification update failed');
+      const dismissed = readDismissedIds();
+      const read = readReadIds();
+      setPayload({
+        ...json.data,
+        notifications: json.data.notifications
+          .filter((item) => !dismissed.has(item.id))
+          .map((item) => ({ ...item, status: read.has(item.id) ? 'Read' as const : item.status })),
+      });
+    } catch {
+      // Keep optimistic UI state when persistence is unavailable (for example IIS EPERM).
+    }
+  };
+
+  const update = (action: 'mark-read' | 'archive' | 'mark-all-read', ids: string[] = []) => {
+    setError('');
+    const liveIds = ids.filter((id) => isLiveNotificationId(id));
+    const persistedIds = ids.filter((id) => !isLiveNotificationId(id));
+
+    if (action === 'archive' && ids.length) dismissLocally(ids);
+    if (action === 'mark-read' && ids.length) markReadLocally(ids);
+    if (action === 'mark-all-read') {
+      const allIds = (payload?.notifications || []).map((item) => item.id);
+      markReadLocally(allIds);
+    }
+
+    if (action === 'mark-all-read' || persistedIds.length) {
+      void persistUpdate(action, persistedIds);
+    }
+  };
+
+  const openNotification = (item: NotificationRecord) => {
+    if (item.href) {
+      setOpen(false);
+      router.push(item.href);
+    }
+    if (item.status === 'Unread') {
+      update('mark-read', [item.id]);
+    }
+  };
 
   return (
     <div ref={panelRef} className={`relative ${className}`}>
@@ -146,7 +281,7 @@ export function NotificationCenter({ scope = 'notifications', className = '' }: 
               <button type="button" onClick={() => void load()} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50" aria-label="Refresh notifications">
                 <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
-              <button type="button" onClick={() => void update('mark-all-read')} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50" aria-label="Mark all as read">
+              <button type="button" onClick={() => update('mark-all-read')} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50" aria-label="Mark all as read">
                 <CheckCheck className="h-4 w-4" />
               </button>
               <button type="button" onClick={() => setOpen(false)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50" aria-label="Close notifications">
@@ -158,8 +293,20 @@ export function NotificationCenter({ scope = 'notifications', className = '' }: 
           {error ? <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-xs font-bold text-red-800">{error}</div> : null}
 
           <div className="max-h-[62vh] space-y-2 overflow-y-auto p-2">
-            {items.map((item) => (
-              <article key={item.id} className={`group rounded-lg border p-3 ${item.status === 'Unread' ? severityClass[item.severity] : 'border-slate-200 bg-white text-slate-700'}`}>
+            {visibleItems.map((item) => (
+              <article
+                key={item.id}
+                className={`group rounded-lg border p-3 ${item.status === 'Unread' ? severityClass[item.severity] : 'border-slate-200 bg-white text-slate-700'} ${item.href ? 'cursor-pointer hover:shadow-sm' : ''}`}
+                onClick={() => item.href && openNotification(item)}
+                onKeyDown={(event) => {
+                  if (item.href && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    openNotification(item);
+                  }
+                }}
+                role={item.href ? 'button' : undefined}
+                tabIndex={item.href ? 0 : undefined}
+              >
                 <div className="flex items-start gap-3">
                   <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.status === 'Unread' ? dotClass[item.severity] : 'bg-slate-300'}`} />
                   <div className="min-w-0 flex-1">
@@ -176,17 +323,41 @@ export function NotificationCenter({ scope = 'notifications', className = '' }: 
                       </span>
                       <div className="flex items-center gap-1">
                         {item.status === 'Unread' ? (
-                          <button type="button" onClick={() => void update('mark-read', [item.id])} className="rounded-md px-2 py-1 text-[11px] font-black text-slate-600 hover:bg-white" aria-label={`Mark ${item.title} as read`}>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              update('mark-read', [item.id]);
+                            }}
+                            className="rounded-md px-2 py-1 text-[11px] font-black text-slate-600 hover:bg-white"
+                            aria-label={`Mark ${item.title} as read`}
+                          >
                             Read
                           </button>
                         ) : null}
-                        <button type="button" onClick={() => void update('archive', [item.id])} className="rounded-md p-1.5 text-slate-500 hover:bg-white" aria-label={`Archive ${item.title}`}>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            update('archive', [item.id]);
+                          }}
+                          className="rounded-md p-1.5 text-slate-500 hover:bg-white"
+                          aria-label={`Archive ${item.title}`}
+                        >
                           <Archive className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
                     {item.href ? (
-                      <Link onClick={() => void update('mark-read', [item.id])} href={item.href} className="mt-3 inline-flex items-center gap-1 text-xs font-black text-blue-700 hover:text-blue-900">
+                      <Link
+                        href={item.href}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          openNotification(item);
+                        }}
+                        className="mt-3 inline-flex items-center gap-1 text-xs font-black text-blue-700 hover:text-blue-900"
+                      >
                         Open item <ChevronRight className="h-3.5 w-3.5" />
                       </Link>
                     ) : null}
@@ -194,13 +365,13 @@ export function NotificationCenter({ scope = 'notifications', className = '' }: 
                 </div>
               </article>
             ))}
-            {!loading && !items.length ? (
+            {!loading && !visibleItems.length ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-8 text-center">
                 <p className="text-sm font-black text-slate-800">No {title.toLowerCase()}</p>
                 <p className="mt-1 text-xs font-semibold text-slate-500">New workflow alerts and enterprise communications will appear here.</p>
               </div>
             ) : null}
-            {loading && !items.length ? <div className="px-4 py-8 text-center text-sm font-bold text-slate-500">Loading {title.toLowerCase()}...</div> : null}
+            {loading && !visibleItems.length ? <div className="px-4 py-8 text-center text-sm font-bold text-slate-500">Loading {title.toLowerCase()}...</div> : null}
           </div>
         </div>
       ) : null}

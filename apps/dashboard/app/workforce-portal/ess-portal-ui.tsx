@@ -238,6 +238,7 @@ export function EssNotificationItem({
   icon: Icon,
   iconBg,
   iconColor,
+  onClick,
 }: {
   title: string;
   meta: string;
@@ -245,10 +246,16 @@ export function EssNotificationItem({
   icon: LucideIcon;
   iconBg: string;
   iconColor: string;
+  onClick?: () => void;
 }) {
   const unread = status.toLowerCase() === 'unread';
+  const Wrapper = onClick ? 'button' : 'div';
   return (
-    <div className="flex items-start gap-3 rounded-[16px] border border-[#E9EEF5] bg-[#FAFBFD] p-3 transition-colors hover:bg-white">
+    <Wrapper
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`flex w-full items-start gap-3 rounded-[16px] border border-[#E9EEF5] bg-[#FAFBFD] p-3 text-left transition-colors hover:bg-white ${onClick ? 'cursor-pointer' : ''}`}
+    >
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px]" style={{ backgroundColor: iconBg, color: iconColor }}>
         <Icon className="h-4 w-4" strokeWidth={2} />
       </span>
@@ -263,7 +270,7 @@ export function EssNotificationItem({
       >
         {status}
       </span>
-    </div>
+    </Wrapper>
   );
 }
 

@@ -1,6 +1,12 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { SessionPayload } from '@/lib/auth/session';
+import {
+  essSeedNotificationHrefs,
+  isEssSelfServiceSession,
+  normalizeEssNotificationHref,
+  resolveNotificationHref,
+} from '@/lib/ess-notification-routing';
 
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
 export type NotificationStatus = 'Unread' | 'Read' | 'Archived';
@@ -104,10 +110,11 @@ const ownerMatches = (item: EnterpriseNotification, session: SessionPayload) => 
 };
 
 const seededNotifications = (session: SessionPayload): EnterpriseNotification[] => {
+  const essMode = isEssSelfServiceSession(session);
   const base = {
     recipientUserId: session.sub,
     recipientUsername: session.username,
-    recipientEmployeeCode: session.employeeCode,
+    recipientEmployeeCode: session.employeeCode || session.employeeId,
     recipientRoles: session.roles,
     channels: ['In-App', 'Email'] as Array<'In-App' | 'Email'>,
   };
@@ -122,7 +129,7 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
       body: 'Your current enterprise access is protected by RBAC, session controls, and activity logging.',
       severity: 'success',
       status: 'Unread',
-      href: '/hris/administration/audit-trail',
+      href: essMode ? '/workforce-portal?tab=security' : '/hris/administration/audit-trail',
       createdAt: nowIso(),
       actor: 'Security Service',
       metadata: { persistentSeed: true },
@@ -136,7 +143,7 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
       body: 'Keep contact details, emergency contacts, bank details, and supporting documents up to date.',
       severity: 'info',
       status: 'Unread',
-      href: session.permissions.includes('ess.view') ? '/workforce-portal?tab=profile' : '/hris/employees/employee-profile',
+      href: essMode ? '/workforce-portal?tab=profile' : '/hris/employees/employee-profile',
       createdAt: nowIso(),
       actor: 'HRIS',
       metadata: { persistentSeed: true },
@@ -150,7 +157,7 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
       body: 'Payslips, deductions, pension contributions, allowances, and loan deductions can be reviewed from payroll self-service.',
       severity: 'info',
       status: 'Unread',
-      href: session.permissions.includes('ess.view') ? '/workforce-portal?tab=payroll' : '/hris/payroll/payslip-generation',
+      href: essMode ? '/workforce-portal?tab=payroll' : '/hris/payroll/payslip-generation',
       createdAt: nowIso(),
       actor: 'Payroll Service',
       metadata: { persistentSeed: true },
@@ -164,7 +171,7 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
       body: 'Company announcements, policy updates, request comments, and service messages will appear here.',
       severity: 'info',
       status: 'Unread',
-      href: session.permissions.includes('ess.view') ? '/workforce-portal?tab=communication' : '/hris/announcements',
+      href: essMode ? '/workforce-portal?tab=communication' : '/hris/announcements',
       createdAt: nowIso(),
       actor: 'Human Capital',
       metadata: { persistentSeed: true },
@@ -182,7 +189,7 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
         body: 'Review pending HR, payroll, leave, workforce, and employee service requests according to your role permissions.',
         severity: 'warning',
         status: 'Unread',
-        href: '/hris/administration/approval-workflow',
+        href: essMode ? '/workforce-portal?tab=leave&leaveSection=Approvals' : '/hris/administration/approval-workflow',
         createdAt: nowIso(),
         actor: 'Workflow Engine',
         metadata: { persistentSeed: true },
@@ -196,7 +203,7 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
         body: 'Timesheet periods, project approvals, attendance exceptions, and payroll-ready hours are available for review.',
         severity: 'warning',
         status: 'Unread',
-        href: '/hris/time-and-logs/timesheet-approval',
+        href: essMode ? '/workforce-portal?tab=time' : '/hris/time-and-logs/timesheet-approval',
         createdAt: nowIso(),
         actor: 'Workforce Management',
         metadata: { persistentSeed: true },
@@ -207,16 +214,33 @@ const seededNotifications = (session: SessionPayload): EnterpriseNotification[] 
   return seeds;
 };
 
-const ensureSeeded = async (session: SessionPayload) => {
-  const store = await readStore();
-  const existingIds = new Set(store.notifications.map((item) => item.id));
-  const missing = seededNotifications(session).filter((item) => !existingIds.has(item.id));
-  if (missing.length) {
-    store.notifications.push(...missing);
-    await writeStore(store);
-  }
+const migrateSeededHrefs = (session: SessionPayload, store: NotificationFile) => {
+  if (!isEssSelfServiceSession(session)) return store;
+  const hrefs = essSeedNotificationHrefs(session);
+  store.notifications = store.notifications.map((item) => {
+    const nextHref = hrefs[item.id] || normalizeEssNotificationHref(item.href);
+    if (!nextHref || nextHref === item.href) return item;
+    return { ...item, href: nextHref };
+  });
   return store;
 };
+
+const ensureSeeded = async (session: SessionPayload) => {
+  let store = await readStore();
+  const existingIds = new Set(store.notifications.map((item) => item.id));
+  const missing = seededNotifications(session).filter((item) => !existingIds.has(item.id));
+  if (missing.length) store.notifications.push(...missing);
+  const before = JSON.stringify(store.notifications);
+  store = migrateSeededHrefs(session, store);
+  if (missing.length || JSON.stringify(store.notifications) !== before) await writeStore(store);
+  return store;
+};
+
+const withResolvedHrefs = (session: SessionPayload, items: EnterpriseNotification[]) =>
+  items.map((item) => ({
+    ...item,
+    href: resolveNotificationHref(session, item.href),
+  }));
 
 const byScope = (scope: NotificationScope) => (item: EnterpriseNotification) => {
   if (scope === 'messages') return item.kind === 'Message';
@@ -234,7 +258,7 @@ export const listEnterpriseNotifications = async (session: SessionPayload, scope
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const allVisible = store.notifications.filter((item) => ownerMatches(item, session) && item.status !== 'Archived');
   return {
-    notifications: items,
+    notifications: withResolvedHrefs(session, items),
     counts: {
       unread: allVisible.filter((item) => item.status === 'Unread').length,
       notifications: allVisible.filter((item) => item.kind !== 'Message' && item.status === 'Unread').length,
@@ -255,7 +279,10 @@ export const updateEnterpriseNotifications = async (session: SessionPayload, ids
     if (action === 'archive') return { ...item, status: 'Archived', archivedAt: at, readAt: item.readAt || at };
     return { ...item, status: 'Read', readAt: item.readAt || at };
   });
-  await writeStore(store);
+  const wrote = await writeStore(store);
+  if (!wrote) {
+    return listEnterpriseNotifications(session);
+  }
   return listEnterpriseNotifications(session);
 };
 

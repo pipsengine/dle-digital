@@ -84,7 +84,7 @@ const QUICK_ACCESS = [
 
 type EssPortalShellProps = {
   tab: EssTab;
-  onTabChange: (tab: EssTab) => void;
+  onTabChange: (tab: EssTab, options?: { leaveSection?: string }) => void;
   locale: string;
   onLocaleChange: (locale: string) => void;
   loading: boolean;
@@ -216,8 +216,8 @@ export function EssPortalShell({
                 </option>
               ))}
             </select>
-            <NotificationCenter scope="notifications" />
-            <NotificationCenter scope="messages" />
+            <NotificationCenter scope="notifications" essMode />
+            <NotificationCenter scope="messages" essMode />
             <EnterpriseUserProfile
               context="ess"
               name={employee?.fullName}

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { permissionsForRequest } from '@/lib/auth/request-permissions';
 import { getUiPermissions, hasAccTimesheetStageApprove, permissionsFromRequest, resolveAccessContext } from '@/lib/hris-access';
 import {
+  aggregateEmployeeAttendanceForHeaders,
   advanceProjectTimesheetApproval,
   advanceTimesheetWorkflow,
   buildProjectTimesheetApprovals,
@@ -549,30 +550,10 @@ const processPayrollBatch = async (headerIds: string[], actor: string, post: boo
     if (!sampleHeader) continue;
     const existingPeriodUpdate = updates.find((update) => update.periodId === periodId);
     const mergedHeaderIds = Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), ...periodHeaderIds]));
-    const totals = new Map<string, {
-      employeeId: string;
-      employeeName: string;
-      daysWorked: number;
-      attendanceHours: number;
-      bookedHours: number;
-      idleHours: number;
-    }>();
-
-    for (const line of lines.filter((item) => mergedHeaderIds.includes(item.headerId))) {
-      const current = totals.get(line.employeeId) || {
-        employeeId: line.employeeId,
-        employeeName: line.employeeName,
-        daysWorked: 0,
-        attendanceHours: 0,
-        bookedHours: 0,
-        idleHours: 0,
-      };
-      current.daysWorked += line.clockIn ? 1 : 0;
-      current.attendanceHours = round(current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration));
-      current.bookedHours = round(current.bookedHours + normalizePaidWorkHours(line.totalHours));
-      current.idleHours = round(current.idleHours + line.idleHours);
-      totals.set(line.employeeId, current);
-    }
+    const totals = aggregateEmployeeAttendanceForHeaders(headers, lines, {
+      headerIds: mergedHeaderIds,
+      payrollReadyOnly: false,
+    });
 
     const period = resolvePeriod(periods, sampleHeader.timesheetDate);
     updates = [
@@ -583,7 +564,14 @@ const processPayrollBatch = async (headerIds: string[], actor: string, post: boo
         acknowledgedAt: new Date().toISOString(),
         acknowledgedBy: actor,
         headerIds: mergedHeaderIds,
-        employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+        employeeAttendance: Array.from(totals.values()).map((item) => ({
+          employeeId: item.employeeId,
+          employeeName: item.employeeName,
+          daysWorked: item.daysWorked,
+          attendanceHours: item.attendanceHours,
+          bookedHours: item.bookedHours,
+          idleHours: item.idleHours,
+        })).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
       },
       ...updates.filter((update) => update.periodId !== periodId),
     ];

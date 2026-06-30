@@ -280,6 +280,7 @@ const deliverLeaveEmployeeNotification = async (input: {
   requestId: string;
   kind?: 'Approval' | 'Workflow' | 'Notification';
   sendEmail?: () => Promise<unknown>;
+  href?: string;
 }) => {
   await createEnterpriseNotification(input.session, {
     kind: input.kind || 'Workflow',
@@ -288,7 +289,7 @@ const deliverLeaveEmployeeNotification = async (input: {
     body: input.body,
     severity: input.severity || 'info',
     recipientEmployeeCode: employeeNotificationCode(input.employee),
-    href: '/workforce-portal?tab=leave',
+    href: input.href || '/workforce-portal?tab=leave',
     channels: ['In-App', 'Email'],
     metadata: { requestId: input.requestId },
     actor: input.session.fullName,
@@ -315,6 +316,7 @@ export const notifyLeaveFinalApproval = async (input: {
       body: requesterBody,
       severity: 'success',
       requestId: input.request.id,
+      href: '/workforce-portal?tab=leave&leaveSection=applications',
       sendEmail: () => sendLeaveWorkflowEmail({
         event: 'approved',
         request: input.request,
@@ -367,6 +369,7 @@ export const notifyLeaveRejected = async (input: {
       severity: 'warning',
       requestId: input.request.id,
       kind: 'Approval',
+      href: '/workforce-portal?tab=leave&leaveSection=applications',
       sendEmail: () => sendLeaveWorkflowEmail({
         event: 'rejected',
         request: input.request,
@@ -396,6 +399,7 @@ export const notifyLeaveAwaitingHrApproval = async (input: {
       body: `${requestLabel} has been approved by the line manager and is awaiting HR Manager / Head approval.`,
       severity: 'info',
       requestId: input.request.id,
+      href: '/workforce-portal?tab=leave&leaveSection=applications',
       sendEmail: () => sendLeaveWorkflowEmail({
         event: 'manager-approved',
         request: input.request,
@@ -414,7 +418,7 @@ export const notifyLeaveAwaitingHrApproval = async (input: {
       body: `${requestLabel} has been approved by the line manager and is awaiting HR Manager / Head approval.`,
       severity: 'warning',
       recipientRoles: ['HR Manager', 'HR Head', 'HR Officer', 'Leave Administrator'],
-      href: '/workforce-portal?tab=leave',
+      href: '/workforce-portal?tab=leave&leaveSection=Approvals',
       channels: ['In-App', 'Email'],
       metadata: { requestId: input.request.id },
       actor: input.actorName,
@@ -554,6 +558,7 @@ export const notifyLineManagerLeaveSubmitted = async (input: {
       severity: 'warning',
       requestId: input.request.id,
       kind: 'Approval',
+      href: '/workforce-portal?tab=leave&leaveSection=Approvals',
       sendEmail: () => sendLeaveApprovalRequestEmail({
         request: input.request,
         requester: input.requester,
@@ -714,7 +719,7 @@ export const listLiveLeaveApprovalNotifications = async (input: {
     body: `${item.type} · ${item.startDate} to ${item.endDate} · ${item.days} day(s) · ${item.stage}`,
     severity: 'warning' as const,
     status: 'Unread' as const,
-    href: '/workforce-portal?tab=leave',
+    href: '/workforce-portal?tab=leave&leaveSection=Approvals',
     createdAt: new Date().toISOString(),
     actor: 'Leave Workflow',
     channels: ['In-App'] as Array<'In-App' | 'Email' | 'SMS'>,

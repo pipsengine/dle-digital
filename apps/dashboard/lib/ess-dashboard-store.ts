@@ -3,6 +3,7 @@ import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { getDleEnterpriseDbPool } from '@/lib/dle-enterprise-db';
 import { readEmployeeAttendanceMonthSummary } from '@/lib/biometric-live-attendance-store';
 import { listEnterpriseNotifications } from '@/lib/enterprise-notifications-store';
+import { normalizeEssNotificationHref } from '@/lib/ess-notification-routing';
 import type { LeaveApplicationRecord, LeaveBalanceRecord, LeaveStatus, WorkflowStage } from '@/lib/leave-management-store';
 import type { SessionPayload } from '@/lib/auth/session';
 import { resolveActivePayrollPeriod } from '@/lib/payroll-periods';
@@ -203,7 +204,7 @@ export type EssDashboardContext = {
   };
   attendance: Awaited<ReturnType<typeof readEmployeeAttendanceMonthSummary>>;
   documents: Array<{ id: string; title: string; category: string; version: string; status: string }>;
-  notifications: Array<{ id: string; title: string; type: string; status: string; createdAt: string }>;
+  notifications: Array<{ id: string; title: string; type: string; status: string; createdAt: string; href?: string }>;
   birthdays: Array<{ id: string; fullName: string; department: string; date: string }>;
   anniversaries: Array<{ id: string; fullName: string; years: number; date: string }>;
   events: Array<{ id: string; label: string; date: string; type: string }>;
@@ -322,11 +323,19 @@ export async function buildEssDashboardContext(input: {
     type: item.module || item.kind,
     status: item.status,
     createdAt: item.createdAt,
+    href: normalizeEssNotificationHref(item.href),
   }));
   const pendingLeave = leaveSnapshot.applications.find((item) => ['Submitted', 'Under Review'].includes(item.status));
   const derivedNotifications = [
     ...(pendingLeave
-      ? [{ id: `leave-pending-${pendingLeave.id}`, title: `${pendingLeave.leaveType} awaiting ${pendingLeave.stage} review`, type: 'Workflow', status: 'Unread', createdAt: pendingLeave.updatedAt }]
+      ? [{
+          id: `leave-pending-${pendingLeave.id}`,
+          title: `${pendingLeave.leaveType} awaiting ${pendingLeave.stage} review`,
+          type: 'Workflow',
+          status: 'Unread',
+          createdAt: pendingLeave.updatedAt,
+          href: '/workforce-portal?tab=leave&leaveSection=applications',
+        }]
       : []),
     ...notificationsFromDb,
   ];

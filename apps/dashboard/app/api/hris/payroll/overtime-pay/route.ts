@@ -182,7 +182,17 @@ const buildPayload = async (request: Request) => {
       issues: string[];
     }>;
 
-  const payableRecords = records.filter((record) => record.payableHours > 0);
+  const overtimeByEmployeeDate = new Map<string, (typeof records)[number]>();
+  for (const record of records) {
+    const key = `${normalizePayrollMatchKey(record.employeeId)}::${record.date}`;
+    const existing = overtimeByEmployeeDate.get(key);
+    if (!existing || record.payableHours > existing.payableHours) {
+      overtimeByEmployeeDate.set(key, record);
+    }
+  }
+  const dedupedRecords = Array.from(overtimeByEmployeeDate.values());
+
+  const payableRecords = dedupedRecords.filter((record) => record.payableHours > 0);
   const payableTotals = payableRecords.reduce(
     (sum, record) => ({
       payableHours: sum.payableHours + record.payableHours,
@@ -192,7 +202,7 @@ const buildPayload = async (request: Request) => {
     }),
     { payableHours: 0, weekdayHours: 0, specialDayHours: 0, grossPay: 0 }
   );
-  const readiness = records.reduce(
+  const readiness = dedupedRecords.reduce(
     (sum, record) => ({
       ready: sum.ready + (record.status === 'Ready' ? 1 : 0),
       review: sum.review + (record.status === 'Review' ? 1 : 0),
@@ -204,8 +214,8 @@ const buildPayload = async (request: Request) => {
   );
 
   const visibleRecords = perms.canViewMoney
-    ? records
-    : records.map((record) => ({ ...record, hourlyRate: null, grossPay: null }));
+    ? dedupedRecords
+    : dedupedRecords.map((record) => ({ ...record, hourlyRate: null, grossPay: null }));
 
   return {
     generatedAt: new Date().toISOString(),
@@ -223,7 +233,7 @@ const buildPayload = async (request: Request) => {
       specialDayBasis: 'Hours worked for that day',
     },
     summary: {
-      records: records.length,
+      records: dedupedRecords.length,
       payableRecords: payableRecords.length,
       payableHours: round2(payableTotals.payableHours),
       weekdayHours: round2(payableTotals.weekdayHours),

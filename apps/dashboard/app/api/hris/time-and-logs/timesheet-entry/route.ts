@@ -65,7 +65,7 @@ import {
   resolveOvertimeBookingOptions,
 } from '@/lib/timesheet-overtime-config';
 import { applyTimesheetLineDefaults } from '@/lib/timesheet-line-defaults';
-import { normalizeIdleAllocations, normalizeProjectAllocations, reconcileTimesheetLineHours, resolvePrimaryProjectCode, type TimesheetDayContext } from '@/lib/timesheet-entry-shared';
+import { normalizeIdleAllocations, normalizeProjectAllocations, reconcileTimesheetLineHours, resolvePrimaryProjectCode, validateTimesheetLinesForPersist, type TimesheetDayContext } from '@/lib/timesheet-entry-shared';
 
 const dayContextFor = (date: string, holidayDates: string[]): TimesheetDayContext => ({ date, holidayDates });
 
@@ -1539,7 +1539,12 @@ export async function PATCH(request: Request) {
         header.status = normalizeTimesheetStatus(header.status);
       }
 
-      await writeTimesheetHeaderLines(header, normalizedLines);
+      const persistCheck = validateTimesheetLinesForPersist(normalizedLines);
+      if (persistCheck.issues.some((issue) => /duplicate project code/i.test(issue))) {
+        return err(400, persistCheck.issues.join(' '));
+      }
+
+      await writeTimesheetHeaderLines(header, persistCheck.lines);
       return ok(await buildPayload(request, header.timesheetDate, header.supervisorId, header.workCenterName, locationName, mode));
     }
 

@@ -5,7 +5,6 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { NotificationCenter } from '@/components/layout/notification-center';
 import EmployeeAvatar from '@/components/hris/EmployeeAvatar';
 import { EnterpriseUserProfile } from '@hris/components/layout/enterprise-user-profile';
 import { EssDashboardView, EssRightPanel } from './ess-dashboard-view';
@@ -109,7 +108,8 @@ type Payload = {
     loans: { applications: number; outstanding: number };
   };
   announcements: Array<{ id: string; title: string; channel: string; publishedAt: string; priority: string }>;
-  notifications: Array<{ id: string; title: string; type: string; status: string; createdAt: string }>;
+  notifications: Array<{ id: string; title: string; type: string; status: string; createdAt: string; href?: string }>;
+  approvalQueue?: Array<{ id: string; employee: string; type: string; days: number; startDate: string; endDate: string; stage: string }>;
   birthdays: Array<{ id: string; fullName: string; department: string; date: string }>;
   anniversaries: Array<{ id: string; fullName: string; years: number; date: string }>;
   events: Array<{ id: string; label: string; date: string; type: string }>;
@@ -812,8 +812,22 @@ const calcLeaveDays = (from: string, to: string, basis: string) => {
   return days;
 };
 
-function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction, onWithdrawLeave, saving, initialNow }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { requestId: string; leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string; attachmentNames: string[] }) => Promise<void>; onLeaveAction?: (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => Promise<void>; onWithdrawLeave?: (requestId: string) => Promise<void>; saving?: boolean; initialNow: string }) {
-  const [active, setActive] = useState<LeaveTab>('Leave Dashboard');
+const leaveSectionToTab = (value?: string | null): LeaveTab | null => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'approvals') return 'Approvals';
+  if (normalized === 'applications' || normalized === 'my applications') return 'My Applications';
+  if (normalized === 'apply' || normalized === 'apply leave') return 'Apply Leave';
+  return leaveTabs.find((tab) => tab.toLowerCase() === normalized) || null;
+};
+
+function EssLeaveWorkspace({ payload, employee, onLeaveSubmitted, onLeaveAction, onWithdrawLeave, saving, initialNow, initialSection }: { payload: Payload | null; employee?: Payload['employee']; onLeaveSubmitted?: (input: { requestId: string; leaveType: string; startDate: string; endDate: string; days: number; reason: string; relieverEmployeeId: string; relieverName: string; handover: string; attachmentNames: string[] }) => Promise<void>; onLeaveAction?: (input: { requestId: string; action: 'approve' | 'reject'; comment?: string }) => Promise<void>; onWithdrawLeave?: (requestId: string) => Promise<void>; saving?: boolean; initialNow: string; initialSection?: string | null }) {
+  const [active, setActive] = useState<LeaveTab>(() => leaveSectionToTab(initialSection) || 'Leave Dashboard');
+
+  useEffect(() => {
+    const next = leaveSectionToTab(initialSection);
+    if (next) setActive(next);
+  }, [initialSection]);
   const [leaveType, setLeaveType] = useState('Annual Leave');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -1040,12 +1054,16 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [showSecurityBanner, setShowSecurityBanner] = useState(true);
+  const [leaveSection, setLeaveSection] = useState<string | null>(null);
 
-  const navigateTab = (next: Tab) => {
+  const navigateTab = (next: Tab, options?: { leaveSection?: string }) => {
     setTab(next);
+    setLeaveSection(options?.leaveSection || null);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('tab', next);
+      if (options?.leaveSection) url.searchParams.set('leaveSection', options.leaveSection);
+      else url.searchParams.delete('leaveSection');
       window.history.replaceState(null, '', url.toString());
     }
   };
@@ -1075,7 +1093,9 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
 
   useEffect(() => {
     const requestedTab = searchParams.get('tab') as Tab | null;
+    const requestedLeaveSection = searchParams.get('leaveSection');
     if (requestedTab && navItems.some((item) => item.id === requestedTab)) setTab(requestedTab);
+    setLeaveSection(requestedLeaveSection);
   }, [searchParams]);
 
   const submitRequest = async () => {
@@ -1260,7 +1280,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
       {tab !== 'dashboard' && tab !== 'profile' && tab !== 'payroll' && (
         <div className="space-y-4">
           {tab === 'leave' && widgets && (
-            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} onLeaveAction={submitLeaveApproval} onWithdrawLeave={withdrawLeaveRequest} saving={saving} initialNow={initialNow} />
+            <EssLeaveWorkspace payload={payload} employee={employee} onLeaveSubmitted={submitLeaveApplication} onLeaveAction={submitLeaveApproval} onWithdrawLeave={withdrawLeaveRequest} saving={saving} initialNow={initialNow} initialSection={leaveSection} />
           )}
 
           {tab === 'time' && widgets && (

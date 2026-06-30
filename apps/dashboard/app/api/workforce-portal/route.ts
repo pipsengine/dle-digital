@@ -1003,12 +1003,22 @@ export async function GET(request: Request) {
           type: 'Workflow',
           status: 'Unread',
           createdAt: new Date().toISOString(),
+          href: '/workforce-portal?tab=leave&leaveSection=Approvals',
         })),
         ...essContext.notifications.filter((item) => !String(item.id).startsWith('live-leave-')),
         ...(latestReleasedPayroll && !essContext.notifications.some((item) => /payslip/i.test(item.title))
-          ? [{ id: 'ntf-payslip', title: `${latestReleasedPayroll.periodLabel || periodTitle(latestReleasedPayroll.period)} payslip is ready for download`, type: 'Payroll', status: 'Read', createdAt: dateAdd(-1) }]
+          ? [{ id: 'ntf-payslip', title: `${latestReleasedPayroll.periodLabel || periodTitle(latestReleasedPayroll.period)} payslip is ready for download`, type: 'Payroll', status: 'Read', createdAt: dateAdd(-1), href: '/workforce-portal?tab=payroll' }]
           : []),
       ],
+      approvalQueue: leaveApprovals.map((item) => ({
+        id: String(item.id),
+        employee: String(item.employee),
+        type: String(item.type),
+        days: Number(item.days || 0),
+        startDate: String(item.startDate || ''),
+        endDate: String(item.endDate || ''),
+        stage: String(item.stage || 'Approval'),
+      })),
       birthdays: essContext.birthdays,
       anniversaries: essContext.anniversaries,
       events: essContext.events,

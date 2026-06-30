@@ -11,13 +11,15 @@ import { readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
 import {
   DAILY_BREAK_HOURS,
   STANDARD_TIMESHEET_HOURS,
+  dedupeTimesheetLinesByEmployee,
+  isTimesheetPaidLeaveLine,
   normalizeIdleAllocations,
   normalizeProjectAllocations,
   type TimesheetLine,
 } from '@/lib/timesheet-entry-shared';
 
 export type { TimesheetLine } from '@/lib/timesheet-entry-shared';
-export { DAILY_BREAK_HOURS, STANDARD_TIMESHEET_HOURS } from '@/lib/timesheet-entry-shared';
+export { DAILY_BREAK_HOURS, STANDARD_TIMESHEET_HOURS, isTimesheetPaidLeaveLine } from '@/lib/timesheet-entry-shared';
 
 export type TimesheetStatus =
   | 'Draft'
@@ -943,6 +945,48 @@ CREATE TABLE [hris].[TimesheetPayrollUpdateEmployees] (
   CONSTRAINT [PK_TimesheetPayrollUpdateEmployees] PRIMARY KEY ([PayrollUpdateId], [EmployeeId]),
   CONSTRAINT [FK_TimesheetPayrollUpdateEmployees_Update] FOREIGN KEY ([PayrollUpdateId]) REFERENCES [hris].[TimesheetPayrollUpdates]([Id]) ON DELETE CASCADE
 );
+`);
+    await pool.request().query(`
+;WITH rankedPayrollUpdates AS (
+  SELECT [Id], [PeriodId], ROW_NUMBER() OVER (PARTITION BY [PeriodId] ORDER BY [AcknowledgedAt] DESC, [Id] DESC) AS rn
+  FROM [hris].[TimesheetPayrollUpdates]
+)
+DELETE e
+FROM [hris].[TimesheetPayrollUpdateEmployees] e
+INNER JOIN rankedPayrollUpdates u ON u.[Id] = e.[PayrollUpdateId]
+WHERE u.rn > 1;
+DELETE h
+FROM [hris].[TimesheetPayrollUpdateHeaders] h
+INNER JOIN rankedPayrollUpdates u ON u.[Id] = h.[PayrollUpdateId]
+WHERE u.rn > 1;
+DELETE u
+FROM [hris].[TimesheetPayrollUpdates] u
+INNER JOIN rankedPayrollUpdates r ON r.[Id] = u.[Id]
+WHERE r.rn > 1;
+
+;WITH rankedLines AS (
+  SELECT
+    l.[Id],
+    ROW_NUMBER() OVER (
+      PARTITION BY l.[HeaderId], UPPER(LTRIM(RTRIM(l.[EmployeeId])))
+      ORDER BY CASE WHEN NULLIF(LTRIM(RTRIM(l.[ClockIn])), '') IS NULL THEN 0 ELSE 1 END DESC,
+               ISNULL(l.[TotalHours], 0) DESC,
+               ISNULL(l.[AttendanceDuration], 0) DESC,
+               l.[Id] DESC
+    ) AS rn
+  FROM [hris].[TimesheetLines] l
+  WHERE NULLIF(LTRIM(RTRIM(l.[EmployeeId])), '') IS NOT NULL
+)
+DELETE l
+FROM [hris].[TimesheetLines] l
+INNER JOIN rankedLines r ON r.[Id] = l.[Id]
+WHERE r.rn > 1;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TimesheetPayrollUpdates_PeriodId' AND object_id = OBJECT_ID(N'[hris].[TimesheetPayrollUpdates]'))
+  CREATE UNIQUE INDEX [UX_TimesheetPayrollUpdates_PeriodId] ON [hris].[TimesheetPayrollUpdates]([PeriodId]);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_TimesheetLines_HeaderEmployee' AND object_id = OBJECT_ID(N'[hris].[TimesheetLines]'))
+  CREATE UNIQUE INDEX [UX_TimesheetLines_HeaderEmployee] ON [hris].[TimesheetLines]([HeaderId], [EmployeeId]);
 `);
     for (const name of officialTimesheetWorkCenters) {
       const code = workCenterCode(name);
@@ -1884,6 +1928,7 @@ export async function readTimesheetApprovalData(options?: { softFail?: boolean }
 export async function writeTimesheetData(data: { headers: TimesheetHeader[]; lines: TimesheetLine[] }) {
   const pool = await db();
   const tx = new sql.Transaction(pool);
+  const safeLines = dedupeTimesheetLinesByEmployee(data.lines).lines;
   await tx.begin();
   try {
     for (const header of data.headers) {
@@ -1926,7 +1971,7 @@ VALUES (@Id,@PeriodId,@TimesheetDate,@SupervisorId,@SupervisorName,@WorkCenterId
       }
     }
     const lineIdsByHeader = new Map<string, Set<string>>();
-    for (const line of data.lines) {
+    for (const line of safeLines) {
       const ids = lineIdsByHeader.get(line.headerId) || new Set<string>();
       ids.add(line.id);
       lineIdsByHeader.set(line.headerId, ids);
@@ -1943,7 +1988,7 @@ VALUES (@Id,@PeriodId,@TimesheetDate,@SupervisorId,@SupervisorName,@WorkCenterId
           .query(`DELETE FROM [hris].[TimesheetLines] WHERE [Id]=@Id`);
       }
     }
-    for (const line of data.lines) {
+    for (const line of safeLines) {
       await new sql.Request(tx)
         .input('Id', sql.NVarChar(220), line.id)
         .input('HeaderId', sql.NVarChar(160), line.headerId)
@@ -2003,6 +2048,7 @@ VALUES (@Id,@HeaderId,@EmployeeId,@EmployeeNo,@EmployeeName,@BiometricId,@Attend
 export async function writeTimesheetHeaderLines(header: TimesheetHeader, lines: TimesheetLine[]) {
   const pool = await db();
   const tx = new sql.Transaction(pool);
+  const safeLines = dedupeTimesheetLinesByEmployee(lines).lines;
   await tx.begin();
   try {
     await new sql.Request(tx)
@@ -2044,7 +2090,7 @@ VALUES (@Id,@PeriodId,@TimesheetDate,@SupervisorId,@SupervisorName,@WorkCenterId
         .query(`INSERT INTO [hris].[TimesheetWorkflowEvents] ([HeaderId],[Stage],[Decision],[Actor],[ActedAt],[Comment]) VALUES (@HeaderId,@Stage,@Decision,@Actor,@ActedAt,@Comment)`);
     }
 
-    const currentIds = new Set(lines.map((line) => line.id));
+    const currentIds = new Set(safeLines.map((line) => line.id));
     const existing = await new sql.Request(tx)
       .input('HeaderId', sql.NVarChar(160), header.id)
       .query(`SELECT [Id] FROM [hris].[TimesheetLines] WHERE [HeaderId]=@HeaderId`);
@@ -2055,7 +2101,7 @@ VALUES (@Id,@PeriodId,@TimesheetDate,@SupervisorId,@SupervisorName,@WorkCenterId
         .query(`DELETE FROM [hris].[TimesheetLines] WHERE [Id]=@Id`);
     }
 
-    for (const line of lines) {
+    for (const line of safeLines) {
       await new sql.Request(tx)
         .input('Id', sql.NVarChar(220), line.id)
         .input('HeaderId', sql.NVarChar(160), line.headerId)
@@ -2146,7 +2192,14 @@ export async function readTimesheetPayrollUpdates(): Promise<TimesheetPayrollUpd
     pool.request().query(`SELECT * FROM [hris].[TimesheetPayrollUpdateHeaders]`),
     pool.request().query(`SELECT * FROM [hris].[TimesheetPayrollUpdateEmployees] ORDER BY [EmployeeName]`),
   ]);
-  return updatesResult.recordset.map((row) => ({
+  const seenPeriods = new Set<string>();
+  const latestRows = updatesResult.recordset.filter((row) => {
+    const periodId = String(row.PeriodId || '');
+    if (!periodId || seenPeriods.has(periodId)) return false;
+    seenPeriods.add(periodId);
+    return true;
+  });
+  return latestRows.map((row) => ({
     id: row.Id,
     periodId: row.PeriodId,
     periodName: row.PeriodName,
@@ -2164,61 +2217,153 @@ export async function readTimesheetPayrollUpdates(): Promise<TimesheetPayrollUpd
   }));
 }
 
-const synthesizeTimesheetHoursForPeriod = async (periodId: string) => {
-  const { headers, lines } = await readTimesheetData();
-  const periodHeaders = headers.filter((header) => header.periodId === periodId && normalizeTimesheetStatus(header.status) === 'HR_Acknowledged');
-  const headerIds = new Set(periodHeaders.map((header) => header.id));
-  const headerById = new Map(periodHeaders.map((header) => [header.id, header]));
-  const totals = new Map<string, { daysWorked: number; bookedHours: number }>();
+export type EmployeeAttendanceAggregate = {
+  employeeId: string;
+  employeeName: string;
+  daysWorked: number;
+  attendanceHours: number;
+  bookedHours: number;
+  idleHours: number;
+  skippedDuplicateDays: number;
+};
+
+const payrollReadyHeaderStatuses = new Set<TimesheetStatus>(['HR_Acknowledged', 'Locked', 'Approved']);
+
+export const isTimesheetCountableForPayroll = (status: TimesheetStatus | string) =>
+  !['Rejected', 'Returned'].includes(normalizeTimesheetStatus(status as TimesheetStatus));
+
+/** A payable day is recorded when attendance exists, hours are booked, or paid leave applies. */
+export const isPaidWorkDay = (line: Pick<TimesheetLine, 'clockIn' | 'totalHours' | 'usedHours' | 'projectAllocations' | 'idleAllocations' | 'remarks'>) => {
+  const hasClock = Boolean(String(line.clockIn || '').trim());
+  const hasBooked = normalizePaidWorkHours(Number(line.totalHours || 0)) > 0 || normalizePaidWorkHours(Number(line.usedHours || 0)) > 0;
+  return hasClock || hasBooked || isTimesheetPaidLeaveLine(line);
+};
+
+/** Canonical payroll attendance totals — one paid day per employee per calendar date across all headers. */
+export const aggregateEmployeeAttendanceForHeaders = (
+  headers: TimesheetHeader[],
+  lines: TimesheetLine[],
+  options?: { headerIds?: string[]; payrollReadyOnly?: boolean },
+) => {
+  const headerIds = new Set(options?.headerIds || headers.map((header) => header.id));
+  const headerById = new Map(headers.filter((header) => headerIds.has(header.id)).map((header) => [header.id, header]));
+  const totals = new Map<string, EmployeeAttendanceAggregate>();
   const countedEmployeeDates = new Set<string>();
 
-  for (const line of lines.filter((item) => headerIds.has(item.headerId))) {
+  for (const line of lines) {
+    if (!headerIds.has(line.headerId)) continue;
     const header = headerById.get(line.headerId);
-    const dateKey = header?.timesheetDate || '';
-    const paidDay = Boolean(line.clockIn || isTimesheetPaidLeaveLine(line));
+    if (!header) continue;
+    const status = normalizeTimesheetStatus(header.status);
+    if (!isTimesheetCountableForPayroll(status)) continue;
+    if (options?.payrollReadyOnly && !payrollReadyHeaderStatuses.has(status)) continue;
+
+    const dateKey = header.timesheetDate || '';
+    const paidDay = isPaidWorkDay(line);
     const employeeDateKey = `${line.employeeId}::${dateKey}`;
-    if (paidDay && dateKey && countedEmployeeDates.has(employeeDateKey)) continue;
+    if (paidDay && dateKey && countedEmployeeDates.has(employeeDateKey)) {
+      const current = totals.get(line.employeeId);
+      if (current) current.skippedDuplicateDays += 1;
+      continue;
+    }
     if (paidDay && dateKey) countedEmployeeDates.add(employeeDateKey);
-    const current = totals.get(line.employeeId) || { daysWorked: 0, bookedHours: 0 };
+
+    const current = totals.get(line.employeeId) || {
+      employeeId: line.employeeId,
+      employeeName: line.employeeName,
+      daysWorked: 0,
+      attendanceHours: 0,
+      bookedHours: 0,
+      idleHours: 0,
+      skippedDuplicateDays: 0,
+    };
     current.daysWorked += paidDay ? 1 : 0;
+    current.attendanceHours = Math.round((current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration)) * 10) / 10;
     current.bookedHours = Math.round((current.bookedHours + normalizePaidWorkHours(line.totalHours)) * 10) / 10;
+    current.idleHours = Math.round((current.idleHours + line.idleHours) * 10) / 10;
     totals.set(line.employeeId, current);
   }
+
   return totals;
 };
 
-/** Approved timesheet hours for payroll — uses payroll updates when present, otherwise HR-acknowledged entries. */
+const synthesizeTimesheetHoursForPeriod = async (periodId: string) => {
+  const { headers, lines } = await readTimesheetData();
+  const periodHeaders = headers.filter((header) => header.periodId === periodId && isTimesheetCountableForPayroll(header.status));
+  const totals = aggregateEmployeeAttendanceForHeaders(headers, lines, {
+    headerIds: periodHeaders.map((header) => header.id),
+    payrollReadyOnly: false,
+  });
+  const mapped = new Map<string, { daysWorked: number; bookedHours: number; employeeNo?: string }>();
+  for (const line of lines) {
+    if (!periodHeaders.some((header) => header.id === line.headerId)) continue;
+    const aggregate = totals.get(line.employeeId);
+    if (!aggregate || mapped.has(line.employeeId)) continue;
+    mapped.set(line.employeeId, {
+      daysWorked: aggregate.daysWorked,
+      bookedHours: aggregate.bookedHours,
+      employeeNo: line.employeeNo,
+    });
+  }
+  return mapped;
+};
+
+const registerTimesheetHours = (
+  map: Map<string, { daysWorked: number; bookedHours: number }>,
+  employeeId: string,
+  employeeNo: string | undefined,
+  data: { daysWorked: number; bookedHours: number },
+) => {
+  const compact = (value: unknown) => String(value || '').trim();
+  const keys = [employeeId, employeeNo, normalizePayrollMatchKey(employeeId), normalizePayrollMatchKey(employeeNo)]
+    .map((key) => compact(key))
+    .filter(Boolean);
+  keys.forEach((key) => map.set(key, data));
+};
+
+const hasTimesheetHours = (map: Map<string, { daysWorked: number; bookedHours: number }>, employeeId: string, employeeNo?: string) => {
+  const compact = (value: unknown) => String(value || '').trim();
+  const keys = [employeeId, employeeNo, normalizePayrollMatchKey(employeeId), normalizePayrollMatchKey(employeeNo)]
+    .map((key) => compact(key))
+    .filter(Boolean);
+  return keys.some((key) => {
+    const entry = map.get(key);
+    return Boolean(entry && (entry.daysWorked > 0 || entry.bookedHours > 0));
+  });
+};
+
+/** Approved timesheet hours for payroll — locked/HR-acknowledged lines first, payroll snapshots only as fallback. */
 export async function buildTimesheetHoursMapForPayrollPeriod(period: string) {
   const map = new Map<string, { daysWorked: number; bookedHours: number }>();
   const periodId = period.startsWith('per-') ? period : `per-${period}`;
   const periodToken = period.replace(/^per-/, '');
 
-  const addEmployee = (employeeId: string, data: { daysWorked: number; bookedHours: number }) => {
-    const keys = [employeeId, normalizePayrollMatchKey(employeeId)].filter(Boolean);
-    keys.forEach((key) => map.set(key, data));
-  };
+  try {
+    const synthesized = await synthesizeTimesheetHoursForPeriod(periodId);
+    synthesized.forEach((data, employeeId) => {
+      registerTimesheetHours(map, employeeId, data.employeeNo, {
+        daysWorked: data.daysWorked,
+        bookedHours: data.bookedHours,
+      });
+    });
+  } catch (error) {
+    console.warn('[Timesheet] Unable to synthesize payroll hours from entries:', error instanceof Error ? error.message : error);
+  }
 
   try {
     const updates = await readTimesheetPayrollUpdates();
     const update = updates.find((item) => item.periodId === periodId || String(item.periodName || '').includes(periodToken));
     if (update) {
       for (const employee of update.employeeAttendance) {
-        addEmployee(employee.employeeId, {
+        if (hasTimesheetHours(map, employee.employeeId)) continue;
+        registerTimesheetHours(map, employee.employeeId, undefined, {
           daysWorked: Number(employee.daysWorked || 0),
           bookedHours: Number(employee.bookedHours || 0),
         });
       }
-      if (map.size > 0) return map;
     }
   } catch (error) {
     console.warn('[Timesheet] Payroll update feed unavailable:', error instanceof Error ? error.message : error);
-  }
-
-  try {
-    const synthesized = await synthesizeTimesheetHoursForPeriod(periodId);
-    synthesized.forEach((data, employeeId) => addEmployee(employeeId, data));
-  } catch (error) {
-    console.warn('[Timesheet] Unable to synthesize payroll hours from entries:', error instanceof Error ? error.message : error);
   }
 
   return map;
@@ -2229,6 +2374,22 @@ export async function writeTimesheetPayrollUpdates(updates: TimesheetPayrollUpda
   const tx = new sql.Transaction(pool);
   await tx.begin();
   try {
+    const periodIds = Array.from(new Set(updates.map((update) => update.periodId).filter(Boolean)));
+    for (const periodId of periodIds) {
+      await new sql.Request(tx)
+        .input('PeriodId', sql.NVarChar(40), periodId)
+        .query(`
+          DELETE e
+          FROM [hris].[TimesheetPayrollUpdateEmployees] e
+          INNER JOIN [hris].[TimesheetPayrollUpdates] u ON u.[Id] = e.[PayrollUpdateId]
+          WHERE u.[PeriodId] = @PeriodId;
+          DELETE h
+          FROM [hris].[TimesheetPayrollUpdateHeaders] h
+          INNER JOIN [hris].[TimesheetPayrollUpdates] u ON u.[Id] = h.[PayrollUpdateId]
+          WHERE u.[PeriodId] = @PeriodId;
+          DELETE FROM [hris].[TimesheetPayrollUpdates] WHERE [PeriodId] = @PeriodId;
+        `);
+    }
     for (const update of updates) {
       await new sql.Request(tx)
         .input('Id', sql.NVarChar(160), update.id)
@@ -2293,30 +2454,10 @@ export async function refreshTimesheetPayrollUpdatesForHeaders(headerIds: string
     const sampleHeader = headers.find((item) => item.id === mergedHeaderIds[0]);
     if (!sampleHeader) continue;
     const existingPeriodUpdate = updates.find((update) => update.periodId === periodId);
-    const totals = new Map<string, {
-      employeeId: string;
-      employeeName: string;
-      daysWorked: number;
-      attendanceHours: number;
-      bookedHours: number;
-      idleHours: number;
-    }>();
-
-    for (const line of lines.filter((item) => mergedHeaderIds.includes(item.headerId))) {
-      const current = totals.get(line.employeeId) || {
-        employeeId: line.employeeId,
-        employeeName: line.employeeName,
-        daysWorked: 0,
-        attendanceHours: 0,
-        bookedHours: 0,
-        idleHours: 0,
-      };
-      current.daysWorked += line.clockIn ? 1 : 0;
-      current.attendanceHours = payrollRound(current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration));
-      current.bookedHours = payrollRound(current.bookedHours + normalizePaidWorkHours(line.totalHours));
-      current.idleHours = payrollRound(current.idleHours + line.idleHours);
-      totals.set(line.employeeId, current);
-    }
+    const totals = aggregateEmployeeAttendanceForHeaders(headers, lines, {
+      headerIds: mergedHeaderIds,
+      payrollReadyOnly: false,
+    });
 
     const period =
       periods.find((item) => item.id === periodId) ||
@@ -2331,7 +2472,14 @@ export async function refreshTimesheetPayrollUpdatesForHeaders(headerIds: string
         acknowledgedAt: new Date().toISOString(),
         acknowledgedBy: actor,
         headerIds: mergedHeaderIds,
-        employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+        employeeAttendance: Array.from(totals.values()).map((item) => ({
+          employeeId: item.employeeId,
+          employeeName: item.employeeName,
+          daysWorked: item.daysWorked,
+          attendanceHours: item.attendanceHours,
+          bookedHours: item.bookedHours,
+          idleHours: item.idleHours,
+        })).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
       },
       ...updates.filter((update) => update.periodId !== periodId),
     ];
@@ -2636,33 +2784,11 @@ export const isTimesheetPayrollReadyStatus = (status: TimesheetStatus) =>
 const createPayrollUpdateForPeriod = async (periodId: string, actor: string): Promise<TimesheetPayrollUpdate> => {
   const { headers, lines } = await readTimesheetData();
   const period = await readTimesheetPeriod(new Date(`${periodId.replace('per-', '')}-15T00:00:00`));
-  const periodHeaders = headers.filter((header) => header.periodId === periodId && normalizeTimesheetStatus(header.status) === 'HR_Acknowledged');
-  const headerIds = new Set(periodHeaders.map((header) => header.id));
-  const headerById = new Map(periodHeaders.map((header) => [header.id, header]));
-  const totals = new Map<string, TimesheetPayrollUpdate['employeeAttendance'][number]>();
-  const countedEmployeeDates = new Set<string>();
-
-  for (const line of lines.filter((item) => headerIds.has(item.headerId))) {
-    const header = headerById.get(line.headerId);
-    const dateKey = header?.timesheetDate || '';
-    const paidDay = Boolean(line.clockIn || isPaidLeaveLine(line));
-    const employeeDateKey = `${line.employeeId}::${dateKey}`;
-    if (paidDay && dateKey && countedEmployeeDates.has(employeeDateKey)) continue;
-    if (paidDay && dateKey) countedEmployeeDates.add(employeeDateKey);
-    const current = totals.get(line.employeeId) || {
-      employeeId: line.employeeId,
-      employeeName: line.employeeName,
-      daysWorked: 0,
-      attendanceHours: 0,
-      bookedHours: 0,
-      idleHours: 0,
-    };
-    current.daysWorked += paidDay ? 1 : 0;
-    current.attendanceHours = Math.round((current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration)) * 10) / 10;
-    current.bookedHours = Math.round((current.bookedHours + normalizePaidWorkHours(line.totalHours)) * 10) / 10;
-    current.idleHours = Math.round((current.idleHours + line.idleHours) * 10) / 10;
-    totals.set(line.employeeId, current);
-  }
+  const periodHeaders = headers.filter((header) => header.periodId === periodId && isTimesheetCountableForPayroll(header.status));
+  const totals = aggregateEmployeeAttendanceForHeaders(headers, lines, {
+    headerIds: periodHeaders.map((header) => header.id),
+    payrollReadyOnly: false,
+  });
 
   const update: TimesheetPayrollUpdate = {
     id: `payroll-${periodId}-${Date.now()}`,
@@ -2670,8 +2796,15 @@ const createPayrollUpdateForPeriod = async (periodId: string, actor: string): Pr
     periodName: period.name,
     acknowledgedAt: new Date().toISOString(),
     acknowledgedBy: actor,
-    headerIds: Array.from(headerIds),
-    employeeAttendance: Array.from(totals.values()).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+    headerIds: periodHeaders.map((header) => header.id),
+    employeeAttendance: Array.from(totals.values()).map((item) => ({
+      employeeId: item.employeeId,
+      employeeName: item.employeeName,
+      daysWorked: item.daysWorked,
+      attendanceHours: item.attendanceHours,
+      bookedHours: item.bookedHours,
+      idleHours: item.idleHours,
+    })).sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
   };
   const updates = await readTimesheetPayrollUpdates();
   await writeTimesheetPayrollUpdates([update, ...updates.filter((item) => item.periodId !== periodId)]);
@@ -2893,14 +3026,6 @@ const withSyncTimeout = async <T,>(promise: Promise<T>, ms: number, message: str
 
 const cleanSupervisorLabel = (value: string) =>
   value.replace(/\s+\(\d+\)\s*$/, '').trim();
-
-const isPaidLeaveLine = (line: Pick<TimesheetLine, 'projectAllocations' | 'idleAllocations' | 'remarks'>) => {
-  const projectLeave = (line.projectAllocations || []).some((item) => item.projectCode?.toUpperCase() === 'LEAVE' && Number(item.hours || 0) > 0);
-  const idleLeave = (line.idleAllocations || []).some((item) => item.reasonName?.toLowerCase().includes('leave') && Number(item.hours || 0) > 0);
-  return projectLeave || idleLeave || String(line.remarks || '').toLowerCase().includes('approved paid leave');
-};
-
-export const isTimesheetPaidLeaveLine = isPaidLeaveLine;
 
 const supervisorScopeKeys = (value: string | null | undefined) => {
   const raw = String(value || '').trim().toUpperCase();

@@ -10,7 +10,13 @@ import {
 import { buildEssEmployeeLookupKeys } from '@/lib/ess-dashboard-store';
 import { listLiveLeaveApprovalNotifications } from '@/lib/leave-workflow-service';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import {
+  isLiveNotificationId,
+  resolveNotificationHref,
+  shouldUseEssNotificationRouting,
+} from '@/lib/ess-notification-routing';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
+import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 
 const getSession = async (request: NextRequest) => verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value);
 
@@ -25,8 +31,8 @@ const resolveSessionEmployee = async (session: NonNullable<Awaited<ReturnType<ty
   const identities = [session.employeeCode, session.employeeId, session.username]
     .map((value) => normalizePayrollMatchKey(value))
     .filter(Boolean);
-  const employee = employees.find((item) => {
-    const keys = buildEssEmployeeLookupKeys(item).map((key) => normalizePayrollMatchKey(key)).filter(Boolean);
+  const employee = employees.find((item: DleEmployeeDirectoryRow) => {
+    const keys = buildEssEmployeeLookupKeys(item).map((key: string) => normalizePayrollMatchKey(key)).filter(Boolean);
     return identities.some((identity) => keys.includes(identity));
   });
   return { employee, employees };
@@ -51,10 +57,14 @@ const mergeNotificationFeeds = (
   return merged.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 };
 
+const essContextFrom = (request: NextRequest) =>
+  request.headers.get('x-ess-context') === 'workforce-portal';
+
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
   if (!session) return NextResponse.json({ status: 'error', error: 'Unauthenticated' }, { status: 401 });
 
+  const essContext = essContextFrom(request);
   const scope = scopeFrom(request);
   const base = await listEnterpriseNotifications(session, scope).catch(() => ({
     notifications: [] as EnterpriseNotification[],
@@ -82,6 +92,10 @@ export async function GET(request: NextRequest) {
   }
 
   const unread = notifications.filter((item) => item.status === 'Unread').length;
+  notifications = notifications.map((item) => ({
+    ...item,
+    href: resolveNotificationHref(session, item.href, essContext),
+  }));
   return NextResponse.json({
     status: 'success',
     data: {
@@ -106,7 +120,19 @@ export async function PATCH(request: NextRequest) {
   if (body.action !== 'mark-read' && body.action !== 'archive' && body.action !== 'mark-all-read') {
     return NextResponse.json({ status: 'error', error: 'Unsupported notification action' }, { status: 400 });
   }
-  const data = await updateEnterpriseNotifications(session, Array.isArray(body.ids) ? body.ids : [], body.action);
+  const requestedIds = Array.isArray(body.ids) ? body.ids : [];
+  const persistedIds = requestedIds.filter((id) => !isLiveNotificationId(id));
+  if (body.action !== 'mark-all-read' && !persistedIds.length) {
+    return NextResponse.json({ status: 'success', data: { notifications: [], counts: { unread: 0, notifications: 0, messages: 0, approvals: 0, critical: 0 } } });
+  }
+  const data = await updateEnterpriseNotifications(session, body.action === 'mark-all-read' ? [] : persistedIds, body.action);
+  const essContext = essContextFrom(request);
+  if (shouldUseEssNotificationRouting(session, essContext)) {
+    data.notifications = data.notifications.map((item) => ({
+      ...item,
+      href: resolveNotificationHref(session, item.href, essContext),
+    }));
+  }
   return NextResponse.json({ status: 'success', data });
 }
 

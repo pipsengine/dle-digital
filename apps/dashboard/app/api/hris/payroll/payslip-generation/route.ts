@@ -15,7 +15,7 @@ import { capturePayrollSnapshot, ensurePayrollRun, getPayrollRunForPeriod, saveP
 import { syncSagePeriodEarningAdjustments } from '@/lib/payroll-period-earning-adjustments-store';
 import { syncLeaveAllowanceEventsForPayroll } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
-import { calculateTimesheetPeriod, readTimesheetPayrollUpdates, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
+import { calculateTimesheetPeriod, buildTimesheetHoursMapForPayrollPeriod, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
 import { normalizePayrollMatchKey } from '@/lib/sage-people-payroll-store';
 import { payslipIdentityMap, syncPayslipIdentitiesFromSage, type PayslipEmployeeIdentity } from '@/lib/payroll-payslip-identity-store';
 import { resolvePayCurrency } from '@/lib/payroll-currency';
@@ -170,37 +170,16 @@ const inclusiveDays = (startDate: string, endDate: string) => {
 };
 
 const buildDailyAttendanceByKey = async (period: string) => {
-  const updates = await readTimesheetPayrollUpdates();
-  const periodId = `per-${period}`;
-  const periods = await readTimesheetPeriods();
-  const timesheetPeriod = periods.find((item) => item.id === periodId) || calculateTimesheetPeriod(new Date(`${period}-15T00:00:00`));
-  const maxPayableDays = inclusiveDays(timesheetPeriod.startDate, timesheetPeriod.endDate);
+  const timesheetHours = await buildTimesheetHoursMapForPayrollPeriod(period);
   const byKey = new Map<string, DailyAttendanceSummary>();
-
-  const add = (key: string, attendance: DailyAttendanceSummary) => {
-    if (!key) return;
-    const current = byKey.get(key) || emptyDailyAttendance();
-    current.daysWorked = Math.min(maxPayableDays, current.daysWorked + attendance.daysWorked);
-    current.attendanceHours += attendance.attendanceHours;
-    current.bookedHours += attendance.bookedHours;
-    current.idleHours += attendance.idleHours;
-    byKey.set(key, current);
-  };
-
-  updates
-    .filter((update) => update.periodId === periodId)
-    .forEach((update) => {
-      update.employeeAttendance.forEach((employee) => {
-        const attendance = {
-          daysWorked: num(employee.daysWorked),
-          attendanceHours: num(employee.attendanceHours),
-          bookedHours: num(employee.bookedHours),
-          idleHours: num(employee.idleHours),
-        };
-        [employee.employeeId, employee.employeeName].map(normalizePayrollMatchKey).forEach((key) => add(key, attendance));
-      });
+  for (const [key, value] of timesheetHours.entries()) {
+    byKey.set(key, {
+      daysWorked: num(value.daysWorked),
+      attendanceHours: 0,
+      bookedHours: num(value.bookedHours),
+      idleHours: 0,
     });
-
+  }
   return byKey;
 };
 
