@@ -2369,40 +2369,75 @@ const hasTimesheetHours = (map: Map<string, { daysWorked: number; bookedHours: n
 };
 
 /** Approved timesheet hours for payroll — locked/HR-acknowledged lines first, payroll snapshots only as fallback. */
+const TIMESHEET_HOURS_CACHE_MS = Number(process.env.HRIS_TIMESHEET_HOURS_CACHE_MS || 120000);
+type TimesheetHoursCacheEntry = {
+  expiresAt: number;
+  map: Map<string, { daysWorked: number; bookedHours: number }>;
+  inFlight?: Promise<Map<string, { daysWorked: number; bookedHours: number }>>;
+};
+const timesheetHoursCache = new Map<string, TimesheetHoursCacheEntry>();
+
+export const invalidateTimesheetHoursCacheForPeriod = (period?: string) => {
+  if (!period) {
+    timesheetHoursCache.clear();
+  } else {
+    const periodId = period.startsWith('per-') ? period : `per-${period}`;
+    timesheetHoursCache.delete(periodId);
+    timesheetHoursCache.delete(period.replace(/^per-/, ''));
+  }
+  void import('@/lib/payroll-calculation-service')
+    .then((mod) => mod.invalidatePayrollCalculationCache(period?.replace(/^per-/, '')))
+    .catch(() => undefined);
+};
+
 export async function buildTimesheetHoursMapForPayrollPeriod(period: string) {
-  const map = new Map<string, { daysWorked: number; bookedHours: number }>();
   const periodId = period.startsWith('per-') ? period : `per-${period}`;
-  const periodToken = period.replace(/^per-/, '');
+  const cached = timesheetHoursCache.get(periodId);
+  if (cached?.map && cached.expiresAt > Date.now()) return cached.map;
+  if (cached?.inFlight) return cached.inFlight;
 
-  try {
-    const synthesized = await synthesizeTimesheetHoursForPeriod(periodId);
-    synthesized.forEach((data, employeeId) => {
-      registerTimesheetHours(map, employeeId, data.employeeNo, data.employeeName, {
-        daysWorked: data.daysWorked,
-        bookedHours: data.bookedHours,
-      });
-    });
-  } catch (error) {
-    console.warn('[Timesheet] Unable to synthesize payroll hours from entries:', error instanceof Error ? error.message : error);
-  }
+  const inFlight = (async () => {
+    const map = new Map<string, { daysWorked: number; bookedHours: number }>();
+    const periodToken = period.replace(/^per-/, '');
 
-  try {
-    const updates = await readTimesheetPayrollUpdates();
-    const update = updates.find((item) => item.periodId === periodId || String(item.periodName || '').includes(periodToken));
-    if (update) {
-      for (const employee of update.employeeAttendance) {
-        if (hasTimesheetHours(map, employee.employeeId, undefined, employee.employeeName)) continue;
-        registerTimesheetHours(map, employee.employeeId, undefined, employee.employeeName, {
-          daysWorked: Number(employee.daysWorked || 0),
-          bookedHours: Number(employee.bookedHours || 0),
+    try {
+      const synthesized = await synthesizeTimesheetHoursForPeriod(periodId);
+      synthesized.forEach((data, employeeId) => {
+        registerTimesheetHours(map, employeeId, data.employeeNo, data.employeeName, {
+          daysWorked: data.daysWorked,
+          bookedHours: data.bookedHours,
         });
-      }
+      });
+    } catch (error) {
+      console.warn('[Timesheet] Unable to synthesize payroll hours from entries:', error instanceof Error ? error.message : error);
     }
-  } catch (error) {
-    console.warn('[Timesheet] Payroll update feed unavailable:', error instanceof Error ? error.message : error);
-  }
 
-  return map;
+    try {
+      const updates = await readTimesheetPayrollUpdates();
+      const update = updates.find((item) => item.periodId === periodId || String(item.periodName || '').includes(periodToken));
+      if (update) {
+        for (const employee of update.employeeAttendance) {
+          if (hasTimesheetHours(map, employee.employeeId, undefined, employee.employeeName)) continue;
+          registerTimesheetHours(map, employee.employeeId, undefined, employee.employeeName, {
+            daysWorked: Number(employee.daysWorked || 0),
+            bookedHours: Number(employee.bookedHours || 0),
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('[Timesheet] Payroll update feed unavailable:', error instanceof Error ? error.message : error);
+    }
+
+    timesheetHoursCache.set(periodId, { expiresAt: Date.now() + TIMESHEET_HOURS_CACHE_MS, map });
+    return map;
+  })();
+
+  timesheetHoursCache.set(periodId, {
+    expiresAt: 0,
+    map: cached?.map ?? new Map(),
+    inFlight,
+  });
+  return inFlight;
 }
 
 export async function writeTimesheetPayrollUpdates(updates: TimesheetPayrollUpdate[]) {
@@ -2821,7 +2856,10 @@ export const isTimesheetPayrollReadyStatus = (status: TimesheetStatus) =>
   ['HR_Acknowledged', 'Locked'].includes(normalizeTimesheetStatus(status));
 
 /** Rebuild the payroll attendance snapshot for a full timesheet period from live lines. */
-export const rebuildPayrollSnapshotForPeriod = async (periodId: string, actor: string) => createPayrollUpdateForPeriod(periodId, actor);
+export const rebuildPayrollSnapshotForPeriod = async (periodId: string, actor: string) => {
+  invalidateTimesheetHoursCacheForPeriod(periodId);
+  return createPayrollUpdateForPeriod(periodId, actor);
+};
 
 const createPayrollUpdateForPeriod = async (periodId: string, actor: string): Promise<TimesheetPayrollUpdate> => {
   const { headers, lines } = await readTimesheetData();

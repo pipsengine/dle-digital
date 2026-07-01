@@ -205,10 +205,29 @@ const readPeriodEarningAdjustmentsSync = () => {
     const parsed = JSON.parse(readFileSync(PERIOD_ADJUSTMENTS_PATH, 'utf8'));
     const rows = Array.isArray(parsed) ? parsed as PayrollPeriodEarningAdjustment[] : [];
     periodAdjustmentCache = { mtime: stat.mtimeMs, rows };
+    periodRowsByPeriodCache = null;
     return rows;
   } catch {
     return [];
   }
+};
+
+let periodRowsByPeriodCache: { mtime: number; index: Map<string, PayrollPeriodEarningAdjustment[]> } | null = null;
+
+const periodAdjustmentRowsForPeriod = (period: string) => {
+  const rows = readPeriodEarningAdjustmentsSync();
+  const mtime = periodAdjustmentCache?.mtime || 0;
+  if (!periodRowsByPeriodCache || periodRowsByPeriodCache.mtime !== mtime) {
+    const index = new Map<string, PayrollPeriodEarningAdjustment[]>();
+    for (const row of rows) {
+      const key = normalizedPeriod(row.period);
+      const bucket = index.get(key) || [];
+      bucket.push(row);
+      index.set(key, bucket);
+    }
+    periodRowsByPeriodCache = { mtime, index };
+  }
+  return periodRowsByPeriodCache.index.get(normalizedPeriod(period)) || [];
 };
 
 export const PAYROLL_EARNING_PROFILES: Record<Exclude<PayrollEarningProfileId, 'contract-day-rate' | 'stipend-non-taxable' | 'fallback'>, { name: string; definitions: PayrollEarningDefinition[] }> = {
@@ -849,8 +868,7 @@ const periodAdjustmentLines = (employee: DleEmployeeDirectoryRow, options?: Payr
   const salaryGrade = normalizedTextKey(employee.salaryGrade || employee.jobGrade);
   const profileId = resolvePayrollEarningProfile(employee);
   const structuralFamily = sageStructuralGradeFamily(employee, period);
-  const matchedRows = readPeriodEarningAdjustmentsSync()
-    .filter((row) => normalizedPeriod(row.period) === period)
+  const matchedRows = periodAdjustmentRowsForPeriod(period)
     .filter((row) => {
       const employeeMatched = employeeAdjustmentMatched(employee, row);
       const gradeMatched = Array.isArray(row.salaryGrades) && row.salaryGrades.map(normalizedTextKey).includes(salaryGrade);

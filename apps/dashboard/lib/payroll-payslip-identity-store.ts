@@ -171,7 +171,14 @@ export const readPayslipEmployeeIdentities = async (): Promise<PayslipEmployeeId
   return [];
 };
 
+const PAYSLIP_IDENTITY_CACHE_MS = Number(process.env.HRIS_PAYSLIP_IDENTITY_CACHE_MS || 600000);
+let payslipIdentityMapCache: { expiresAt: number; map: Map<string, PayslipEmployeeIdentity> } | null = null;
+
 export const payslipIdentityMap = async () => {
+  const now = Date.now();
+  if (payslipIdentityMapCache && payslipIdentityMapCache.expiresAt > now) {
+    return payslipIdentityMapCache.map;
+  }
   const identities = await readPayslipEmployeeIdentities();
   const map = new Map<string, PayslipEmployeeIdentity>();
   const setAlias = (raw: string | undefined, identity: PayslipEmployeeIdentity) => {
@@ -188,6 +195,7 @@ export const payslipIdentityMap = async () => {
   identities.forEach((identity) => {
     [identity.employeeId, identity.employeeCode, identity.sourceEmployeeCode].forEach((key) => setAlias(key, identity));
   });
+  payslipIdentityMapCache = { expiresAt: Date.now() + PAYSLIP_IDENTITY_CACHE_MS, map };
   return map;
 };
 
@@ -226,6 +234,7 @@ export const writePayslipEmployeeIdentities = async (records: PayslipEmployeeIde
     try {
       await mkdir(path.dirname(identityPath), { recursive: true });
       await writeFile(identityPath, payload, 'utf8');
+      payslipIdentityMapCache = null;
       return Array.from(next.values());
     } catch (error) {
       lastError = error;

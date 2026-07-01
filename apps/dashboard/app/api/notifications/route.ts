@@ -9,7 +9,7 @@ import {
 } from '@/lib/enterprise-notifications-store';
 import { buildEssEmployeeLookupKeys } from '@/lib/ess-dashboard-store';
 import { listLiveLeaveApprovalNotifications } from '@/lib/leave-workflow-service';
-import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { readDirectoryEmployees } from '@/lib/payroll-employee-source';
 import {
   isLiveNotificationId,
   resolveNotificationHref,
@@ -27,7 +27,7 @@ const scopeFrom = (request: NextRequest): NotificationScope => {
 };
 
 const resolveSessionEmployee = async (session: NonNullable<Awaited<ReturnType<typeof getSession>>>) => {
-  const { employees } = await readPayrollEmployees();
+  const { employees } = await readDirectoryEmployees();
   const identities = [session.employeeCode, session.employeeId, session.username]
     .map((value) => normalizePayrollMatchKey(value))
     .filter(Boolean);

@@ -1,6 +1,6 @@
 import {
+  buildPayrollCalculationFromSnapshot,
   calculatePayrollForPeriod,
-  groupPayrollCalculationRecords,
   maskPayrollCalculationRecords,
   type PayrollCalculationRecord,
 } from '@/lib/payroll-calculation-service';
@@ -14,7 +14,6 @@ import {
   type UnifiedPayrollRun,
 } from '@/lib/payroll-run-store';
 import {
-  enrichCalculationRecordsWithReadiness,
   summarizePayrollReadiness,
 } from '@/lib/payroll-readiness';
 import { reapplyPayrollValidationPolicy } from '@/lib/payroll-tolerance';
@@ -70,29 +69,6 @@ const stripPendingPayrollAmounts = (calculation: Awaited<ReturnType<typeof calcu
   },
 });
 
-const snapshotSummary = (snapshot: PayrollRunSnapshot, records: PayrollCalculationRecord[]) => {
-  const raw = snapshot.summary as Record<string, number>;
-  const ready = Number(raw.readyEmployees ?? raw.ready ?? records.filter((record) => record.payrollStatus === 'Ready').length);
-  const review = Number(raw.reviewEmployees ?? raw.review ?? records.filter((record) => record.payrollStatus === 'Review').length);
-  const blocked = Number(raw.blockedEmployees ?? raw.blocked ?? records.filter((record) => record.payrollStatus === 'Blocked').length);
-  const employees = Number(raw.employees ?? records.length);
-  const payrollEligible = Number(raw.payrollEligible ?? records.filter((record) => !['Terminated', 'Resigned', 'Retired', 'Inactive'].includes(record.employmentStatus)).length);
-  return {
-    employees,
-    payrollEligible,
-    readyEmployees: ready,
-    reviewEmployees: review,
-    blockedEmployees: blocked,
-    basePay: roundMoney(Number(raw.basePay ?? records.reduce((sum, record) => sum + Number(record.basePay || 0), 0))),
-    allowances: roundMoney(Number(raw.allowances ?? records.reduce((sum, record) => sum + Number(record.allowances || 0), 0))),
-    grossPay: roundMoney(Number(raw.grossPay ?? records.reduce((sum, record) => sum + Number(record.grossPay || 0), 0))),
-    deductions: roundMoney(Number(raw.deductions ?? raw.totalDeductions ?? records.reduce((sum, record) => sum + Number(record.deductions || 0), 0))),
-    netPay: roundMoney(Number(raw.netPay ?? records.reduce((sum, record) => sum + Number(record.netPay || 0), 0))),
-    exceptionCount: Number(raw.exceptionCount ?? records.reduce((sum, record) => sum + Number(record.exceptionCount || 0), 0)),
-    deferredExceptionCount: Number(raw.deferredExceptionCount ?? records.reduce((sum, record) => sum + Number(record.deferredWarnings?.length || 0), 0)),
-  };
-};
-
 const shouldUseSnapshot = (
   run: UnifiedPayrollRun | null,
   periodRecord: { status: string } | null,
@@ -101,58 +77,6 @@ const shouldUseSnapshot = (
   if (!run || !snapshot?.records?.length) return false;
   if (periodRecord?.status === 'Closed' || run.status === 'Closed') return true;
   return FINALIZED_RUN_STATUSES.has(run.status);
-};
-
-const applySnapshotToCalculation = (
-  live: Awaited<ReturnType<typeof calculatePayrollForPeriod>>,
-  snapshot: PayrollRunSnapshot,
-  period: string,
-) => {
-  const records = reapplyPayrollValidationPolicy(
-    enrichCalculationRecordsWithReadiness(snapshot.records),
-    live.toleranceMode,
-  );
-  const summary = snapshotSummary(snapshot, records);
-  const readiness = summarizePayrollReadiness(records);
-  const exceptionCount = records.reduce((sum, record) => sum + Number(record.exceptionCount || 0), 0);
-  const deferredExceptionCount = records.reduce((sum, record) => sum + Number(record.deferredWarnings?.length || 0), 0);
-  return {
-    ...live,
-    generatedAt: snapshot.capturedAt || live.generatedAt,
-    source: 'Frozen payroll run snapshot',
-    period,
-    periodLabel: payrollPeriodLabel(period),
-    summary: {
-      ...live.summary,
-      employees: summary.employees,
-      payrollEligible: summary.payrollEligible,
-      readyEmployees: summary.readyEmployees,
-      reviewEmployees: summary.reviewEmployees,
-      blockedEmployees: summary.blockedEmployees,
-      readinessReadyEmployees: readiness.readinessReadyEmployees,
-      readinessAwaitingTimesheetEmployees: readiness.readinessAwaitingTimesheetEmployees,
-      readinessReviewEmployees: readiness.readinessReviewEmployees,
-      readinessBlockedEmployees: readiness.readinessBlockedEmployees,
-      basePay: summary.basePay,
-      allowances: summary.allowances,
-      grossPay: summary.grossPay,
-      totalDeductions: summary.deductions,
-      deductions: summary.deductions,
-      netPay: summary.netPay,
-      exceptionCount,
-      deferredExceptionCount,
-      payrollCoveragePct: summary.employees
-        ? Math.round((records.filter((record) => record.setupAssignedToPayroll).length / summary.employees) * 1000) / 10
-        : 0,
-    },
-    records,
-    breakdowns: {
-      byPayrollGroup: groupPayrollCalculationRecords(records, 'payrollGroup'),
-      byDepartment: groupPayrollCalculationRecords(records, 'department').slice(0, 12),
-      byEmploymentType: groupPayrollCalculationRecords(records, 'employmentType'),
-      byComponent: live.breakdowns.byComponent,
-    },
-  };
 };
 
 const refreshCalculationFromRecords = (
@@ -185,20 +109,24 @@ const refreshCalculationFromRecords = (
 };
 
 const resolvePeriodCalculation = async (period: string, run: UnifiedPayrollRun | null, periodRecord: { status: string } | null) => {
+  const payrollComputed = isPayrollComputed(run, periodRecord);
+
+  if (payrollComputed && run) {
+    const snapshot = await readPayrollSnapshot(run.id);
+    if (shouldUseSnapshot(run, periodRecord, snapshot) && snapshot) {
+      const calculation = await buildPayrollCalculationFromSnapshot(period, snapshot);
+      return { calculation, dataMode: 'snapshot' as const, payrollComputed: true };
+    }
+  }
+
   const live = await calculatePayrollForPeriod(period);
   const normalizedLive = refreshCalculationFromRecords(live, reapplyPayrollValidationPolicy(live.records, live.toleranceMode));
-  const payrollComputed = isPayrollComputed(run, periodRecord);
 
   if (!payrollComputed) {
     return { calculation: stripPendingPayrollAmounts(normalizedLive), dataMode: 'pending' as const, payrollComputed: false };
   }
 
   if (!run) return { calculation: normalizedLive, dataMode: 'live' as const, payrollComputed: true };
-
-  const snapshot = await readPayrollSnapshot(run.id);
-  if (shouldUseSnapshot(run, periodRecord, snapshot) && snapshot) {
-    return { calculation: applySnapshotToCalculation(normalizedLive, snapshot, period), dataMode: 'snapshot' as const, payrollComputed: true };
-  }
 
   if (run.grossPay > 0) {
     return {

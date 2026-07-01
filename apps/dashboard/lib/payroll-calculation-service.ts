@@ -1,10 +1,11 @@
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
-import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
+import { payrollDataSourceInfo, readDirectoryEmployees, readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { mergeTimesheetDayRateEarnings, calculatePayrollEarnings, resolvePayrollEarningProfile } from '@/lib/payroll-earnings-engine';
-import { isNonPermanentPayrollEmployee, permanentStyleSageEarnings } from '@/lib/payroll-employee-classification';
+import { isNonPermanentPayrollEmployee, payrollActiveEmployees, permanentStyleSageEarnings } from '@/lib/payroll-employee-classification';
 import { registerPayrollAdjustmentsChangeHandler, adjustmentsFileMtime } from '@/lib/payroll-period-earning-adjustments-store';
 import { contractEmployeeCode, isDailyRatePayrollEmployee, isEmployeeExcludedFromPayrollRun, type PayrollRunExclusionEmployee } from '@/lib/payroll-employee-classification';
-import { enterprisePayrollSourceLabel, isEnterprisePayrollPeriod, shouldComparePayrollWithSage } from '@/lib/payroll-enterprise-source';
+import { enterprisePayrollSourceLabel, isEnterprisePayrollPeriod, isSagePayrollRuntimeEnabled, shouldComparePayrollWithSage } from '@/lib/payroll-enterprise-source';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
@@ -13,8 +14,9 @@ import { syncLeaveAllowanceEventsForPayroll } from '@/lib/payroll-leave-allowanc
 import { normalizePayrollMatchKey, readSagePayrollPeriodTotals } from '@/lib/sage-people-payroll-store';
 import { buildTimesheetHoursMapForPayrollPeriod } from '@/lib/timesheet-entry-store';
 import { payrollPeriodLabel } from '@/lib/payroll-period-store';
-import { computePayrollReadinessStatus, summarizePayrollReadiness, type PayrollReadinessStatus } from '@/lib/payroll-readiness';
-import { partitionPayrollIssues, payrollToleranceActive } from '@/lib/payroll-tolerance';
+import { computePayrollReadinessStatus, enrichCalculationRecordsWithReadiness, summarizePayrollReadiness, type PayrollReadinessStatus } from '@/lib/payroll-readiness';
+import { partitionPayrollIssues, payrollToleranceActive, reapplyPayrollValidationPolicy } from '@/lib/payroll-tolerance';
+import type { PayrollRunSnapshot } from '@/lib/payroll-run-store';
 
 export type PayrollRecordStatus = 'Ready' | 'Review' | 'Blocked';
 export type PayrollTone = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'cyan' | 'slate';
@@ -266,13 +268,234 @@ export const groupPayrollCalculationRecords = (records: PayrollCalculationRecord
     .map((item) => ({ ...item, grossPay: roundMoney(item.grossPay), netPay: roundMoney(item.netPay) }))
     .sort((a, b) => b.grossPay - a.grossPay);
 
-const PAYROLL_CALC_CACHE_TTL_MS = 45_000;
+const PAYROLL_CALC_CACHE_TTL_MS = Number(process.env.HRIS_PAYROLL_CALC_CACHE_MS || 300000);
+const PAYROLL_CONFIG_CACHE_MS = Number(process.env.HRIS_PAYROLL_CONFIG_CACHE_MS || 300000);
 const payrollCalculationCache = new Map<string, {
   key: string;
   expiresAt: number;
   result?: PayrollCalculationResult;
   inFlight?: Promise<PayrollCalculationResult>;
 }>();
+
+type PayrollConfigBundle = {
+  expiresAt: number;
+  taxConfig: Awaited<ReturnType<typeof readPayrollTaxConfig>>;
+  pensionConfig: Awaited<ReturnType<typeof readPayrollPensionConfig>>;
+  fundsConfig: Awaited<ReturnType<typeof readStatutoryFundsConfig>>;
+  loansConfig: Awaited<ReturnType<typeof readPayrollLoansConfig>>;
+  loanApplications: Awaited<ReturnType<typeof readPayrollLoanApplications>>;
+};
+
+let payrollConfigCache: PayrollConfigBundle | null = null;
+
+const readPayrollConfigBundle = async () => {
+  const now = Date.now();
+  if (payrollConfigCache && payrollConfigCache.expiresAt > now) return payrollConfigCache;
+  const [taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications] = await Promise.all([
+    readPayrollTaxConfig(),
+    readPayrollPensionConfig(),
+    readStatutoryFundsConfig(),
+    readPayrollLoansConfig(),
+    readPayrollLoanApplications(),
+  ]);
+  payrollConfigCache = {
+    expiresAt: now + PAYROLL_CONFIG_CACHE_MS,
+    taxConfig,
+    pensionConfig,
+    fundsConfig,
+    loansConfig,
+    loanApplications,
+  };
+  return payrollConfigCache;
+};
+
+export const invalidatePayrollConfigCache = () => {
+  payrollConfigCache = null;
+};
+
+const readEmployeesForPayrollCalculation = async (period: string) => {
+  if (isEnterprisePayrollPeriod(period) && !isSagePayrollRuntimeEnabled()) {
+    const directory = await readDirectoryEmployees();
+    return {
+      ...directory,
+      employees: await applyPayrollEmployeeOptions(payrollActiveEmployees(directory.employees)),
+    };
+  }
+  return readPayrollEmployees();
+};
+
+const emptyPayrollSummary = (): PayrollCalculationSummary => ({
+  employees: 0,
+  payrollEligible: 0,
+  ready: 0,
+  review: 0,
+  blocked: 0,
+  blockedEmployees: 0,
+  readyEmployees: 0,
+  reviewEmployees: 0,
+  readinessReadyEmployees: 0,
+  readinessAwaitingTimesheetEmployees: 0,
+  readinessReviewEmployees: 0,
+  readinessBlockedEmployees: 0,
+  basePay: 0,
+  allowances: 0,
+  grossPay: 0,
+  totalDeductions: 0,
+  deductions: 0,
+  netPay: 0,
+  employerCost: 0,
+  sageGrossPay: 0,
+  sageNetPay: 0,
+  grossVariance: 0,
+  netVariance: 0,
+  discrepancyCount: 0,
+  exceptionCount: 0,
+  deferredExceptionCount: 0,
+  averageDeductionRatio: 0,
+  payrollCoveragePct: 0,
+});
+
+const snapshotSummaryFromRecords = (snapshot: PayrollRunSnapshot, records: PayrollCalculationRecord[]) => {
+  const raw = snapshot.summary as Record<string, number>;
+  const ready = Number(raw.readyEmployees ?? raw.ready ?? records.filter((record) => record.payrollStatus === 'Ready').length);
+  const review = Number(raw.reviewEmployees ?? raw.review ?? records.filter((record) => record.payrollStatus === 'Review').length);
+  const blocked = Number(raw.blockedEmployees ?? raw.blocked ?? records.filter((record) => record.payrollStatus === 'Blocked').length);
+  const employees = Number(raw.employees ?? records.length);
+  const payrollEligible = Number(raw.payrollEligible ?? records.filter((record) => !['Terminated', 'Resigned', 'Retired', 'Inactive'].includes(record.employmentStatus)).length);
+  return {
+    employees,
+    payrollEligible,
+    readyEmployees: ready,
+    reviewEmployees: review,
+    blockedEmployees: blocked,
+    basePay: roundMoney(Number(raw.basePay ?? records.reduce((sum, record) => sum + Number(record.basePay || 0), 0))),
+    allowances: roundMoney(Number(raw.allowances ?? records.reduce((sum, record) => sum + Number(record.allowances || 0), 0))),
+    grossPay: roundMoney(Number(raw.grossPay ?? records.reduce((sum, record) => sum + Number(record.grossPay || 0), 0))),
+    deductions: roundMoney(Number(raw.deductions ?? raw.totalDeductions ?? records.reduce((sum, record) => sum + Number(record.deductions || 0), 0))),
+    netPay: roundMoney(Number(raw.netPay ?? records.reduce((sum, record) => sum + Number(record.netPay || 0), 0))),
+    exceptionCount: Number(raw.exceptionCount ?? records.reduce((sum, record) => sum + Number(record.exceptionCount || 0), 0)),
+    deferredExceptionCount: Number(raw.deferredExceptionCount ?? records.reduce((sum, record) => sum + Number(record.deferredWarnings?.length || 0), 0)),
+  };
+};
+
+const buildPayrollCalculationShell = async (period: string): Promise<PayrollCalculationResult> => {
+  const toleranceMode = payrollToleranceActive(period);
+  const enterpriseSourceActive = isEnterprisePayrollPeriod(period);
+  const [employeeSource, { taxConfig, pensionConfig, fundsConfig, loansConfig }] = await Promise.all([
+    readEmployeesForPayrollCalculation(period),
+    readPayrollConfigBundle(),
+  ]);
+  const taxVersion = activeTaxVersion(taxConfig);
+  const pensionVersion = activePensionVersion(pensionConfig);
+  const fundsVersion = activeStatutoryFundsVersion(fundsConfig);
+  const loansVersion = activeLoansVersion(loansConfig);
+  if (!taxVersion || !pensionVersion || !fundsVersion || !loansVersion) {
+    throw new Error('One or more active payroll configuration versions are missing.');
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    source: enterprisePayrollSourceLabel(period),
+    dataSource: payrollDataSourceInfo(employeeSource),
+    period,
+    periodLabel: payrollPeriodLabel(period),
+    configurations: {
+      tax: { id: taxVersion.id, name: taxVersion.name, effectiveFrom: taxVersion.effectiveFrom },
+      pension: { id: pensionVersion.id, name: pensionVersion.name, effectiveFrom: pensionVersion.effectiveFrom },
+      statutoryFunds: { id: fundsVersion.id, name: fundsVersion.name, effectiveFrom: fundsVersion.effectiveFrom },
+      loans: { id: loansVersion.id, name: loansVersion.name, effectiveFrom: loansVersion.effectiveFrom },
+    },
+    summary: emptyPayrollSummary(),
+    records: [],
+    breakdowns: {
+      byPayrollGroup: [],
+      byDepartment: [],
+      byEmploymentType: [],
+      byComponent: [],
+    },
+    controls: [
+      { id: 'employees', label: 'Employee Source', status: employeeSource.databaseAvailable ? 'Passed' : 'Review', detail: `${employeeSource.employees.length} employees loaded from ${employeeSource.source}`, tone: employeeSource.databaseAvailable ? 'green' : 'amber' },
+      { id: 'config', label: 'Configuration Versions', status: 'Passed', detail: 'PAYE, pension, statutory funds, and loan policies resolved by active effective versions.', tone: 'blue' },
+      { id: 'timesheets', label: 'Timesheet Payroll Feed', status: 'Snapshot', detail: 'Loaded from frozen payroll run snapshot.', tone: 'green' },
+      { id: 'exceptions', label: 'Exception Gate', status: 'Snapshot', detail: 'Exception counts restored from frozen payroll run snapshot.', tone: 'blue' },
+      ...(enterpriseSourceActive
+        ? [{ id: 'enterprise-source', label: 'Authoritative Payroll Source', status: 'DLE_Enterprise', detail: 'Frozen payroll snapshot from DLE_Enterprise HRIS.', tone: 'green' as PayrollTone }]
+        : [{ id: 'sage-discrepancy', label: 'Sage Comparison', status: 'Snapshot', detail: 'Loaded from frozen payroll run snapshot.', tone: 'blue' as PayrollTone }]),
+    ],
+    toleranceMode,
+    enterpriseSourceActive,
+  };
+};
+
+export const buildPayrollCalculationFromSnapshot = async (period: string, snapshot: PayrollRunSnapshot): Promise<PayrollCalculationResult> => {
+  const shell = await buildPayrollCalculationShell(period);
+  const toleranceMode = shell.toleranceMode;
+  const records = reapplyPayrollValidationPolicy(
+    enrichCalculationRecordsWithReadiness(snapshot.records),
+    toleranceMode,
+  );
+  const summary = snapshotSummaryFromRecords(snapshot, records);
+  const readiness = summarizePayrollReadiness(records);
+  const exceptionCount = records.reduce((sum, record) => sum + Number(record.exceptionCount || 0), 0);
+  const deferredExceptionCount = records.reduce((sum, record) => sum + Number(record.deferredWarnings?.length || 0), 0);
+  const totals = records.reduce(
+    (sum, record) => ({
+      paye: sum.paye + record.paye,
+      pensionEmployee: sum.pensionEmployee + record.pensionEmployee,
+      pensionEmployer: sum.pensionEmployer + record.pensionEmployer,
+      statutoryEmployee: sum.statutoryEmployee + record.statutoryEmployee,
+      statutoryEmployer: sum.statutoryEmployer + record.statutoryEmployer,
+      loanRecovery: sum.loanRecovery + record.loanRecovery,
+    }),
+    { paye: 0, pensionEmployee: 0, pensionEmployer: 0, statutoryEmployee: 0, statutoryEmployer: 0, loanRecovery: 0 },
+  );
+  const component = (componentId: string, label: string, amount: number, tone: PayrollTone, payer: 'Employee' | 'Employer' | 'Both') =>
+    ({ id: componentId, label, amount: roundMoney(amount), tone, payer });
+  return {
+    ...shell,
+    generatedAt: snapshot.capturedAt || shell.generatedAt,
+    source: 'Frozen payroll run snapshot',
+    summary: {
+      ...shell.summary,
+      employees: summary.employees,
+      payrollEligible: summary.payrollEligible,
+      ready: summary.readyEmployees,
+      review: summary.reviewEmployees,
+      blocked: summary.blockedEmployees,
+      readyEmployees: summary.readyEmployees,
+      reviewEmployees: summary.reviewEmployees,
+      blockedEmployees: summary.blockedEmployees,
+      readinessReadyEmployees: readiness.readinessReadyEmployees,
+      readinessAwaitingTimesheetEmployees: readiness.readinessAwaitingTimesheetEmployees,
+      readinessReviewEmployees: readiness.readinessReviewEmployees,
+      readinessBlockedEmployees: readiness.readinessBlockedEmployees,
+      basePay: summary.basePay,
+      allowances: summary.allowances,
+      grossPay: summary.grossPay,
+      totalDeductions: summary.deductions,
+      deductions: summary.deductions,
+      netPay: summary.netPay,
+      exceptionCount,
+      deferredExceptionCount,
+      payrollCoveragePct: summary.employees
+        ? Math.round((records.filter((record) => record.setupAssignedToPayroll).length / summary.employees) * 1000) / 10
+        : 0,
+    },
+    records,
+    breakdowns: {
+      byPayrollGroup: groupPayrollCalculationRecords(records, 'payrollGroup'),
+      byDepartment: groupPayrollCalculationRecords(records, 'department').slice(0, 12),
+      byEmploymentType: groupPayrollCalculationRecords(records, 'employmentType'),
+      byComponent: [
+        component('paye', 'PAYE', totals.paye, 'violet', 'Employee'),
+        component('pension-employee', 'Employee Pension', totals.pensionEmployee, 'blue', 'Employee'),
+        component('statutory-employee', 'NHF/Statutory Employee', totals.statutoryEmployee, 'cyan', 'Employee'),
+        component('loan', 'Loan Recovery', totals.loanRecovery, 'amber', 'Employee'),
+        component('pension-employer', 'Employer Pension', totals.pensionEmployer, 'green', 'Employer'),
+        component('statutory-employer', 'NSITF/ITF Employer', totals.statutoryEmployer, 'slate', 'Employer'),
+      ],
+    },
+  };
+};
 
 export const calculatePayrollForPeriod = async (
   requestedPeriod: string,
@@ -316,20 +539,12 @@ const computePayrollForPeriod = async (requestedPeriod: string): Promise<Payroll
   const compareWithSage = shouldComparePayrollWithSage(requestedPeriod);
   const [
     employeeSource,
-    taxConfig,
-    pensionConfig,
-    fundsConfig,
-    loansConfig,
-    loanApplications,
+    { taxConfig, pensionConfig, fundsConfig, loansConfig, loanApplications },
     sagePeriodTotals,
     timesheetHours,
   ] = await Promise.all([
-    readPayrollEmployees(),
-    readPayrollTaxConfig(),
-    readPayrollPensionConfig(),
-    readStatutoryFundsConfig(),
-    readPayrollLoansConfig(),
-    readPayrollLoanApplications(),
+    readEmployeesForPayrollCalculation(requestedPeriod),
+    readPayrollConfigBundle(),
     compareWithSage ? readSagePayrollPeriodTotals(requestedPeriod).catch(() => []) : Promise.resolve([]),
     readApprovedTimesheetHoursForPayrollPeriod(requestedPeriod),
   ]);
@@ -342,10 +557,12 @@ const computePayrollForPeriod = async (requestedPeriod: string): Promise<Payroll
     throw new Error('One or more active payroll configuration versions are missing.');
   }
 
-  try {
-    await syncLeaveAllowanceEventsForPayroll(requestedPeriod);
-  } catch (error) {
-    console.warn('[PayrollCalculation] Leave allowance sync skipped:', error instanceof Error ? error.message : error);
+  if (!enterpriseSourceActive) {
+    try {
+      await syncLeaveAllowanceEventsForPayroll(requestedPeriod);
+    } catch (error) {
+      console.warn('[PayrollCalculation] Leave allowance sync skipped:', error instanceof Error ? error.message : error);
+    }
   }
 
   const sageByKey = new Map<string, (typeof sagePeriodTotals)[number]>();
