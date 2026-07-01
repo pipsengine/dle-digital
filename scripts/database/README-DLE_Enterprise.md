@@ -60,6 +60,24 @@ The monitor job fails if:
 - the latest full backup is missing or older than 26 hours
 - the latest log backup is missing or older than 90 minutes
 
+## Payroll cutover backups (HRIS)
+
+When a payroll period is fully posted and closed through the payroll workflow, HRIS automatically:
+
+1. Runs a **verified full database backup** (`BACKUP DATABASE` + `RESTORE VERIFYONLY`)
+2. Stores the file under `{Primary Backup}\PayrollCutover\{YYYY-MM}\`
+3. Records the cutover in Backup & Disaster Recovery audit history
+4. **Blocks opening the next payroll period** until that verified backup exists
+
+Environment flags:
+
+- `HRIS_PAYROLL_CUTOVER_BACKUP_ENABLED` — default `true`
+- `HRIS_PAYROLL_CUTOVER_BACKUP_BLOCK_OPEN` — default `true` (gate next period open)
+
+Daily SQL Agent backups remain the baseline; payroll cutover backups are an additional recovery point taken at payroll month-end before the next period opens.
+
+Manual retry: run **Full Backup** from Administration → Backup & Disaster Recovery, or close the period again through payroll workflow (skipped if a successful cutover backup already exists for that period).
+
 Configure Database Mail and SQL Agent alert notifications for job failures in production.
 
 ## RBAC Foundation

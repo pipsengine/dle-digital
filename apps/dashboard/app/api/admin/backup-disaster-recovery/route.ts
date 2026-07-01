@@ -7,6 +7,7 @@ import {
   runDleEnterpriseRestoreDrill,
   saveBackupDisasterRecoveryConfiguration,
 } from '@/lib/backup-disaster-recovery-service';
+import { runPayrollCutoverBackup } from '@/lib/payroll-cutover-backup-service';
 import type { BackupDisasterRecoveryState } from '@/lib/backup-disaster-recovery-types';
 
 const ok = <T,>(data: T) => NextResponse.json({ status: 'success', data });
@@ -54,10 +55,16 @@ export async function POST(request: Request) {
     return err(403, 'You do not have permission to run backup and disaster recovery operations.');
   }
   try {
-    const body = await request.json().catch(() => ({})) as { action?: string; detail?: string; operation?: string };
+    const body = await request.json().catch(() => ({})) as { action?: string; detail?: string; operation?: string; payrollPeriod?: string };
     const actor = actorFrom(request);
     if (body.operation === 'run-full-backup') {
       return ok(await runDleEnterpriseFullBackup(actor));
+    }
+    if (body.operation === 'run-payroll-cutover-backup') {
+      const payrollPeriod = String(body.payrollPeriod || '').trim();
+      if (!payrollPeriod) return err(400, 'payrollPeriod is required for payroll cutover backup.');
+      const result = await runPayrollCutoverBackup(payrollPeriod, actor);
+      return ok(await readEnrichedBackupDisasterRecoveryState());
     }
     if (body.operation === 'run-restore-drill') {
       return ok(await runDleEnterpriseRestoreDrill(actor));

@@ -17,6 +17,11 @@ export const defaultBackupDisasterRecoveryState = (): BackupDisasterRecoveryStat
   restoreReadiness: [],
   audit: [],
   lastOperation: null,
+  payrollCutover: {
+    enabled: true,
+    requireBeforeNextPeriodOpen: true,
+    records: [],
+  },
   updatedAt: new Date().toISOString(),
   updatedBy: 'System',
 });

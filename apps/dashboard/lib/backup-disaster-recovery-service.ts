@@ -8,6 +8,7 @@ import type {
   BackupExecutionJob,
   BackupFailureRecoveryRule,
   BackupIncident,
+  BackupLastOperation,
   BackupMetric,
   BackupPolicy,
   BackupReplicationTarget,
@@ -109,6 +110,110 @@ const targetWithPrimary = (state: BackupDisasterRecoveryState) => {
   const primary = state.replicationTargets.find((target) => target.target === PRIMARY_TARGET);
   if (primary?.location.trim()) return primary;
   return state.replicationTargets.find((target) => target.location.trim());
+};
+
+export const resolvePrimaryBackupTarget = (state: BackupDisasterRecoveryState) => targetWithPrimary(state);
+
+const payrollCutoverDirectory = (baseLocation: string, payrollPeriod: string) => {
+  const base = backupDirectory(baseLocation);
+  const periodToken = payrollPeriod.replace(/[^0-9-]/g, '') || 'period';
+  return `${base}\\PayrollCutover\\${periodToken}`;
+};
+
+export const payrollCutoverBackupFilePath = (baseLocation: string, payrollPeriod: string, databaseName = DATABASE_NAME) => {
+  const directory = payrollCutoverDirectory(baseLocation, payrollPeriod);
+  const periodToken = payrollPeriod.replace(/[^0-9-]/g, '') || 'period';
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  return `${directory}\\${databaseName}_PAYROLL_${periodToken}_${stamp}.bak`;
+};
+
+type BackupRunContext = {
+  operationType: BackupLastOperation['type'];
+  jobLabel: string;
+  successAuditAction: string;
+  failedAuditAction: string;
+  payrollPeriod?: string;
+};
+
+const executeDleEnterpriseBackupToPath = async (actor: string, filePath: string, context: BackupRunContext) => {
+  const pool = await getDleEnterpriseDbPool();
+  if (!pool) throw new Error('DLE_Enterprise database is not available.');
+
+  const initialState = await readBackupDisasterRecoveryState();
+  const startedAt = new Date().toISOString();
+  const runningMessage = context.payrollPeriod
+    ? `Writing payroll cutover backup for ${context.payrollPeriod} to ${backupDirectory(filePath)}`
+    : `Writing backup to ${backupDirectory(filePath)}`;
+
+  await writeBackupDisasterRecoveryState({
+    ...initialState,
+    lastOperation: {
+      type: context.operationType,
+      status: 'running',
+      message: runningMessage,
+      at: startedAt,
+      payrollPeriod: context.payrollPeriod,
+    },
+    serviceMetrics: metricSnapshot('Running', runningMessage),
+    executionQueue: compact([jobRecord(context.jobLabel, 'Running', filePath, startedAt), ...initialState.executionQueue], 20),
+  }, actor);
+
+  const startedMs = Date.now();
+  try {
+    await ensureSqlServerBackupDirectory(pool, backupDirectory(filePath));
+    ensureLocalBackupDirectory(filePath);
+
+    const request = pool.request();
+    (request as typeof request & { timeout: number }).timeout = Number(process.env.DLE_ENTERPRISE_BACKUP_TIMEOUT_MS || 900000);
+    await request
+      .input('BackupPath', sql.NVarChar(4000), filePath)
+      .query(`
+DECLARE @DatabaseName sysname = DB_NAME();
+DECLARE @BackupSql nvarchar(max) = N'BACKUP DATABASE ' + QUOTENAME(@DatabaseName) + N' TO DISK = @BackupPath WITH INIT, CHECKSUM, COMPRESSION, STATS = 10;';
+EXEC sp_executesql @BackupSql, N'@BackupPath nvarchar(4000)', @BackupPath = @BackupPath;
+RESTORE VERIFYONLY FROM DISK = @BackupPath WITH CHECKSUM;
+`);
+
+    const completedAt = new Date().toISOString();
+    const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedMs) / 1000));
+    const latest = await readBackupDisasterRecoveryState();
+    const successMessage = `Backup completed in ${elapsedSeconds}s. Verified with RESTORE VERIFYONLY.`;
+    const next = await writeBackupDisasterRecoveryState({
+      ...latest,
+      lastOperation: {
+        type: context.operationType,
+        status: 'success',
+        message: successMessage,
+        at: completedAt,
+        payrollPeriod: context.payrollPeriod,
+      },
+      serviceMetrics: metricSnapshot('Completed', successMessage, completedAt),
+      executionQueue: compact([jobRecord(context.jobLabel, 'Completed', filePath, completedAt), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
+      restoreReadiness: compact([restoreRecord(filePath, completedAt, 'Passed'), ...latest.restoreReadiness], 20),
+      incidents: latest.incidents.filter((incident) => !/full database backup|mkdir|EINVAL/i.test(incident.message)),
+      audit: compact([{ at: completedAt, actor, action: context.successAuditAction, detail: filePath }, ...latest.audit], 100),
+    }, actor);
+    return { filePath, completedAt, elapsedSeconds, state: await enrichBackupDisasterRecoveryState(next) };
+  } catch (error) {
+    const failedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : 'Database backup failed.';
+    const latest = await readBackupDisasterRecoveryState();
+    const next = await writeBackupDisasterRecoveryState({
+      ...latest,
+      lastOperation: {
+        type: context.operationType,
+        status: 'failed',
+        message,
+        at: failedAt,
+        payrollPeriod: context.payrollPeriod,
+      },
+      serviceMetrics: metricSnapshot('Failed', message),
+      executionQueue: compact([jobRecord(context.jobLabel, 'Failed', filePath, failedAt), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
+      incidents: compact([incidentRecord(message, failedAt), ...latest.incidents], 50),
+      audit: compact([{ at: failedAt, actor, action: context.failedAuditAction, detail: message }, ...latest.audit], 100),
+    }, actor);
+    throw Object.assign(new Error(message), { backupState: await enrichBackupDisasterRecoveryState(next) });
+  }
 };
 
 const normalizePathKey = (value: string) => value.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
@@ -504,67 +609,31 @@ export const runDleEnterpriseFullBackup = async (actor: string) => {
   const databaseResult = await pool.request().query('SELECT DB_NAME() AS databaseName');
   const databaseName = String(databaseResult.recordset[0]?.databaseName || DATABASE_NAME);
   const filePath = backupFilePath(target.location, databaseName);
-  const startedAt = new Date().toISOString();
 
-  await writeBackupDisasterRecoveryState({
-    ...initialState,
-    lastOperation: { type: 'full-backup', status: 'running', message: `Writing backup to ${backupDirectory(filePath)}`, at: startedAt },
-    serviceMetrics: metricSnapshot('Running', `Writing backup to ${backupDirectory(filePath)}`),
-    executionQueue: compact([jobRecord('DLE_Enterprise Full Database Backup', 'Running', filePath, startedAt), ...initialState.executionQueue], 20),
-  }, actor);
+  const result = await executeDleEnterpriseBackupToPath(actor, filePath, {
+    operationType: 'full-backup',
+    jobLabel: 'DLE_Enterprise Full Database Backup',
+    successAuditAction: 'Full database backup completed',
+    failedAuditAction: 'Full database backup failed',
+  });
 
-  const startedMs = Date.now();
-  try {
-    await ensureSqlServerBackupDirectory(pool, backupDirectory(filePath));
-    ensureLocalBackupDirectory(filePath);
-
-    const request = pool.request();
-    (request as typeof request & { timeout: number }).timeout = Number(process.env.DLE_ENTERPRISE_BACKUP_TIMEOUT_MS || 900000);
-    await request
-      .input('BackupPath', sql.NVarChar(4000), filePath)
-      .query(`
-DECLARE @DatabaseName sysname = DB_NAME();
-DECLARE @BackupSql nvarchar(max) = N'BACKUP DATABASE ' + QUOTENAME(@DatabaseName) + N' TO DISK = @BackupPath WITH INIT, CHECKSUM, COMPRESSION, STATS = 10;';
-EXEC sp_executesql @BackupSql, N'@BackupPath nvarchar(4000)', @BackupPath = @BackupPath;
-RESTORE VERIFYONLY FROM DISK = @BackupPath WITH CHECKSUM;
-`);
-
-    const completedAt = new Date().toISOString();
-    const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedMs) / 1000));
-    const latest = await readBackupDisasterRecoveryState();
-    const nextTargets = latest.replicationTargets.map((item) => item.target === target.target ? {
+  const latest = await readBackupDisasterRecoveryState();
+  const targetRecord = targetWithPrimary(latest);
+  if (targetRecord) {
+    const nextTargets = latest.replicationTargets.map((item) => item.target === targetRecord.target ? {
       ...item,
-      location: target.location,
+      location: targetRecord.location,
       status: 'Verified',
-      lastCopy: completedAt,
+      lastCopy: result.completedAt,
       lag: '0 min',
     } : item);
-    const next = await writeBackupDisasterRecoveryState({
-      ...latest,
-      lastOperation: { type: 'full-backup', status: 'success', message: `Full backup completed in ${elapsedSeconds}s. Verified with RESTORE VERIFYONLY.`, at: completedAt },
-      serviceMetrics: metricSnapshot('Completed', `Full backup completed in ${elapsedSeconds}s`, completedAt),
-      replicationTargets: nextTargets,
-      executionQueue: compact([jobRecord('DLE_Enterprise Full Database Backup', 'Completed', filePath, completedAt), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
-      restoreReadiness: compact([restoreRecord(filePath, completedAt, 'Passed'), ...latest.restoreReadiness], 20),
-      incidents: latest.incidents.filter((incident) => !/full database backup|mkdir|EINVAL/i.test(incident.message)),
-      audit: compact([{ at: completedAt, actor, action: 'Full database backup completed', detail: filePath }, ...latest.audit], 100),
-    }, actor);
-    return enrichBackupDisasterRecoveryState(next);
-  } catch (error) {
-    const failedAt = new Date().toISOString();
-    const message = error instanceof Error ? error.message : 'Full database backup failed.';
-    const latest = await readBackupDisasterRecoveryState();
-    const next = await writeBackupDisasterRecoveryState({
-      ...latest,
-      lastOperation: { type: 'full-backup', status: 'failed', message, at: failedAt },
-      serviceMetrics: metricSnapshot('Failed', message),
-      executionQueue: compact([jobRecord('DLE_Enterprise Full Database Backup', 'Failed', filePath, failedAt), ...latest.executionQueue.filter((job) => job.status !== 'Running')], 20),
-      incidents: compact([incidentRecord(message, failedAt), ...latest.incidents], 50),
-      audit: compact([{ at: failedAt, actor, action: 'Full database backup failed', detail: message }, ...latest.audit], 100),
-    }, actor);
+    const next = await writeBackupDisasterRecoveryState({ ...latest, replicationTargets: nextTargets }, actor);
     return enrichBackupDisasterRecoveryState(next);
   }
+  return result.state;
 };
+
+export const runDleEnterpriseFullBackupToPath = executeDleEnterpriseBackupToPath;
 
 export const saveBackupDisasterRecoveryConfiguration = async (
   patch: Partial<BackupDisasterRecoveryState>,

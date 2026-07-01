@@ -7,6 +7,7 @@ import {
   openPayrollPeriod,
   reopenPayrollPeriodRecord,
 } from '@/lib/payroll-period-store';
+import { assertPayrollCutoverBackupBeforeOpen } from '@/lib/payroll-cutover-backup-service';
 import { payrollSessionContext, managementPermissions } from '@/lib/payroll-session';
 
 const ok = <T,>(data: T) => NextResponse.json({ status: 'success', data });
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
       return ok({ record });
     }
     if (action === 'open' || action === 'activate') {
+      await assertPayrollCutoverBackupBeforeOpen(period);
       const record = action === 'activate' ? await activatePayrollPeriod(period, actor) : await openPayrollPeriod(period, actor);
       return ok({ record, activePeriod: period });
     }

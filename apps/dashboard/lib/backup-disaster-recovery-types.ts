@@ -64,10 +64,28 @@ export type BackupAuditEvent = {
 };
 
 export type BackupLastOperation = {
-  type: 'full-backup' | 'restore-drill' | 'configuration';
+  type: 'full-backup' | 'restore-drill' | 'configuration' | 'payroll-cutover';
   status: 'success' | 'failed' | 'running';
   message: string;
   at: string;
+  payrollPeriod?: string;
+};
+
+export type PayrollCutoverBackupRecord = {
+  payrollPeriod: string;
+  backupFilePath: string;
+  completedAt: string;
+  status: 'success' | 'failed';
+  actor: string;
+  message: string;
+};
+
+export type PayrollCutoverBackupSettings = {
+  /** Automatic full backup when a payroll period is closed and locked. */
+  enabled: boolean;
+  /** Block opening the next payroll period until the prior closed period has a verified cutover backup. */
+  requireBeforeNextPeriodOpen: boolean;
+  records: PayrollCutoverBackupRecord[];
 };
 
 export type BackupDisasterRecoveryState = {
@@ -82,6 +100,7 @@ export type BackupDisasterRecoveryState = {
   restoreReadiness: BackupRestoreReadiness[];
   audit: BackupAuditEvent[];
   lastOperation?: BackupLastOperation | null;
+  payrollCutover?: PayrollCutoverBackupSettings;
   updatedAt: string;
   updatedBy: string;
 };

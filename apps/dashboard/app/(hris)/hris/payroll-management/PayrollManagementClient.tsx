@@ -154,6 +154,7 @@ type PayrollRun = {
   statutorySchedulesGeneratedBy?: string | null;
   postedAt: string | null;
   postedBy?: string | null;
+  artifacts?: Array<{ type: string; label: string; fileName: string; generatedAt: string; generatedBy: string; meta?: Record<string, unknown> }>;
 };
 
 type PayrollPayload = {
@@ -679,7 +680,7 @@ const actionsBySection: Partial<Record<SectionId, PayrollAction[]>> = {
   'finance-integration': [
     action('generate-bank-schedule', 'Generate Bank Payment Schedule', 'primary', financeRoles, true),
     action('validate-bank-accounts', 'Validate Bank Accounts', 'workflow', financeRoles),
-    action('export-bank-file', 'Export Bank Payment File', 'workflow', financeRoles, true),
+    action('export-bank-file', 'Export Bank Payment File', 'workflow', financeRoles),
     action('mark-payment-sent', 'Mark Payment Sent', 'workflow', financeRoles, true),
     action('mark-payment-confirmed', 'Mark Payment Confirmed', 'workflow', financeRoles, true),
     action('reconcile-bank-payment', 'Reconcile Bank Payment', 'secondary', financeRoles),
@@ -4282,6 +4283,16 @@ export default function PayrollManagementClient({
     });
   }, [payload?.records, query, status]);
 
+  const mergePayrollRun = (run: PayrollRun) => {
+    setPayload((prev) => {
+      if (!prev) return prev;
+      const runs = prev.runs.some((item) => item.id === run.id || item.period === run.period)
+        ? prev.runs.map((item) => (item.id === run.id || item.period === run.period ? { ...item, ...run } : item))
+        : [...prev.runs, run];
+      return { ...prev, currentRun: run, runs, generatedAt: new Date().toISOString() };
+    });
+  };
+
   const runAction = async (action: string, reason = '', periodOverride?: string, reportOptions?: { report?: string; reportName?: string }) => {
     setBusyAction(action);
     setToast('');
@@ -4301,11 +4312,18 @@ export default function PayrollManagementClient({
       });
       const json = await readApiResponse<{ run: PayrollRun }>(res);
       if (!res.ok || json.status !== 'success') throw new Error(json.error || 'Payroll action failed');
-      setToast(`${action.replace('-run', '').replace(/-/g, ' ')} completed.`);
+      const friendly = action.replace('-run', '').replace(/-/g, ' ');
+      setToast(action === 'generate-bank-schedule' ? 'Bank schedule generated successfully.' : `${friendly} completed.`);
       if (period) setViewPeriod(period);
-      await load(period || null);
+      if (json.data?.run && ['generate-bank-schedule', 'generate-statutory-schedules'].includes(action)) {
+        mergePayrollRun(json.data.run);
+      } else {
+        await load(period || null);
+      }
+      return true;
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Payroll action failed');
+      return false;
     } finally {
       setBusyAction('');
     }
@@ -4420,8 +4438,22 @@ export default function PayrollManagementClient({
       exportReportPdf();
       return;
     }
+    if (actionItem.id === 'export-bank-file') {
+      exportReportExcel('bank-schedule');
+      return;
+    }
+    if (actionItem.id === 'generate-bank-schedule' && payrollRunFor(payload)?.bankScheduleGeneratedAt) {
+      setToast('Bank schedule is already generated. Downloading Excel export…');
+      exportReportExcel('bank-schedule');
+      return;
+    }
     if (actionItem.id === 'generate-report') {
       void generateReport();
+      return;
+    }
+    const auth = canRunAction(actionItem, role, payload);
+    if (!auth.allowed) {
+      setToast(auth.reason || 'This action is not available right now.');
       return;
     }
     if (actionItem.sensitive) {
@@ -4436,8 +4468,12 @@ export default function PayrollManagementClient({
     if (!confirmAction) return;
     if (confirmAction.reasonRequired && !actionReason.trim()) return;
     const actionToRun = confirmAction;
-    setConfirmAction(null);
-    void runAction(actionToRun.id, actionReason.trim());
+    void runAction(actionToRun.id, actionReason.trim()).then((ok) => {
+      setConfirmAction(null);
+      if (ok && actionToRun.id === 'generate-bank-schedule') {
+        exportReportExcel('bank-schedule');
+      }
+    });
   };
 
   const reportExportUrl = (format: 'csv' | 'xls' | 'pdf' | 'html', report = 'payroll-register', status = 'All') => {
@@ -4684,11 +4720,14 @@ export default function PayrollManagementClient({
           viewPeriod={viewPeriod}
           canViewMoney={canViewMoney}
           onRefresh={() => void load()}
-          onExportCsv={exportCsv}
-          onExportExcel={exportExcel}
+          onExportCsv={() => exportReportCsv('bank-schedule')}
+          onExportExcel={() => exportReportExcel('bank-schedule')}
+          onExportPdf={() => exportReportPdf('bank-schedule')}
+          busyAction={busyAction}
           onSelectTab={(tab) => {
             setActiveTabs((prev) => ({ ...prev, 'finance-integration': tab }));
-            window.history.pushState(null, '', sectionHref('finance-integration'));
+            const href = tab === 'overview' ? '/hris/payroll-management/bank-finance' : `/hris/payroll-management/bank-finance?tab=${encodeURIComponent(tab)}`;
+            window.history.pushState(null, '', href);
           }}
           onFixException={(id) => {
             const issue = payload?.exceptions.find((item) => item.id === id);
@@ -4720,6 +4759,7 @@ export default function PayrollManagementClient({
             payload={payload}
             reason={actionReason}
             setReason={setActionReason}
+            busy={Boolean(busyAction)}
             onCancel={() => setConfirmAction(null)}
             onConfirm={confirmSensitiveAction}
           />
@@ -5347,6 +5387,7 @@ export default function PayrollManagementClient({
           payload={payload}
           reason={actionReason}
           setReason={setActionReason}
+          busy={Boolean(busyAction)}
           onCancel={() => setConfirmAction(null)}
           onConfirm={confirmSensitiveAction}
         />
@@ -6419,7 +6460,7 @@ function WorkflowStepper({ payload, onAction }: { payload: PayrollPayload | null
   );
 }
 
-function ConfirmationModal({ actionItem, payload, reason, setReason, onCancel, onConfirm }: { actionItem: PayrollAction; payload: PayrollPayload | null; reason: string; setReason: (value: string) => void; onCancel: () => void; onConfirm: () => void }) {
+function ConfirmationModal({ actionItem, payload, reason, setReason, busy = false, onCancel, onConfirm }: { actionItem: PayrollAction; payload: PayrollPayload | null; reason: string; setReason: (value: string) => void; busy?: boolean; onCancel: () => void; onConfirm: () => void }) {
   const requiresReason = actionItem.reasonRequired || ['reject-run', 'request-revision', 'reopen-period', 'reverse-payroll', 'reverse-journal-posting'].includes(actionItem.id);
   const canConfirm = !requiresReason || reason.trim().length > 2;
   return (
@@ -6442,8 +6483,8 @@ function ConfirmationModal({ actionItem, payload, reason, setReason, onCancel, o
           ) : null}
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
-          <button type="button" onClick={onCancel} className="min-h-10 rounded-lg border border-slate-200 px-4 text-xs font-black text-slate-700 hover:bg-slate-50">Cancel</button>
-          <button type="button" onClick={onConfirm} disabled={!canConfirm} className="min-h-10 rounded-lg bg-slate-900 px-4 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50">Confirm Action</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="min-h-10 rounded-lg border border-slate-200 px-4 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
+          <button type="button" onClick={onConfirm} disabled={!canConfirm || busy} className="min-h-10 rounded-lg bg-slate-900 px-4 text-xs font-black text-white disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Processing…' : 'Confirm Action'}</button>
         </div>
       </div>
     </div>

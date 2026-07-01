@@ -4,11 +4,15 @@ import type { ComponentType } from 'react';
 import {
   AlertTriangle,
   Banknote,
+  CheckCircle2,
   ChevronRight,
+  Circle,
   CreditCard,
   Download,
   FileSpreadsheet,
+  FileText,
   Landmark,
+  Printer,
   RefreshCcw,
   Scale,
   Users,
@@ -23,10 +27,39 @@ type FinanceException = {
   owner: string;
 };
 
+type FinanceRecord = {
+  employeeId: string;
+  fullName: string;
+  bankName?: string;
+  accountNo?: string;
+  sortCode?: string;
+  branchCode?: string;
+  bankCode?: string;
+  netPay: number | null;
+  grossPay?: number | null;
+  deductions?: number | null;
+  location?: string;
+  payrollStatus: string;
+  exceptionCount?: number;
+  exceptions?: string[];
+};
+
+type PayrollArtifact = {
+  type: string;
+  label: string;
+  fileName: string;
+  generatedAt: string;
+  generatedBy: string;
+};
+
 type FinanceRun = {
   status: string;
   bankScheduleGeneratedAt?: string | null;
+  bankScheduleGeneratedBy?: string | null;
+  statutorySchedulesGeneratedAt?: string | null;
   postedAt?: string | null;
+  postedBy?: string | null;
+  artifacts?: PayrollArtifact[];
 };
 
 export type BankFinancePayload = {
@@ -40,8 +73,14 @@ export type BankFinancePayload = {
   workflow?: { currentStatus: string; nextOwner: string };
   summary: {
     totalEmployees: number;
+    payrollEligible?: number;
     netPay: number | null;
+    grossPay?: number | null;
+    deductions?: number | null;
+    readyEmployees?: number;
+    exceptionCount?: number;
   };
+  records?: FinanceRecord[];
   exceptions: FinanceException[];
   currentRun?: FinanceRun | null;
   permissions?: { canViewMoney?: boolean; canExport?: boolean };
@@ -64,9 +103,11 @@ type Props = {
   lastLoaded: string;
   viewPeriod: string | null;
   canViewMoney: boolean;
+  busyAction?: string;
   onRefresh: () => void;
   onExportCsv: () => void;
   onExportExcel: () => void;
+  onExportPdf?: () => void;
   onSelectTab: (tab: BankFinanceTabId) => void;
   onFixException: (id: string) => void;
   onViewAllExceptions: () => void;
@@ -152,9 +193,11 @@ export default function BankFinanceHub({
   lastLoaded,
   viewPeriod,
   canViewMoney,
+  busyAction = '',
   onRefresh,
   onExportCsv,
   onExportExcel,
+  onExportPdf,
   onSelectTab,
   onFixException,
   onViewAllExceptions,
@@ -531,65 +574,409 @@ export default function BankFinanceHub({
             onFix={onFixException}
             onViewAll={onViewAllExceptions}
           />
-        ) : (
-          <FinanceTabPanel tab={activeTab} onBack={() => onSelectTab('overview')} onFinanceAction={onFinanceAction} />
-        )}
+        ) : activeTab === 'bank-schedule' ? (
+          <BankSchedulePanel
+            payload={payload}
+            run={run}
+            canViewMoney={canViewMoney}
+            busyAction={busyAction}
+            onBack={() => onSelectTab('overview')}
+            onFinanceAction={onFinanceAction}
+            onExportExcel={onExportExcel}
+            onExportPdf={onExportPdf}
+          />
+        ) : activeTab === 'payment-files' ? (
+          <PaymentFilesPanel
+            payload={payload}
+            run={run}
+            canViewMoney={canViewMoney}
+            onBack={() => onSelectTab('overview')}
+            onExportExcel={onExportExcel}
+          />
+        ) : activeTab === 'payroll-journal' ? (
+          <PayrollJournalPanel run={run} busyAction={busyAction} onBack={() => onSelectTab('overview')} onFinanceAction={onFinanceAction} />
+        ) : activeTab === 'reconciliation' ? (
+          <ReconciliationPanel onBack={() => onSelectTab('overview')} onFinanceAction={onFinanceAction} />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function FinanceTabPanel({
-  tab,
+const releasedStatuses = ['Released', 'Locked', 'Posted', 'Published', 'Closed'];
+
+const bankScheduleRowsFor = (records: FinanceRecord[] = []) => {
+  const ready = records.filter((record) => record.payrollStatus === 'Ready');
+  return ready.length ? ready : records.filter((record) => record.payrollStatus !== 'Blocked');
+};
+
+const bankScheduleReadyFor = (run: FinanceRun | null | undefined) =>
+  Boolean(
+    run?.bankScheduleGeneratedAt ||
+      run?.artifacts?.some((item) => item.type === 'bank-schedule'),
+  );
+
+const bankValidationIssues = (records: FinanceRecord[] = []) =>
+  records.filter(
+    (record) =>
+      record.payrollStatus !== 'Blocked' &&
+      (!record.bankName || !record.accountNo || !record.netPay || Number(record.netPay) <= 0),
+  );
+
+function WorkflowStepCard({
+  title,
+  status,
+  detail,
+  done,
+}: {
+  title: string;
+  status: string;
+  detail: string;
+  done: boolean;
+}) {
+  return (
+    <div className={`rounded-xl border p-4 ${done ? 'border-emerald-200 bg-emerald-50' : 'border-[#E5E7EB] bg-slate-50'}`}>
+      <div className="flex items-start gap-3">
+        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${done ? 'bg-emerald-100 text-emerald-700' : 'bg-white text-slate-400'}`}>
+          {done ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
+        </span>
+        <div className="min-w-0">
+          <p className={`text-sm font-bold ${done ? 'text-emerald-900' : 'text-[#0F172A]'}`}>{title}</p>
+          <p className={`mt-1 text-xs font-semibold ${done ? 'text-emerald-700' : 'text-[#64748B]'}`}>{status}</p>
+          <p className="mt-2 text-xs text-slate-600">{detail}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BankSchedulePanel({
+  payload,
+  run,
+  canViewMoney,
+  busyAction,
+  onBack,
+  onFinanceAction,
+  onExportExcel,
+  onExportPdf,
+}: {
+  payload: BankFinancePayload | null;
+  run: FinanceRun | null | undefined;
+  canViewMoney: boolean;
+  busyAction: string;
+  onBack: () => void;
+  onFinanceAction: (actionId: string) => void;
+  onExportExcel: () => void;
+  onExportPdf?: () => void;
+}) {
+  const records = payload?.records || [];
+  const bankRows = bankScheduleRowsFor(records);
+  const previewRows = bankRows.slice(0, 25);
+  const validationIssues = bankValidationIssues(records);
+  const bankScheduleReady = bankScheduleReadyFor(run);
+  const payrollReleased = releasedStatuses.includes(run?.status || '');
+  const generating = busyAction === 'generate-bank-schedule';
+  const totals = bankRows.reduce(
+    (sum, record) => ({
+      grossPay: sum.grossPay + Number(record.grossPay || 0),
+      deductions: sum.deductions + Number(record.deductions || 0),
+      netPay: sum.netPay + Number(record.netPay || 0),
+    }),
+    { grossPay: 0, deductions: 0, netPay: 0 },
+  );
+  const bankArtifact = run?.artifacts?.find((item) => item.type === 'bank-schedule');
+
+  return (
+    <div className="space-y-4">
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden; }
+          #bank-schedule-print-area, #bank-schedule-print-area * { visibility: visible; }
+          #bank-schedule-print-area { position: absolute; left: 0; top: 0; width: 100%; background: white; padding: 18px; }
+          #bank-schedule-print-area table { width: 100%; border-collapse: collapse; }
+          #bank-schedule-print-area th, #bank-schedule-print-area td { border: 1px solid #cbd5e1; padding: 6px; font-size: 11px; }
+          #bank-schedule-print-area th { background: #0f172a !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      `}</style>
+      <section className="rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-sm">
+        <button type="button" onClick={onBack} className="text-sm font-semibold text-[#2563EB] hover:underline">
+          ← Back to Overview
+        </button>
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold">Bank Schedule</h2>
+            <p className="mt-2 text-sm text-[#64748B]">
+              {payload?.periodLabel || 'Current period'} · {fmtNum(bankRows.length)} employees in payment schedule
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {bankScheduleReady ? (
+              <>
+                <button type="button" onClick={onExportExcel} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-700">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Export Excel (all {fmtNum(bankRows.length)})
+                </button>
+                {onExportPdf ? (
+                  <button type="button" onClick={onExportPdf} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">
+                    <FileText className="h-4 w-4" />
+                    Export PDF
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50">
+                  <Printer className="h-4 w-4" />
+                  Print Preview
+                </button>
+              </>
+            ) : payrollReleased ? (
+              <button
+                type="button"
+                disabled={generating}
+                onClick={() => onFinanceAction('generate-bank-schedule')}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {generating ? 'Generating…' : 'Generate Bank Schedule'}
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            ) : (
+              <span className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800">Release payroll before generating the bank schedule.</span>
+            )}
+          </div>
+        </div>
+
+        {bankScheduleReady ? (
+          <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            Bank schedule generated
+            {run?.bankScheduleGeneratedAt ? ` on ${new Date(run.bankScheduleGeneratedAt).toLocaleString('en-GB')}` : ''}
+            {run?.bankScheduleGeneratedBy ? ` by ${run.bankScheduleGeneratedBy}` : ''}.
+            {bankArtifact ? ` File: ${bankArtifact.fileName}.` : ''} Use Export Excel to download the full schedule.
+          </p>
+        ) : null}
+
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <WorkflowStepCard
+            title="Schedule Generation"
+            done={bankScheduleReady || payrollReleased}
+            status={bankScheduleReady ? 'Complete' : payrollReleased ? 'Ready to generate' : 'Waiting for payroll release'}
+            detail={bankScheduleReady ? 'Bank payment schedule stamped and audit logged.' : 'Confirm generation to stamp this payroll period for bank processing.'}
+          />
+          <WorkflowStepCard
+            title="Employee Payment Schedule"
+            done={bankRows.length > 0}
+            status={`${fmtNum(bankRows.length)} employees`}
+            detail={`Net payroll exposure ${fmtMoney(totals.netPay, canViewMoney, payload?.payrollComputed !== false)} across salary payment lines.`}
+          />
+          <WorkflowStepCard
+            title="Validation"
+            done={validationIssues.length === 0}
+            status={validationIssues.length ? `${fmtNum(validationIssues.length)} bank detail issues` : 'All payment lines validated'}
+            detail={validationIssues.length ? 'Some employees are missing bank name, account number, or net pay.' : 'Bank name, account number, and net pay are present for schedule lines.'}
+          />
+          <WorkflowStepCard
+            title="Export"
+            done={bankScheduleReady}
+            status={bankScheduleReady ? 'Ready for download' : 'Pending generation'}
+            detail={bankScheduleReady ? 'Export formatted Excel for all employees or PDF for a summary extract.' : 'Generate the schedule first, then export to Excel or PDF.'}
+          />
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+          <p className="text-xs font-bold uppercase text-blue-700">Gross</p>
+          <p className="mt-2 text-2xl font-bold text-[#0F172A]">{fmtMoney(totals.grossPay, canViewMoney, payload?.payrollComputed !== false)}</p>
+        </div>
+        <div className="rounded-xl border border-violet-100 bg-violet-50 p-4">
+          <p className="text-xs font-bold uppercase text-violet-700">Deductions</p>
+          <p className="mt-2 text-2xl font-bold text-[#0F172A]">{fmtMoney(totals.deductions, canViewMoney, payload?.payrollComputed !== false)}</p>
+        </div>
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+          <p className="text-xs font-bold uppercase text-emerald-700">Net Salary</p>
+          <p className="mt-2 text-2xl font-bold text-[#0F172A]">{fmtMoney(totals.netPay, canViewMoney, payload?.payrollComputed !== false)}</p>
+        </div>
+      </section>
+
+      <section id="bank-schedule-print-area" className="rounded-2xl border border-[#E5E7EB] bg-white shadow-sm">
+        <div className="border-b border-[#E5E7EB] p-5">
+          <h3 className="text-lg font-semibold">Employee Payment Schedule Preview</h3>
+          <p className="mt-1 text-sm text-[#64748B]">Review bank details and net salaries before export. Showing first {fmtNum(previewRows.length)} of {fmtNum(bankRows.length)} employees.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-[960px] w-full text-left">
+            <thead className="bg-[#0F172A] text-xs font-bold uppercase text-white">
+              <tr>
+                {['Employee Code', 'Employee Name', 'Bank', 'Account No', 'Sort Code', 'NET Salary', 'Location'].map((head) => (
+                  <th key={head} className="px-4 py-3">
+                    {head}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {previewRows.map((record) => (
+                <tr key={record.employeeId} className="hover:bg-slate-50">
+                  <td className="px-4 py-3 text-sm font-semibold text-[#0F172A]">{record.employeeId}</td>
+                  <td className="px-4 py-3 text-sm font-semibold text-[#0F172A]">{record.fullName}</td>
+                  <td className="px-4 py-3 text-xs text-slate-700">{record.bankName || 'Not configured'}</td>
+                  <td className="px-4 py-3 text-xs font-semibold text-slate-700">{record.accountNo || 'Not configured'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-700">{record.sortCode || record.branchCode || record.bankCode || '—'}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-emerald-700">{fmtMoney(record.netPay, canViewMoney, payload?.payrollComputed !== false)}</td>
+                  <td className="px-4 py-3 text-xs text-slate-700">{record.location || '—'}</td>
+                </tr>
+              ))}
+              {!previewRows.length ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm font-semibold text-slate-600">
+                    No payment lines are ready. Process payroll and resolve blocked employees first.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {bankRows.length > previewRows.length ? (
+          <p className="border-t border-slate-100 px-5 py-3 text-xs font-semibold text-[#64748B] print:hidden">
+            Export Excel for the complete {fmtNum(bankRows.length)}-employee bank schedule.
+          </p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function PaymentFilesPanel({
+  payload,
+  run,
+  canViewMoney,
+  onBack,
+  onExportExcel,
+}: {
+  payload: BankFinancePayload | null;
+  run: FinanceRun | null | undefined;
+  canViewMoney: boolean;
+  onBack: () => void;
+  onExportExcel: () => void;
+}) {
+  const records = payload?.records || [];
+  const bankRows = bankScheduleRowsFor(records);
+  const validationIssues = bankValidationIssues(records);
+  const bankScheduleReady = bankScheduleReadyFor(run);
+  const netTotal = bankRows.reduce((sum, record) => sum + Number(record.netPay || 0), 0);
+  const bankArtifact = run?.artifacts?.find((item) => item.type === 'bank-schedule');
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-sm">
+        <button type="button" onClick={onBack} className="text-sm font-semibold text-[#2563EB] hover:underline">
+          ← Back to Overview
+        </button>
+        <h2 className="mt-4 text-2xl font-semibold">Payment Files</h2>
+        <p className="mt-2 text-sm text-[#64748B]">Generate and export bank payment files for {payload?.periodLabel || 'the current period'}.</p>
+
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <WorkflowStepCard
+            title="Bank File Generation"
+            done={bankScheduleReady}
+            status={bankScheduleReady ? 'Schedule available' : 'Not generated'}
+            detail={bankScheduleReady ? `Payment file based on ${fmtNum(bankRows.length)} salary lines.` : 'Generate the bank schedule on the Bank Schedule tab first.'}
+          />
+          <WorkflowStepCard
+            title="File Validation"
+            done={validationIssues.length === 0}
+            status={validationIssues.length ? `${fmtNum(validationIssues.length)} issues` : 'Validated'}
+            detail={validationIssues.length ? 'Fix missing bank accounts before sending to the bank.' : 'All schedule lines have bank account details and net pay.'}
+          />
+          <WorkflowStepCard
+            title="Export History"
+            done={Boolean(bankArtifact)}
+            status={bankArtifact ? bankArtifact.fileName : 'No exports yet'}
+            detail={bankArtifact ? `Last generated ${new Date(bankArtifact.generatedAt).toLocaleString('en-GB')} by ${bankArtifact.generatedBy}` : 'Export Excel to create the bank payment file.'}
+          />
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div>
+            <p className="text-xs font-bold uppercase text-slate-500">Payment batch</p>
+            <p className="mt-1 text-lg font-bold text-[#0F172A]">{fmtMoney(netTotal, canViewMoney, payload?.payrollComputed !== false)}</p>
+            <p className="text-xs text-[#64748B]">{fmtNum(bankRows.length)} employees</p>
+          </div>
+          <button
+            type="button"
+            onClick={onExportExcel}
+            disabled={!bankScheduleReady && bankRows.length === 0}
+            className="ml-auto inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" />
+            Export Payment File (Excel)
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      </section>
+
+      {validationIssues.length ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <h3 className="text-sm font-bold text-amber-900">{fmtNum(validationIssues.length)} employees need bank details before payment file export</h3>
+          <div className="mt-3 space-y-2">
+            {validationIssues.slice(0, 8).map((record) => (
+              <p key={record.employeeId} className="text-xs font-semibold text-amber-800">
+                {record.employeeId} · {record.fullName} — {!record.bankName ? 'missing bank' : !record.accountNo ? 'missing account' : 'invalid net pay'}
+              </p>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function PayrollJournalPanel({
+  run,
+  busyAction,
   onBack,
   onFinanceAction,
 }: {
-  tab: BankFinanceTabId;
+  run: FinanceRun | null | undefined;
+  busyAction: string;
   onBack: () => void;
   onFinanceAction: (actionId: string) => void;
 }) {
-  const tabMeta = tabs.find((item) => item.id === tab);
-  const drillDowns: Partial<Record<BankFinanceTabId, string[]>> = {
-    'bank-schedule': ['Schedule Generation', 'Employee Payment Schedule', 'Validation', 'Export'],
-    'payment-files': ['Bank File Generation', 'File Validation', 'Export History'],
-    'payroll-journal': ['Journal Mapping', 'Journal Posting', 'Posting History'],
-    reconciliation: ['Bank Reconciliation', 'Payroll Reconciliation', 'Variance Review'],
-  };
-  const actions: Partial<Record<BankFinanceTabId, { label: string; action: string }>> = {
-    'bank-schedule': { label: 'Generate Bank Schedule', action: 'generate-bank-schedule' },
-    'payment-files': { label: 'Export Payment File', action: 'export-bank-file' },
-    'payroll-journal': { label: 'Post Payroll Journal', action: 'post-run' },
-    reconciliation: { label: 'Run Reconciliation', action: 'reconcile-bank-payment' },
-  };
-  const links = drillDowns[tab] || [];
-  const primary = actions[tab];
-
+  const posted = Boolean(run?.postedAt);
   return (
     <section className="rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-sm">
       <button type="button" onClick={onBack} className="text-sm font-semibold text-[#2563EB] hover:underline">
         ← Back to Overview
       </button>
-      <h2 className="mt-4 text-2xl font-semibold">{tabMeta?.label || tab}</h2>
-      <p className="mt-2 text-sm text-[#64748B]">Open the full {tabMeta?.label?.toLowerCase()} workspace for operational finance controls.</p>
-      {links.length ? (
-        <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {links.map((label) => (
-            <div key={label} className="rounded-xl border border-[#E5E7EB] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-              {label}
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {primary ? (
-        <button
-          type="button"
-          onClick={() => onFinanceAction(primary.action)}
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-5 py-3 text-sm font-bold text-white hover:bg-blue-700"
-        >
-          {primary.label}
+      <h2 className="mt-4 text-2xl font-semibold">Payroll Journal</h2>
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <WorkflowStepCard title="Journal Mapping" done={bankScheduleReadyFor(run)} status="GL mapping ready" detail="Payroll components mapped to finance ledger accounts." />
+        <WorkflowStepCard title="Journal Posting" done={posted} status={posted ? `Posted ${run?.postedAt ? new Date(run.postedAt).toLocaleString('en-GB') : ''}` : 'Not posted'} detail={posted ? `Posted by ${run?.postedBy || 'Finance'}` : 'Post payroll journal after bank schedule and statutory schedules are generated.'} />
+        <WorkflowStepCard title="Posting History" done={posted} status={posted ? 'Recorded in audit trail' : 'No postings'} detail="All journal postings are audit logged." />
+      </div>
+      {!posted ? (
+        <button type="button" disabled={busyAction === 'post-run'} onClick={() => onFinanceAction('post-run')} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-60">
+          {busyAction === 'post-run' ? 'Posting…' : 'Post Payroll Journal'}
           <ChevronRight className="h-4 w-4" />
         </button>
       ) : null}
+    </section>
+  );
+}
+
+function ReconciliationPanel({ onBack, onFinanceAction }: { onBack: () => void; onFinanceAction: (actionId: string) => void }) {
+  return (
+    <section className="rounded-2xl border border-[#E5E7EB] bg-white p-6 shadow-sm">
+      <button type="button" onClick={onBack} className="text-sm font-semibold text-[#2563EB] hover:underline">
+        ← Back to Overview
+      </button>
+      <h2 className="mt-4 text-2xl font-semibold">Reconciliation</h2>
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <WorkflowStepCard title="Bank Reconciliation" done={false} status="Pending" detail="Match bank payment confirmations against the payroll schedule." />
+        <WorkflowStepCard title="Payroll Reconciliation" done={false} status="Pending" detail="Compare gross, deductions, and net pay against finance records." />
+        <WorkflowStepCard title="Variance Review" done={false} status="Pending" detail="Review and sign off any payment variances." />
+      </div>
+      <button type="button" onClick={() => onFinanceAction('reconcile-bank-payment')} className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-5 py-3 text-sm font-bold text-white hover:bg-blue-700">
+        Run Reconciliation
+        <ChevronRight className="h-4 w-4" />
+      </button>
     </section>
   );
 }

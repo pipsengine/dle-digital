@@ -21,6 +21,10 @@ import {
 import type { PayrollSessionRole } from '@/lib/payroll-session';
 import { invalidateHrisEmployeeCaches } from '@/lib/hris-employee-cache';
 import { invalidatePayrollEmployeeCache } from '@/lib/payroll-employee-source';
+import {
+  assertPayrollCutoverBackupBeforeOpen,
+  runPayrollCutoverBackup,
+} from '@/lib/payroll-cutover-backup-service';
 
 type WorkflowInput = {
   action: string;
@@ -72,12 +76,35 @@ const assertNotBlocked = (summary: Awaited<ReturnType<typeof calculatePayrollFor
   }
 };
 
+const FORCE_REFRESH_ACTIONS = new Set([
+  'calculate',
+  'create-run',
+  'validate-payroll',
+  'submit',
+  'submit-run',
+  'approve-run',
+  'release-run',
+  'generate-payslips',
+  'post',
+  'post-run',
+  'close-period',
+]);
+
 export const executePayrollWorkflowAction = async (input: WorkflowInput) => {
   const { action, period, actor, role, reason, comment, ip, paymentDate } = input;
   if (['calculate', 'create-run', 'validate-payroll'].includes(action)) invalidatePayrollEmployeeCache();
-  const calculation = await calculatePayrollForPeriod(period, { forceRefresh: true });
   const periodLabel = payrollPeriodLabel(period);
   let run = await getPayrollRunForPeriod(period);
+  let calculation: Awaited<ReturnType<typeof calculatePayrollForPeriod>> | null = null;
+  const loadCalculation = async () => {
+    if (!calculation) {
+      calculation = await calculatePayrollForPeriod(
+        period,
+        FORCE_REFRESH_ACTIONS.has(action) ? { forceRefresh: true } : undefined,
+      );
+    }
+    return calculation;
+  };
 
   const audit = async (auditAction: string, oldValue: string | null, newValue: string) => {
     await appendPayrollAudit({
@@ -100,29 +127,70 @@ export const executePayrollWorkflowAction = async (input: WorkflowInput) => {
     run.updatedBy = actor;
     await savePayrollRun(run);
     await audit('create-period', null, 'Draft');
-    return { run, calculation, periodRecord: await ensurePayrollPeriod(period, actor) };
+    return { run, calculation: await loadCalculation(), periodRecord: await ensurePayrollPeriod(period, actor) };
   }
 
   if (action === 'open-period') {
+    await assertPayrollCutoverBackupBeforeOpen(period);
     const periodRecord = await openPayrollPeriod(period, actor);
     run = await ensurePayrollRun(period, periodLabel, actor);
     run.status = 'Open';
     run.updatedBy = actor;
     await savePayrollRun(run);
     await audit('open-period', null, 'Open');
-    return { run, calculation, periodRecord };
+    return { run, calculation: await loadCalculation(), periodRecord };
   }
 
   if (action === 'activate-period') {
+    await assertPayrollCutoverBackupBeforeOpen(period);
     const periodRecord = await activatePayrollPeriod(period, actor);
     run = await ensurePayrollRun(period, periodLabel, actor);
     run.status = 'Open';
     await savePayrollRun(run);
     await audit('activate-period', null, period);
-    return { run, calculation, periodRecord };
+    return { run, calculation: await loadCalculation(), periodRecord };
   }
 
   run = run || (await ensurePayrollRun(period, periodLabel, actor));
+
+  if (action === 'generate-bank-schedule') {
+    if (!['Released', 'Locked', 'Published', 'Posted', 'Approved', 'Closed'].includes(run.status)) {
+      throw new Error('Bank schedule generation requires released payroll.');
+    }
+    run.bankScheduleGeneratedAt = nowIso();
+    run.bankScheduleGeneratedBy = actor;
+    run.updatedBy = actor;
+    await savePayrollRun(run);
+    await appendPayrollArtifact(run.id, {
+      type: 'bank-schedule',
+      label: 'Bank payment schedule',
+      fileName: `bank-schedule-${period}.xls`,
+      generatedBy: actor,
+      meta: { netPay: run.netPay, employeeCount: run.employeeCount },
+    });
+    await audit('generate-bank-schedule', null, 'Bank schedule generated');
+    return { run, calculation: calculation as NonNullable<typeof calculation> };
+  }
+
+  if (action === 'generate-statutory-schedules') {
+    if (!['Released', 'Locked', 'Published', 'Posted', 'Approved', 'Closed'].includes(run.status)) {
+      throw new Error('Statutory schedules require released payroll.');
+    }
+    run.statutorySchedulesGeneratedAt = nowIso();
+    run.statutorySchedulesGeneratedBy = actor;
+    run.updatedBy = actor;
+    await savePayrollRun(run);
+    await appendPayrollArtifact(run.id, {
+      type: 'statutory-schedules',
+      label: 'PAYE, pension, NHF, NSITF, ITF schedules',
+      fileName: `statutory-schedules-${period}.zip`,
+      generatedBy: actor,
+    });
+    await audit('generate-statutory-schedules', null, 'Statutory schedules generated');
+    return { run, calculation: calculation as NonNullable<typeof calculation> };
+  }
+
+  calculation = await loadCalculation();
 
   if (['calculate', 'create-run', 'validate-payroll'].includes(action)) {
     assertNotBlocked(calculation.summary, action === 'validate-payroll' ? ['blocked-check'] : []);
@@ -245,43 +313,6 @@ export const executePayrollWorkflowAction = async (input: WorkflowInput) => {
     return { run, calculation };
   }
 
-  if (action === 'generate-bank-schedule') {
-    if (!['Released', 'Locked', 'Published', 'Posted', 'Approved'].includes(run.status)) {
-      throw new Error('Bank schedule generation requires released payroll.');
-    }
-    run.bankScheduleGeneratedAt = nowIso();
-    run.bankScheduleGeneratedBy = actor;
-    run.updatedBy = actor;
-    await savePayrollRun(run);
-    await appendPayrollArtifact(run.id, {
-      type: 'bank-schedule',
-      label: 'Bank payment schedule',
-      fileName: `bank-schedule-${period}.csv`,
-      generatedBy: actor,
-      meta: { netPay: calculation.summary.netPay },
-    });
-    await audit('generate-bank-schedule', null, 'Bank schedule generated');
-    return { run, calculation };
-  }
-
-  if (action === 'generate-statutory-schedules') {
-    if (!['Released', 'Locked', 'Published', 'Posted', 'Approved'].includes(run.status)) {
-      throw new Error('Statutory schedules require released payroll.');
-    }
-    run.statutorySchedulesGeneratedAt = nowIso();
-    run.statutorySchedulesGeneratedBy = actor;
-    run.updatedBy = actor;
-    await savePayrollRun(run);
-    await appendPayrollArtifact(run.id, {
-      type: 'statutory-schedules',
-      label: 'PAYE, pension, NHF, NSITF, ITF schedules',
-      fileName: `statutory-schedules-${period}.zip`,
-      generatedBy: actor,
-    });
-    await audit('generate-statutory-schedules', null, 'Statutory schedules generated');
-    return { run, calculation };
-  }
-
   if (action === 'post' || action === 'post-run') {
     if (!['Released', 'Locked', 'Published'].includes(run.status)) {
       throw new Error('Payroll journal cannot be posted before payroll release.');
@@ -323,7 +354,13 @@ export const executePayrollWorkflowAction = async (input: WorkflowInput) => {
       throw new Error('Payroll run closed but period record could not be persisted to DLE_Enterprise.');
     }
     await audit('close-period', before, run.status);
-    return { run, calculation, periodRecord };
+    const backup = await runPayrollCutoverBackup(period, actor);
+    await audit(
+      'payroll-cutover-backup',
+      backup.skipped ? 'Skipped' : 'Started',
+      backup.skipped ? (backup.reason || 'Skipped') : (backup.record?.backupFilePath || period),
+    );
+    return { run, calculation, periodRecord, payrollCutoverBackup: backup };
   }
 
   if (action === 'reopen-period' || action === 'reopen') {

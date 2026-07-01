@@ -91,6 +91,13 @@ const normalizeState = (value: unknown): BackupDisasterRecoveryState => {
     restoreReadiness: Array.isArray(parsed.restoreReadiness) ? parsed.restoreReadiness.filter((item) => !SEEDED_RESTORE_CONTROLS.has(item.control)) : fallback.restoreReadiness,
     audit: Array.isArray(parsed.audit) ? parsed.audit : fallback.audit,
     lastOperation: parsed.lastOperation && typeof parsed.lastOperation === 'object' ? parsed.lastOperation : fallback.lastOperation,
+    payrollCutover: parsed.payrollCutover && typeof parsed.payrollCutover === 'object'
+      ? {
+          enabled: parsed.payrollCutover.enabled !== false,
+          requireBeforeNextPeriodOpen: parsed.payrollCutover.requireBeforeNextPeriodOpen !== false,
+          records: Array.isArray(parsed.payrollCutover.records) ? parsed.payrollCutover.records : [],
+        }
+      : fallback.payrollCutover,
     updatedAt: parsed.updatedAt || fallback.updatedAt,
     updatedBy: parsed.updatedBy || fallback.updatedBy,
   };
