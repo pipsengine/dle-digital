@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { countDirectReportsFromEmployees, payrollDataSourceInfo, readDirectoryEmployees } from '@/lib/payroll-employee-source';
+import { pendingLeaveApprovalsForActor, readAllEssRequests } from '@/lib/leave-workflow-service';
 import { AUTH_COOKIE, verifySessionToken } from '@/lib/auth/session';
 import { listEnterpriseNotifications } from '@/lib/enterprise-notifications-store';
 
@@ -163,7 +164,22 @@ export async function GET(request: Request) {
   const linked = Boolean(employee);
   const activeTeamSize = employee ? countDirectReportsFromEmployees(employeeSource.employees, employee) : 0;
   const role = employee ? rbacRole(employee, activeTeamSize) : session?.roles?.[0] || 'Employee';
-  const pendingApprovals = role === 'Employee' || activeTeamSize === 0 ? 0 : Math.min(24, Math.ceil(activeTeamSize / 4));
+  let pendingApprovals = 0;
+  if (employee && session && (activeTeamSize > 0 || role !== 'Employee')) {
+    try {
+      const allRequests = await readAllEssRequests();
+      const leaveApprovals = pendingLeaveApprovalsForActor(
+        employee,
+        allRequests,
+        employeeSource.employees,
+        session.roles || [],
+        session.isGlobalAdmin,
+      );
+      pendingApprovals = leaveApprovals.length;
+    } catch {
+      pendingApprovals = activeTeamSize > 0 ? Math.min(24, Math.ceil(activeTeamSize / 4)) : 0;
+    }
+  }
   const sessionCode = compact(session?.employeeCode || session?.employeeId || session?.username);
   const sessionRole = compact(session?.roles?.[0]) || 'Signed-in User';
   const sessionDepartment = compact(session?.department || session?.unit) || 'Application Access';

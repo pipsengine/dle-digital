@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { countDirectReportsFromEmployees, readPayrollEmployees } from '@/lib/payroll-employee-source';
+import { employeeReportsToManager } from '@/lib/reporting-manager-match';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { AUTH_COOKIE, verifySessionToken, type SessionPayload } from '@/lib/auth/session';
 import { calculatePayrollEarnings, calculatePermanentUnionDues, isGenericPayrollGrade } from '@/lib/payroll-earnings-engine';
@@ -1205,6 +1206,19 @@ export async function GET(request: Request) {
         { label: 'Workflow SLA compliance', value: 91, unit: '%' },
         { label: 'Mobile access share', value: 43, unit: '%' },
       ],
+      managerMetrics: (() => {
+        const teamSize = countDirectReportsFromEmployees(employeeSource.employees, employee);
+        const directReports = employeeSource.employees.filter((item) => employeeReportsToManager(item, employee));
+        const onLeave = directReports.filter((item) => /leave/i.test(compact(item.status))).length;
+        return {
+          teamSize,
+          pendingApprovals: leaveApprovals.length,
+          onLeave,
+          missingTimesheets: Math.max(0, directReports.length - Math.min(directReports.length, essContext.attendance.records.length)),
+          teamAttendancePct: essContext.attendance.monthRate || 0,
+          trainingToday: 0,
+        };
+      })(),
       workflowIntelligence: buildEssWorkflowIntelligence({
         employee: {
           employeeId: employee.employeeId,

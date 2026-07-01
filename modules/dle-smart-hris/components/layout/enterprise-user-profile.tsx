@@ -47,6 +47,8 @@ type ProfileUser = {
 
 type EnterpriseUserProfileProps = Partial<ProfileUser> & {
   context?: EnterpriseUserProfileContext;
+  teamSize?: number;
+  pendingApprovals?: number;
 };
 
 const defaults: Record<EnterpriseUserProfileContext, ProfileUser> = {
@@ -161,7 +163,7 @@ const linksFor = (context: EnterpriseUserProfileContext, user: ProfileUser) => {
     { label: 'My Payslips', href: ess ? '/workforce-portal?tab=payroll' : '/hris/payroll/payslip-generation', icon: ReceiptText },
     { label: 'My Leave', href: ess ? '/workforce-portal?tab=leave' : '/hris/leave-management/applications', icon: CalendarDays },
     { label: 'My Requests', href: ess ? '/workforce-portal?tab=services' : '/hris/employees/employee-timeline', icon: CheckSquare },
-    { label: 'My Approvals', href: ess ? '/workforce-portal?tab=workflow' : '/hris/employees/reporting-line', icon: ShieldCheck, count: user.pendingApprovals || 0 },
+    { label: 'My Approvals', href: ess ? '/workforce-portal?tab=leave&leaveSection=Approvals' : '/hris/employees/reporting-line', icon: ShieldCheck, count: user.pendingApprovals || 0 },
   ];
 };
 
@@ -186,6 +188,8 @@ export function EnterpriseUserProfile({
   photoUrl,
   profileHref,
   hasPhoto,
+  teamSize,
+  pendingApprovals,
 }: EnterpriseUserProfileProps) {
   const [currentUser, setCurrentUser] = useState<Partial<ProfileUser>>({});
 
@@ -231,8 +235,8 @@ export function EnterpriseUserProfile({
   }, [context]);
 
   const explicitUser = useMemo(
-    () => pruneEmpty({ name, role, employeeCode, department, photoUrl, profileHref, hasPhoto }),
-    [department, employeeCode, hasPhoto, name, photoUrl, profileHref, role]
+    () => pruneEmpty({ name, role, employeeCode, department, photoUrl, profileHref, hasPhoto, teamSize, pendingApprovals }),
+    [department, employeeCode, hasPhoto, name, pendingApprovals, photoUrl, profileHref, role, teamSize],
   );
   const user = { ...defaults[context], ...currentUser, ...explicitUser } as ProfileUser;
   user.role = displayRole(user.role) || user.role;
@@ -241,8 +245,8 @@ export function EnterpriseUserProfile({
   const tone = contextTone(context);
   const links = linksFor(context, user);
   const notificationCount = Number(user.notificationCount || 0);
-  const pendingApprovals = Number(user.pendingApprovals || 0);
-  const isManager = pendingApprovals > 0 || Number(user.teamSize || 0) > 0 || compact(user.rbacRole).match(/manager|executive/i);
+  const pendingApprovalCount = Number(user.pendingApprovals || 0);
+  const isManager = pendingApprovalCount > 0 || Number(user.teamSize || 0) > 0 || compact(user.rbacRole).match(/manager|executive/i);
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' }).catch(() => undefined);
     window.location.replace('/login');
@@ -326,7 +330,7 @@ export function EnterpriseUserProfile({
           </div>
           <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
             <p className="text-[10px] font-black uppercase text-amber-700">Pending Approvals</p>
-            <p className="mt-1 text-lg font-black text-slate-950">{isManager ? pendingApprovals : '-'}</p>
+            <p className="mt-1 text-lg font-black text-slate-950">{isManager ? pendingApprovalCount : '-'}</p>
           </div>
         </div>
 

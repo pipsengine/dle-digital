@@ -165,6 +165,14 @@ type Payload = {
     };
   };
   workflowIntelligence?: WorkflowIntelligence;
+  managerMetrics?: {
+    teamSize: number;
+    pendingApprovals: number;
+    onLeave: number;
+    missingTimesheets: number;
+    teamAttendancePct: number;
+    trainingToday: number;
+  };
 };
 type ApiResponse<T> = { status: 'success' | 'error'; data?: T; error?: string };
 type Tab = EssTab;
@@ -1248,6 +1256,7 @@ export default function WorkforcePortalClient({ initialNow }: { initialNow: stri
       generatedAt={payload?.generatedAt}
       department={employee?.department}
       employee={employee}
+      managerMetrics={payload?.managerMetrics}
       rightPanel={tab === 'dashboard' ? <EssRightPanel payload={payload} onNavigate={navigateTab} /> : undefined}
     >
       <EssMobileNav tab={tab} onTabChange={navigateTab} />

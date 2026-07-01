@@ -6,10 +6,10 @@ import { ArrowRight, MoreHorizontal, TrendingDown, TrendingUp, X } from 'lucide-
 
 export const essTokens = {
   primary: '#2563EB',
-  navy: '#0F2D6B',
-  sidebar: '#0E1B3D',
-  sidebarHover: '#173067',
-  pageBg: '#F5F8FC',
+  navy: '#081A3A',
+  sidebar: '#081A3A',
+  sidebarHover: '#0D2557',
+  pageBg: '#F5F7FB',
   card: '#FFFFFF',
   divider: '#E9EEF5',
   border: '#E5E7EB',

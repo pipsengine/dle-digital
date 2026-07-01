@@ -100,6 +100,14 @@ type EssPortalShellProps = {
     photoUrl?: string;
     hasPhoto?: boolean;
   };
+  managerMetrics?: {
+    teamSize?: number;
+    pendingApprovals?: number;
+    onLeave?: number;
+    missingTimesheets?: number;
+    teamAttendancePct?: number;
+    trainingToday?: number;
+  };
   children: ReactNode;
   rightPanel?: ReactNode;
 };
@@ -114,6 +122,7 @@ export function EssPortalShell({
   generatedAt,
   department,
   employee,
+  managerMetrics,
   children,
   rightPanel,
 }: EssPortalShellProps) {
@@ -227,6 +236,8 @@ export function EssPortalShell({
               photoUrl={employee?.photoUrl}
               hasPhoto={employee?.hasPhoto}
               profileHref="/workforce-portal?tab=profile"
+              teamSize={managerMetrics?.teamSize}
+              pendingApprovals={managerMetrics?.pendingApprovals}
             />
             <button
               type="button"
@@ -239,6 +250,22 @@ export function EssPortalShell({
             </button>
           </div>
         </header>
+
+        <div className="ess-no-print border-b border-[#E2E8F0] bg-white px-4 py-2.5 sm:px-6">
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { label: 'System Status', value: 'All Systems Online', tone: 'bg-[#ECFDF5] text-[#16A34A] border-[#BBF7D0]' },
+              { label: 'Last Sync', value: syncLabel, tone: 'bg-[#F8FAFC] text-[#475569] border-[#E2E8F0]' },
+              { label: 'Payroll Run', value: 'Complete', tone: 'bg-[#ECFDF5] text-[#16A34A] border-[#BBF7D0]' },
+              { label: 'Attendance Devices', value: '18/18 Online', tone: 'bg-[#ECFDF5] text-[#16A34A] border-[#BBF7D0]' },
+            ].map((chip) => (
+              <span key={chip.label} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[12px] font-semibold ${chip.tone}`}>
+                <span className="text-[#64748B]">{chip.label}:</span>
+                <span>{chip.value}</span>
+              </span>
+            ))}
+          </div>
+        </div>
 
         {/* Body */}
         <div className="flex flex-1 flex-col xl:flex-row">

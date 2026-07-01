@@ -3,6 +3,7 @@ import path from 'node:path';
 import { importSagePayrollEmployeesToDb, loadWorkspaceEnv, readEmployeeDirectoryFromDb, type DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { isDailyRatePayrollEmployee, markInactiveNonDailyContractEmployees, payrollActiveEmployees, withContractPayrollClassification } from '@/lib/payroll-employee-classification';
 import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
+import { employeeReportsToManager } from '@/lib/reporting-manager-match';
 import { isGenericPayrollGrade } from '@/lib/payroll-earnings-engine';
 import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
 import { isSagePayrollRuntimeEnabled } from '@/lib/payroll-enterprise-source';
@@ -113,22 +114,14 @@ export const countDirectReportsFromEmployees = (
 ) => {
   const code = str(manager.employeeCode).toLowerCase();
   const id = str(manager.employeeId).toLowerCase();
-  const name = str(manager.fullName).toLowerCase();
-  if (!code && !name && !id) return 0;
+  if (!code && !id && !str(manager.fullName)) return 0;
   const inactive = /terminated|resigned|retired|inactive|deceased|suspend/;
   return employees.filter((employee) => {
     const employeeCode = str(employee.employeeCode).toLowerCase();
     const employeeId = str(employee.employeeId).toLowerCase();
     if ((code && employeeCode === code) || (id && employeeId === id)) return false;
     if (inactive.test(String(employee.status || '').toLowerCase())) return false;
-    const managerName = str(employee.managerName).toLowerCase();
-    const functionalManager = str(employee.functionalManager).toLowerCase();
-    const departmentHead = str(employee.departmentHead).toLowerCase();
-    return (
-      (name && (managerName === name || functionalManager === name || departmentHead === name))
-      || (code && (managerName === code || functionalManager === code || departmentHead === code))
-      || (id && (managerName === id || functionalManager === id || departmentHead === id))
-    );
+    return employeeReportsToManager(employee, manager);
   }).length;
 };
 
