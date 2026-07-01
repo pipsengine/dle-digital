@@ -189,7 +189,7 @@ export function EssPortalShell({
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-[280px]">
         {/* Header */}
-        <header className="ess-no-print sticky top-0 z-20 flex h-[72px] items-center gap-4 border-b border-[#E9EEF5] bg-white px-4 sm:px-6">
+        <header className="ess-no-print sticky top-0 z-20 flex h-[88px] items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 sm:px-5">
           <div className="hidden min-w-0 shrink-0 lg:block">
             <h1 className="truncate text-[15px] font-bold text-[#0F172A]">Employee Self-Service Portal</h1>
             <p className="truncate text-[13px] text-[#94A3B8]">{department || employee?.department || 'Employee workspace'}</p>
@@ -199,7 +199,7 @@ export function EssPortalShell({
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
             <input
               type="search"
-              placeholder="Search services, documents, leave, payslip..."
+              placeholder="Search services, documents, leave, payroll, people..."
               className="h-11 w-full rounded-[14px] border border-[#E5E7EB] bg-[#F5F8FC] pl-11 pr-16 text-[14px] text-[#0F172A] outline-none placeholder:text-[#94A3B8] focus:border-[#93C5FD] focus:ring-2 focus:ring-[#DBEAFE]"
             />
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-[#E5E7EB] bg-white px-2 py-0.5 text-[11px] font-medium text-[#94A3B8]">
@@ -269,9 +269,9 @@ export function EssPortalShell({
 
         {/* Body */}
         <div className="flex flex-1 flex-col xl:flex-row">
-          <main className="min-w-0 flex-1 px-4 py-5 sm:px-6">{children}</main>
+          <main className="min-w-0 flex-1 px-3 py-2 sm:px-4">{children}</main>
           {rightPanel ? (
-            <aside className="w-full shrink-0 border-t border-[#E9EEF5] bg-[#FAFBFD] px-4 py-5 xl:w-[340px] xl:border-l xl:border-t-0 xl:px-5">
+            <aside className="w-full shrink-0 border-t border-[#E2E8F0] bg-[#F5F7FB] px-3 py-2 xl:w-[360px] xl:border-l xl:border-t-0 xl:px-3">
               {rightPanel}
             </aside>
           ) : null}

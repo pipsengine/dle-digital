@@ -36,10 +36,40 @@ export const essTokens = {
 export function EssCard({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <article
-      className={`rounded-[20px] border border-[#E5E7EB] bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)] ${className}`}
+      className={`rounded-[20px] border border-[#E2E8F0] bg-white shadow-[0_6px_18px_rgba(15,23,42,0.05)] ${className}`}
     >
       {children}
     </article>
+  );
+}
+
+export function EssWorkflowStepper({
+  stages,
+}: {
+  stages: Array<{ id: string; label: string; state: string }>;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {stages.map((stage, index) => (
+        <div key={stage.id} className="flex items-center gap-1">
+          <div
+            className={`min-w-[58px] rounded-[10px] border px-2 py-1.5 text-center text-[10px] font-bold leading-tight ${
+              stage.state === 'completed'
+                ? 'border-[#22C55E] bg-[#ECFDF5] text-[#16A34A]'
+                : stage.state === 'current' || stage.state === 'escalated'
+                  ? 'border-[#2563EB] bg-[#DBEAFE] text-[#2563EB] shadow-[0_0_0_3px_rgba(37,99,235,0.12)]'
+                  : stage.state === 'rejected'
+                    ? 'border-[#EF4444] bg-[#FEF2F2] text-[#DC2626]'
+                    : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#94A3B8]'
+            }`}
+          >
+            <p className="truncate">{stage.label.split(' ')[0]}</p>
+            {stage.state === 'completed' ? <p className="text-[9px] font-semibold text-[#16A34A]">✓</p> : null}
+          </div>
+          {index < stages.length - 1 ? <span className="text-[10px] text-[#CBD5E1]">→</span> : null}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -47,33 +77,45 @@ export function EssKpiCard({
   label,
   value,
   subtitle,
+  detail,
   icon: Icon,
   accent,
   iconBg,
+  sparkline,
+  trend,
 }: {
   label: string;
   value: string;
   subtitle: string;
+  detail?: string;
   icon: LucideIcon;
   accent: string;
   iconBg: string;
+  sparkline?: number[];
+  trend?: number | null;
 }) {
+  const trendUp = (trend ?? 0) >= 0;
   return (
-    <EssCard className="flex min-h-[132px] flex-col p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_70px_rgba(37,99,235,0.12)]">
-      <div className="flex items-start justify-between gap-3">
+    <EssCard className="flex min-h-[104px] flex-col justify-between p-3.5 transition-all duration-200 hover:-translate-y-px hover:shadow-[0_8px_24px_rgba(37,99,235,0.12)]">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-[#475569]">{label}</p>
-          <p className="mt-2 truncate text-[34px] font-bold leading-none tracking-tight text-[#0F172A]" style={{ fontSize: 'clamp(24px, 2.2vw, 34px)' }}>
-            {value}
-          </p>
-          <p className="mt-2 text-[13px] font-medium text-[#94A3B8]">{subtitle}</p>
+          <p className="text-[12px] font-semibold text-[#64748B]">{label}</p>
+          <p className="mt-1 text-[26px] font-bold leading-none tracking-tight text-[#0F172A]">{value}</p>
+          <p className="mt-1 text-[12px] font-medium text-[#64748B]">{subtitle}</p>
+          {detail ? <p className="mt-0.5 text-[11px] text-[#94A3B8]">{detail}</p> : null}
         </div>
-        <span
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px]"
-          style={{ backgroundColor: iconBg, color: accent }}
-        >
-          <Icon className="h-6 w-6" strokeWidth={2} />
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px]" style={{ backgroundColor: iconBg, color: accent }}>
+          <Icon className="h-5 w-5" strokeWidth={2} />
         </span>
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2">
+        {sparkline?.length ? <div className="min-w-0 flex-1"><EssSparkline data={sparkline} color={accent} /></div> : <span />}
+        {trend !== undefined && trend !== null ? (
+          <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold ${trendUp ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>
+            {trendUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            {trendUp ? '+' : ''}{trend}%
+          </span>
+        ) : null}
       </div>
     </EssCard>
   );
@@ -114,8 +156,8 @@ export function EssQuickActionCard({
 
 export function EssSectionHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
-    <div className="mb-4 flex items-center justify-between gap-3">
-      <h3 className="text-[22px] font-bold tracking-tight text-[#0F172A]">{title}</h3>
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <h3 className="text-[15px] font-bold tracking-tight text-[#0F172A]">{title}</h3>
       {action}
     </div>
   );
@@ -141,8 +183,8 @@ export function EssDonutChart({
   });
 
   return (
-    <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-center">
-      <div className="relative h-[168px] w-[168px] shrink-0">
+    <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center">
+      <div className="relative h-[132px] w-[132px] shrink-0">
         <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
           <circle cx="50" cy="50" r="40" fill="none" stroke="#E9EEF5" strokeWidth="12" />
           {segments.map((seg) => (
@@ -239,6 +281,7 @@ export function EssNotificationItem({
   iconBg,
   iconColor,
   onClick,
+  compact = false,
 }: {
   title: string;
   meta: string;
@@ -247,6 +290,7 @@ export function EssNotificationItem({
   iconBg: string;
   iconColor: string;
   onClick?: () => void;
+  compact?: boolean;
 }) {
   const unread = status.toLowerCase() === 'unread';
   const Wrapper = onClick ? 'button' : 'div';
@@ -254,17 +298,17 @@ export function EssNotificationItem({
     <Wrapper
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`flex w-full items-start gap-3 rounded-[16px] border border-[#E9EEF5] bg-[#FAFBFD] p-3 text-left transition-colors hover:bg-white ${onClick ? 'cursor-pointer' : ''}`}
+      className={`flex w-full items-start gap-2 rounded-[12px] border border-[#E9EEF5] bg-[#FAFBFD] text-left transition-colors hover:bg-white ${compact ? 'p-2' : 'gap-3 p-3'} ${onClick ? 'cursor-pointer' : ''}`}
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px]" style={{ backgroundColor: iconBg, color: iconColor }}>
-        <Icon className="h-4 w-4" strokeWidth={2} />
+      <span className={`flex shrink-0 items-center justify-center rounded-[10px] ${compact ? 'h-8 w-8' : 'h-10 w-10'}`} style={{ backgroundColor: iconBg, color: iconColor }}>
+        <Icon className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} strokeWidth={2} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-[14px] font-semibold leading-snug text-[#0F172A]">{title}</p>
-        <p className="mt-0.5 text-[12px] text-[#94A3B8]">{meta}</p>
+        <p className={`font-semibold leading-snug text-[#0F172A] ${compact ? 'text-[12px]' : 'text-[14px]'}`}>{title}</p>
+        <p className={`text-[#94A3B8] ${compact ? 'text-[10px]' : 'mt-0.5 text-[12px]'}`}>{meta}</p>
       </div>
       <span
-        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+        className={`shrink-0 rounded-full px-2 py-0.5 font-semibold ${compact ? 'text-[10px]' : 'px-2.5 py-1 text-[11px]'} ${
           unread ? 'bg-[#DBEAFE] text-[#2563EB]' : 'bg-[#ECFDF5] text-[#10B981]'
         }`}
       >
@@ -274,18 +318,58 @@ export function EssNotificationItem({
   );
 }
 
-export function EssEventItem({ label, date }: { label: string; date: string }) {
+export function EssMiniCalendar() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const monthLabel = now.toLocaleString('en-GB', { month: 'long', year: 'numeric' });
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = Array.from({ length: 42 }, (_, index) => {
+    const day = index - firstDay + 1;
+    return day >= 1 && day <= daysInMonth ? day : null;
+  });
+  const today = now.getDate();
+
   return (
-    <div className="flex items-center gap-3 border-l-2 border-[#DBEAFE] py-2 pl-4">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] bg-[#EFF6FF] text-[#2563EB]">
-        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+    <div>
+      <p className="mb-2 text-[13px] font-bold text-[#0F172A]">{monthLabel}</p>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-[#94A3B8]">
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d) => <span key={d}>{d}</span>)}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {cells.map((day, index) => (
+          <span
+            key={index}
+            className={`flex h-7 items-center justify-center rounded-full text-[11px] font-semibold ${
+              day === today ? 'bg-[#2563EB] text-white' : day ? 'text-[#475569] hover:bg-[#F1F5F9]' : ''
+            }`}
+          >
+            {day || ''}
+          </span>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-[#64748B]">
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#2563EB]" /> Leave</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#F59E0B]" /> Holiday</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#8B5CF6]" /> Training</span>
+      </div>
+    </div>
+  );
+}
+
+export function EssEventItem({ label, date, compact = false }: { label: string; date: string; compact?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 border-l-2 border-[#DBEAFE] pl-3 ${compact ? 'py-1' : 'gap-3 py-2 pl-4'}`}>
+      <div className={`flex shrink-0 items-center justify-center rounded-[10px] bg-[#EFF6FF] text-[#2563EB] ${compact ? 'h-7 w-7' : 'h-9 w-9'}`}>
+        <svg viewBox="0 0 24 24" className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} fill="none" stroke="currentColor" strokeWidth="2">
           <rect x="3" y="4" width="18" height="18" rx="2" />
           <path d="M16 2v4M8 2v4M3 10h18" />
         </svg>
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[14px] font-semibold text-[#0F172A]">{label}</p>
-        <p className="text-[12px] text-[#94A3B8]">{date}</p>
+        <p className={`truncate font-semibold text-[#0F172A] ${compact ? 'text-[12px]' : 'text-[14px]'}`}>{label}</p>
+        <p className={`text-[#94A3B8] ${compact ? 'text-[10px]' : 'text-[12px]'}`}>{date}</p>
       </div>
     </div>
   );
