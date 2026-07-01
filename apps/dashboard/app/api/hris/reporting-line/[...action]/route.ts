@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { assignEmployeesToSupervisor, readSupervisorAssignments } from '@/lib/supervisor-assignment-store';
+import { auditDepartmentReportingManagers, syncDepartmentReportingManagers } from '@/lib/department-reporting-manager-sync';
 
 type Role =
   | 'Super Admin'
@@ -230,6 +231,11 @@ export async function GET(request: Request, ctx: { params: Promise<{ action: str
     return jsonOk(await readSupervisorAssignments({ assignmentBatch, supervisorEmployeeCode }));
   }
 
+  if (seg0 === 'department-reporting-audit') {
+    if (role === 'Employee') return jsonErr(403, 'Permission denied');
+    return jsonOk(await auditDepartmentReportingManagers());
+  }
+
   if (seg0 === 'ai-insights') {
     if (role === 'Employee') return jsonErr(403, 'Permission denied');
     const employeeId = url.searchParams.get('employeeId') || '';
@@ -357,6 +363,17 @@ export async function POST(request: Request, ctx: { params: Promise<{ action: st
   const role = getRole(request);
   const seg0 = action[0] || '';
   if (role === 'Employee') return jsonErr(403, 'Permission denied');
+
+  if (seg0 === 'sync-department-reporting') {
+    const body = (await request.json().catch(() => null)) as { dryRun?: boolean; departments?: string[] } | null;
+    const result = await syncDepartmentReportingManagers({
+      dryRun: Boolean(body?.dryRun),
+      departments: Array.isArray(body?.departments) ? body.departments.map((item) => String(item || '').trim()).filter(Boolean) : undefined,
+      performedBy: role,
+    });
+    return jsonOk(result);
+  }
+
   if (seg0 !== 'bulk-reassignment') return jsonErr(404, 'Not found');
 
   const body = (await request.json().catch(() => null)) as any;

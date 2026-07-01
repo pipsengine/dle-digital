@@ -244,8 +244,8 @@ export function EnterpriseUserProfile({
   const pendingApprovals = Number(user.pendingApprovals || 0);
   const isManager = pendingApprovals > 0 || Number(user.teamSize || 0) > 0 || compact(user.rbacRole).match(/manager|executive/i);
   const logout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
-    window.location.assign('/login');
+    await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' }).catch(() => undefined);
+    window.location.replace('/login');
   };
 
   return (

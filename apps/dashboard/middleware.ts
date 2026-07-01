@@ -5,12 +5,16 @@ import { deriveHrisRole } from '@/lib/hris-access';
 
 const denied = (request: NextRequest, status = 403) => {
   if (request.nextUrl.pathname.startsWith('/api')) {
-    return NextResponse.json({ status: 'error', error: status === 401 ? 'Unauthenticated' : 'Forbidden' }, { status });
+    const response = NextResponse.json({ status: 'error', error: status === 401 ? 'Unauthenticated' : 'Forbidden' }, { status });
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    return response;
   }
   const url = request.nextUrl.clone();
   url.pathname = status === 401 ? '/login' : '/access-denied';
   if (status === 401) url.searchParams.set('next', request.nextUrl.pathname + request.nextUrl.search);
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  return response;
 };
 
 export async function middleware(request: NextRequest) {
@@ -58,7 +62,7 @@ export async function middleware(request: NextRequest) {
     response.headers.set('x-auth-user', session.username || '');
     response.headers.set('x-auth-roles', roles.join(','));
     response.headers.set('x-auth-global-admin', session.isGlobalAdmin ? '1' : '0');
-    if (pathname.startsWith('/hris') || pathname.startsWith('/api/hris')) {
+    if (!pathname.startsWith('/api/auth') && !pathname.startsWith('/_next')) {
       response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       response.headers.set('Pragma', 'no-cache');
       response.headers.set('Expires', '0');

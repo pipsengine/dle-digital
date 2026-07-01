@@ -7,12 +7,17 @@ export async function POST(request: Request) {
   const session = await verifySessionToken(raw ? decodeURIComponent(raw) : '');
   if (session) await logoutAudit(session.username, session.sub, request.headers);
   const response = NextResponse.json({ status: 'success', data: { loggedOut: true } });
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   response.cookies.set(AUTH_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: shouldUseSecureAuthCookie(request), path: '/', maxAge: 0 });
   return response;
 }
 
 export async function GET(request: Request) {
+  const raw = request.headers.get('cookie')?.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${AUTH_COOKIE}=`))?.split('=').slice(1).join('=');
+  const session = await verifySessionToken(raw ? decodeURIComponent(raw) : '');
+  if (session) await logoutAudit(session.username, session.sub, request.headers);
   const response = NextResponse.redirect(new URL('/login', request.url));
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   response.cookies.set(AUTH_COOKIE, '', { httpOnly: true, sameSite: 'lax', secure: shouldUseSecureAuthCookie(request), path: '/', maxAge: 0 });
   return response;
 }

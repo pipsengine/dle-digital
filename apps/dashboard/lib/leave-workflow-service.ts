@@ -230,6 +230,24 @@ const namesMatch = (left: string, right: string) => {
   return a === b || a.includes(b) || b.includes(a);
 };
 
+const employeeCodeFromReference = (reference: string) => {
+  const value = clean(reference);
+  if (!value) return '';
+  const prefixed = value.match(/^([A-Z]{0,5}0*\d+)\s*-/i);
+  if (prefixed?.[1]) return prefixed[1].toUpperCase();
+  const embedded = value.match(/\b(P\d+|L\d+|NYSC\d+|C\d+)\b/i);
+  return embedded?.[1]?.toUpperCase() || '';
+};
+
+const referenceMatchesEmployee = (employee: DleEmployeeDirectoryRow, reference: string) => {
+  if (!reference) return false;
+  if (employeeRequestMatches(employee, reference) || namesMatch(employee.fullName, reference)) return true;
+  const embeddedCode = employeeCodeFromReference(reference);
+  if (embeddedCode && employeeRequestMatches(employee, embeddedCode)) return true;
+  const embeddedName = reference.includes(' - ') ? clean(reference.split(' - ').slice(1).join(' - ')) : '';
+  return Boolean(embeddedName && namesMatch(employee.fullName, embeddedName));
+};
+
 export const employeeRequestMatches = (employee: DleEmployeeDirectoryRow, requestEmployeeId: string) => {
   const lookup = new Set(employeeKeys(employee));
   return lookup.has(normalizePayrollMatchKey(requestEmployeeId));
@@ -510,10 +528,7 @@ export const resolveLineManagerForEmployee = (
 
   const matchReference = (reference: string, source: ResolvedLineManager['source']) => {
     if (!reference) return null;
-    const found = activeEmployees.find((employee) =>
-      !isSelf(employee)
-      && (employeeRequestMatches(employee, reference) || namesMatch(employee.fullName, reference)),
-    );
+    const found = activeEmployees.find((employee) => !isSelf(employee) && referenceMatchesEmployee(employee, reference));
     return found ? { employee: found, label: found.fullName, source } : null;
   };
 
