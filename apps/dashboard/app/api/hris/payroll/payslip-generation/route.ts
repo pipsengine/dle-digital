@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { calculateContractDayRateEarnings, calculatePayrollEarnings, calculatePermanentUnionDues, type PayrollEarningsResult } from '@/lib/payroll-earnings-engine';
+import { mergeTimesheetDayRateEarnings, calculatePayrollEarnings, calculatePermanentUnionDues } from '@/lib/payroll-earnings-engine';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
 import { activePensionVersion, calculatePension, pensionInputFromEmployee, readPayrollPensionConfig } from '@/lib/payroll-pension-engine';
 import { activeStatutoryFundsVersion, calculateStatutoryFunds, readStatutoryFundsConfig, statutoryFundInputFromEmployee } from '@/lib/payroll-statutory-funds-engine';
@@ -196,73 +196,6 @@ const maskAccount = (value: unknown) => {
   return `${'*'.repeat(Math.max(4, raw.length - 4))}${visible}`;
 };
 
-const contractDayRatePayrollResult = (input: {
-  ratePerDay: number;
-  daysWorked: number;
-}): PayrollEarningsResult => {
-  const result = calculateContractDayRateEarnings({
-    ratePerDay: input.ratePerDay,
-    weekdayDays: input.daysWorked,
-  });
-  const lines = result.earningLines.map((line) => ({
-    ...line,
-    percentOfGross: result.grossPay > 0 ? roundMoney(line.amount / result.grossPay) : 0,
-    runFrequency: 'formula' as const,
-    includeInMonthlyPayroll: true,
-  }));
-  const basePay = roundMoney(lines.find((line) => line.code === 'JCWEEKDAY')?.amount || 0);
-  return {
-    profileId: result.profileId,
-    profileName: result.profileName,
-    periodPackageGross: result.grossPay,
-    grossPay: result.grossPay,
-    basePay,
-    basicPay: basePay,
-    allowances: roundMoney(result.grossPay - basePay),
-    taxablePay: result.taxablePay,
-    nonTaxablePay: result.nonTaxablePay,
-    bhtPay: basePay,
-    earningLines: lines,
-    annualBenefitLines: [],
-    paidEarningLines: lines,
-  };
-};
-
-const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: PayrollEarningsResult): PayrollEarningsResult => {
-  const baseCodes = new Set(['JCWEEKDAY', 'JCWEEKDAY_NT']);
-  const supplemental = source.paidEarningLines
-    .filter((line) => !baseCodes.has(compact(line.code).toUpperCase()))
-    .filter((line) => roundMoney(line.amount) !== 0)
-    .map((line) => ({
-      ...line,
-      calculation: line.calculation || 'Daily-rate supplemental earning',
-      runFrequency: line.runFrequency || 'monthly',
-      includeInMonthlyPayroll: line.includeInMonthlyPayroll !== false,
-      amount: roundMoney(line.amount),
-    }));
-  if (!supplemental.length) return base;
-  const paidEarningLines = [...base.paidEarningLines, ...supplemental];
-  const grossPay = roundMoney(paidEarningLines.reduce((sum, line) => sum + line.amount, 0));
-  const taxablePay = roundMoney(paidEarningLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
-  const basicPay = roundMoney(base.basicPay);
-  const normalizedLines = paidEarningLines.map((line) => ({
-    ...line,
-    percentOfGross: grossPay > 0 ? roundMoney(line.amount / grossPay) : 0,
-  }));
-  return {
-    ...base,
-    profileName: `${base.profileName} with Supplemental Components`,
-    grossPay,
-    basePay: basicPay,
-    basicPay,
-    allowances: roundMoney(grossPay - basicPay),
-    taxablePay,
-    nonTaxablePay: roundMoney(grossPay - taxablePay),
-    earningLines: normalizedLines,
-    paidEarningLines: normalizedLines,
-  };
-};
-
 const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) => {
   const role = getRole(request);
   const perms = permissions(role);
@@ -309,7 +242,9 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
     const ratePerDay = Number(employee.ratePerDay || 0) || (Number(employee.ratePerHour || 0) > 0 ? Number(employee.ratePerHour) * Number(employee.hoursPerDay || 8) : 0) || (dailyRateEmployee ? Number(employee.periodSalary || 0) : 0);
     const ratePerHour = Number(employee.ratePerHour || 0) || (ratePerDay > 0 ? ratePerDay / Number(employee.hoursPerDay || 8) : 0);
     const dailyAttendance = dailyRateEmployee ? dailyAttendanceForEmployee(employee, dailyAttendanceByKey) : emptyDailyAttendance();
-    const dailyTimesheetAmounts = dailyRateEmployee ? mergeDailySupplementalEarnings(contractDayRatePayrollResult({ ratePerDay, daysWorked: dailyAttendance.daysWorked }), standardAmounts) : null;
+    const dailyTimesheetAmounts = dailyRateEmployee
+      ? mergeTimesheetDayRateEarnings(employee, { ratePerDay, daysWorked: dailyAttendance.daysWorked, period: requestedPeriod })
+      : null;
     const amounts = dailyTimesheetAmounts && dailyTimesheetAmounts.grossPay > 0 ? dailyTimesheetAmounts : standardAmounts;
     const calculationEmployee = dailyRateEmployee ? { ...payrollEmployee, sagePayrollEarnings: [] } : payrollEmployee;
     const tax = calculatePayrollTax(

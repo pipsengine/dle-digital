@@ -7,6 +7,7 @@ import {
   advanceTimesheetWorkflow,
   buildProjectTimesheetApprovals,
   calculateTimesheetPeriod,
+  isTimesheetCountableForPayroll,
   normalizePaidWorkHours,
   normalizeTimesheetStatus,
   readProjects,
@@ -550,8 +551,11 @@ const processPayrollBatch = async (headerIds: string[], actor: string, post: boo
     if (!sampleHeader) continue;
     const existingPeriodUpdate = updates.find((update) => update.periodId === periodId);
     const mergedHeaderIds = Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), ...periodHeaderIds]));
+    const allPeriodHeaderIds = headers
+      .filter((item) => item.periodId === periodId && isTimesheetCountableForPayroll(item.status))
+      .map((item) => item.id);
     const totals = aggregateEmployeeAttendanceForHeaders(headers, lines, {
-      headerIds: mergedHeaderIds,
+      headerIds: allPeriodHeaderIds,
       payrollReadyOnly: false,
     });
 

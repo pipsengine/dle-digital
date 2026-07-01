@@ -415,6 +415,167 @@ const finalizeContractDayRateEarnings = (lines: PayrollEarningLine[], weekdayDay
   };
 };
 
+const TIMESHEET_DRIVEN_EARNING_CODES = new Set(['JCWEEKDAY', 'JCWEEKDAY_NT']);
+
+export const contractDayRatePayrollResult = (input: {
+  ratePerDay: number;
+  daysWorked: number;
+}): PayrollEarningsResult => {
+  const result = calculateContractDayRateEarnings({
+    ratePerDay: input.ratePerDay,
+    weekdayDays: input.daysWorked,
+  });
+  const lines = result.earningLines.map((line) => ({
+    ...line,
+    percentOfGross: result.grossPay > 0 ? roundMoney(line.amount / result.grossPay) : 0,
+    runFrequency: 'formula' as const,
+    includeInMonthlyPayroll: true,
+  }));
+  const basePay = roundMoney(lines.find((line) => line.code === 'JCWEEKDAY')?.amount || 0);
+  return {
+    profileId: result.profileId,
+    profileName: result.profileName,
+    periodPackageGross: result.periodPackageGross,
+    grossPay: result.grossPay,
+    basePay,
+    basicPay: basePay,
+    allowances: roundMoney(result.grossPay - basePay),
+    taxablePay: result.taxablePay,
+    nonTaxablePay: result.nonTaxablePay,
+    bhtPay: basePay,
+    earningLines: lines,
+    annualBenefitLines: [],
+    paidEarningLines: lines,
+  };
+};
+
+export const buildDailyRateSupplementalEarnings = (
+  employee: DleEmployeeDirectoryRow,
+  options?: PayrollEarningsOptions,
+): PayrollEarningsResult => {
+  const paidEarningLines = periodAdjustmentLines(employee, options).map((line) => ({
+    ...line,
+    runFrequency: line.runFrequency || ('formula' as const),
+    includeInMonthlyPayroll: line.includeInMonthlyPayroll !== false,
+    amount: roundMoney(line.amount),
+  }));
+  const grossPay = roundMoney(paidEarningLines.reduce((sum, line) => sum + line.amount, 0));
+  const taxablePay = roundMoney(paidEarningLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
+  return {
+    profileId: 'contract-day-rate',
+    profileName: 'Daily Rate Supplemental Components',
+    periodPackageGross: 0,
+    grossPay,
+    basePay: 0,
+    basicPay: 0,
+    allowances: grossPay,
+    taxablePay,
+    nonTaxablePay: roundMoney(grossPay - taxablePay),
+    bhtPay: 0,
+    earningLines: paidEarningLines,
+    annualBenefitLines: [],
+    paidEarningLines,
+  };
+};
+
+export const mergeDailySupplementalEarnings = (base: PayrollEarningsResult, source: PayrollEarningsResult): PayrollEarningsResult => {
+  const supplemental = source.paidEarningLines
+    .filter((line) => !TIMESHEET_DRIVEN_EARNING_CODES.has(compact(line.code).toUpperCase()))
+    .filter((line) => roundMoney(line.amount) !== 0)
+    .map((line) => ({
+      ...line,
+      calculation: line.calculation || 'Daily-rate supplemental earning',
+      runFrequency: line.runFrequency || 'monthly',
+      includeInMonthlyPayroll: line.includeInMonthlyPayroll !== false,
+      amount: roundMoney(line.amount),
+    }));
+  if (!supplemental.length) return base;
+
+  const supplementalCodes = new Set(supplemental.map((line) => canonicalEarningCode(line.code)));
+  const baseLines = base.paidEarningLines.filter((line) => {
+    const code = canonicalEarningCode(line.code);
+    if (TIMESHEET_DRIVEN_EARNING_CODES.has(compact(line.code).toUpperCase())) return true;
+    return !supplementalCodes.has(code);
+  });
+
+  const paidEarningLines = [...baseLines, ...supplemental];
+  const grossPay = roundMoney(paidEarningLines.reduce((sum, line) => sum + line.amount, 0));
+  const taxablePay = roundMoney(paidEarningLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
+  const basicPay = roundMoney(baseLines.filter(isBasicLine).reduce((sum, line) => sum + line.amount, 0));
+  const normalizedLines = paidEarningLines.map((line) => ({
+    ...line,
+    percentOfGross: grossPay > 0 ? roundMoney(line.amount / grossPay) : 0,
+  }));
+  return {
+    ...base,
+    profileName: `${base.profileName} with Supplemental Components`,
+    grossPay,
+    basePay: basicPay,
+    basicPay,
+    allowances: roundMoney(grossPay - basicPay),
+    taxablePay,
+    nonTaxablePay: roundMoney(grossPay - taxablePay),
+    earningLines: normalizedLines,
+    paidEarningLines: normalizedLines,
+  };
+};
+
+export const mergeTimesheetDayRateEarnings = (
+  employee: DleEmployeeDirectoryRow,
+  input: { ratePerDay: number; daysWorked: number; period?: string },
+): PayrollEarningsResult => {
+  const timesheetBase = contractDayRatePayrollResult({ ratePerDay: input.ratePerDay, daysWorked: input.daysWorked });
+  const supplemental = buildDailyRateSupplementalEarnings(employee, {
+    period: input.period,
+    includePeriodAdjustments: true,
+  });
+  const merged = supplemental.paidEarningLines.length
+    ? mergeDailySupplementalEarnings(timesheetBase, supplemental)
+    : timesheetBase;
+  return supplemental.paidEarningLines.length
+    ? alignDayRateLinesWithSageBreakdown(merged)
+    : merged;
+};
+
+const alignDayRateLinesWithSageBreakdown = (earnings: PayrollEarningsResult): PayrollEarningsResult => {
+  const weekday = earnings.paidEarningLines.find((line) => compact(line.code).toUpperCase() === 'JCWEEKDAY');
+  const weekdayNt = earnings.paidEarningLines.find((line) => compact(line.code).toUpperCase() === 'JCWEEKDAY_NT');
+  if (!weekday || !weekdayNt) return earnings;
+
+  const collapsedWeekday: PayrollEarningLine = {
+    ...weekday,
+    code: 'JCWEEKDAY',
+    name: 'WEEKDAY EARNING',
+    taxable: true,
+    amount: roundMoney(weekday.amount + weekdayNt.amount),
+    calculation: weekday.calculation || 'No of days worked * Day rate',
+  };
+  const paidEarningLines = [
+    collapsedWeekday,
+    ...earnings.paidEarningLines.filter((line) => !TIMESHEET_DRIVEN_EARNING_CODES.has(compact(line.code).toUpperCase())),
+  ];
+  const grossPay = roundMoney(paidEarningLines.reduce((sum, line) => sum + line.amount, 0));
+  const taxablePay = roundMoney(paidEarningLines.filter((line) => line.taxable).reduce((sum, line) => sum + line.amount, 0));
+  const basicPay = roundMoney(collapsedWeekday.amount);
+  const normalizedLines = paidEarningLines.map((line) => ({
+    ...line,
+    percentOfGross: grossPay > 0 ? roundMoney(line.amount / grossPay) : 0,
+  }));
+  return {
+    ...earnings,
+    profileName: earnings.profileName.includes('Timesheet') ? earnings.profileName : `${earnings.profileName} (Sage Aligned)`,
+    grossPay,
+    basePay: basicPay,
+    basicPay,
+    allowances: roundMoney(grossPay - basicPay),
+    taxablePay,
+    nonTaxablePay: roundMoney(grossPay - taxablePay),
+    bhtPay: basicPay,
+    earningLines: normalizedLines,
+    paidEarningLines: normalizedLines,
+  };
+};
+
 export const contractPayeTaxablePay = (earnings: Pick<PayrollEarningsResult, 'profileId' | 'grossPay' | 'taxablePay' | 'paidEarningLines' | 'earningLines'>) => {
   if (earnings.profileId === 'contract-day-rate') return earnings.grossPay;
   const paidLines = (earnings.paidEarningLines || earnings.earningLines || []) as PayrollEarningLine[];
@@ -839,15 +1000,12 @@ export const calculatePayrollEarnings = (employee: DleEmployeeDirectoryRow, opti
   if (profileId === 'contract-day-rate') {
     const ratePerDay = num(employee.ratePerDay) || (num(employee.ratePerHour) > 0 ? num(employee.ratePerHour) * (num(employee.hoursPerDay) || 8) : 0);
     const weekdayDays = ratePerDay > 0 ? gross / ratePerDay : (num(employee.hoursPerPeriod) > 0 && (num(employee.hoursPerDay) || 8) > 0 ? num(employee.hoursPerPeriod) / (num(employee.hoursPerDay) || 8) : 0);
-    const lines = [
-      { code: 'JCWEEKDAY', name: 'WEEKDAY EARNING', taxable: true, percentOfGross: 0.45, amount: roundMoney(gross * 0.45) },
-      { code: 'JCWEEKDAY_NT', name: 'WEEKDAY ALLOWANCE NON TAX', taxable: false, percentOfGross: 0.55, amount: roundMoney(gross * 0.55) },
-    ].filter((line) => line.amount > 0);
-    return {
-      profileId,
-      profileName: 'Contract Staff on Day Rate',
-      ...finalizeContractDayRateEarnings(lines, weekdayDays, ratePerDay || (weekdayDays > 0 ? gross / weekdayDays : 0)),
-    };
+    const resolvedRatePerDay = ratePerDay || (weekdayDays > 0 ? gross / weekdayDays : 0);
+    const baseAmounts = contractDayRatePayrollResult({ ratePerDay: resolvedRatePerDay, daysWorked: weekdayDays });
+    const supplemental = buildDailyRateSupplementalEarnings(employee, options);
+    return supplemental.paidEarningLines.length
+      ? mergeDailySupplementalEarnings(baseAmounts, supplemental)
+      : baseAmounts;
   }
   if (profileId === 'contract-lumpsum') {
     const isBaseLumpsumCode = (code: string) => /^(LUMPSUMTAX|BASIC1_LUMPSUM)$/i.test(code);

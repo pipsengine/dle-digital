@@ -18,7 +18,7 @@
       "body": "Your current enterprise access is protected by RBAC, session controls, and activity logging.",
       "severity": "success",
       "status": "Archived",
-      "href": "/hris/administration/audit-trail",
+      "href": "/workforce-portal?tab=security",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Security Service",
       "metadata": {
@@ -44,7 +44,7 @@
       "body": "Keep contact details, emergency contacts, bank details, and supporting documents up to date.",
       "severity": "info",
       "status": "Archived",
-      "href": "/hris/employees/employee-profile",
+      "href": "/workforce-portal?tab=profile",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "HRIS",
       "metadata": {
@@ -70,7 +70,7 @@
       "body": "Payslips, deductions, pension contributions, allowances, and loan deductions can be reviewed from payroll self-service.",
       "severity": "info",
       "status": "Archived",
-      "href": "/hris/payroll/payslip-generation",
+      "href": "/workforce-portal?tab=payroll",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Payroll Service",
       "metadata": {
@@ -96,7 +96,7 @@
       "body": "Company announcements, policy updates, request comments, and service messages will appear here.",
       "severity": "info",
       "status": "Archived",
-      "href": "/hris/announcements",
+      "href": "/workforce-portal?tab=communication",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Human Capital",
       "metadata": {
@@ -122,7 +122,7 @@
       "body": "Review pending HR, payroll, leave, workforce, and employee service requests according to your role permissions.",
       "severity": "warning",
       "status": "Archived",
-      "href": "/hris/administration/approval-workflow",
+      "href": "/workforce-portal?tab=leave&leaveSection=Approvals",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Workflow Engine",
       "metadata": {
@@ -148,7 +148,7 @@
       "body": "Timesheet periods, project approvals, attendance exceptions, and payroll-ready hours are available for review.",
       "severity": "warning",
       "status": "Archived",
-      "href": "/hris/time-and-logs/timesheet-approval",
+      "href": "/workforce-portal?tab=time",
       "createdAt": "2026-06-14T12:51:48.566Z",
       "actor": "Workforce Management",
       "metadata": {
@@ -175,7 +175,7 @@
       "body": "Your current enterprise access is protected by RBAC, session controls, and activity logging.",
       "severity": "success",
       "status": "Read",
-      "href": "/hris/administration/audit-trail",
+      "href": "/workforce-portal?tab=security",
       "createdAt": "2026-06-25T17:19:49.509Z",
       "actor": "Security Service",
       "metadata": {
@@ -201,7 +201,7 @@
       "body": "Keep contact details, emergency contacts, bank details, and supporting documents up to date.",
       "severity": "info",
       "status": "Read",
-      "href": "/hris/employees/employee-profile",
+      "href": "/workforce-portal?tab=profile",
       "createdAt": "2026-06-25T17:19:49.509Z",
       "actor": "HRIS",
       "metadata": {
@@ -227,7 +227,7 @@
       "body": "Payslips, deductions, pension contributions, allowances, and loan deductions can be reviewed from payroll self-service.",
       "severity": "info",
       "status": "Read",
-      "href": "/hris/payroll/payslip-generation",
+      "href": "/workforce-portal?tab=payroll",
       "createdAt": "2026-06-25T17:19:49.509Z",
       "actor": "Payroll Service",
       "metadata": {
@@ -253,7 +253,7 @@
       "body": "Company announcements, policy updates, request comments, and service messages will appear here.",
       "severity": "info",
       "status": "Read",
-      "href": "/hris/announcements",
+      "href": "/workforce-portal?tab=communication",
       "createdAt": "2026-06-25T17:19:49.509Z",
       "actor": "Human Capital",
       "metadata": {
@@ -279,7 +279,7 @@
       "body": "Review pending HR, payroll, leave, workforce, and employee service requests according to your role permissions.",
       "severity": "warning",
       "status": "Read",
-      "href": "/hris/administration/approval-workflow",
+      "href": "/workforce-portal?tab=leave&leaveSection=Approvals",
       "createdAt": "2026-06-25T17:19:49.509Z",
       "actor": "Workflow Engine",
       "metadata": {
@@ -305,7 +305,7 @@
       "body": "Timesheet periods, project approvals, attendance exceptions, and payroll-ready hours are available for review.",
       "severity": "warning",
       "status": "Read",
-      "href": "/hris/time-and-logs/timesheet-approval",
+      "href": "/workforce-portal?tab=time",
       "createdAt": "2026-06-25T17:19:49.509Z",
       "actor": "Workforce Management",
       "metadata": {

@@ -21824,6 +21824,16 @@
   },
   {
     "period": "2026-06",
+    "employeeId": "C0293 - OLANIYAN",
+    "employeeCode": "C0293 - OLANIYAN",
+    "code": "WEEKDAYOVT",
+    "name": "WEEKDAY OVT EARNING",
+    "amount": 38671.88,
+    "taxable": true,
+    "source": "Sage payslip supplemental earning sync"
+  },
+  {
+    "period": "2026-06",
     "employeeId": "C0585 - FEMI",
     "employeeCode": "C0585 - FEMI",
     "code": "NNDMEAL",

@@ -1,6 +1,6 @@
 import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
-import { calculateContractDayRateEarnings, calculatePayrollEarnings, resolvePayrollEarningProfile } from '@/lib/payroll-earnings-engine';
+import { mergeTimesheetDayRateEarnings, calculatePayrollEarnings, resolvePayrollEarningProfile } from '@/lib/payroll-earnings-engine';
 import { isNonPermanentPayrollEmployee, permanentStyleSageEarnings } from '@/lib/payroll-employee-classification';
 import { syncSagePeriodEarningAdjustments } from '@/lib/payroll-period-earning-adjustments-store';
 import { contractEmployeeCode, isDailyRatePayrollEmployee, isEmployeeExcludedFromPayrollRun, type PayrollRunExclusionEmployee } from '@/lib/payroll-employee-classification';
@@ -206,29 +206,37 @@ const timesheetPeriodId = (period: string) => `per-${period.replace(/^per-/, '')
 
 export const readApprovedTimesheetHoursForPayrollPeriod = async (period: string) => buildTimesheetHoursMapForPayrollPeriod(period);
 
+const resolveTimesheetHoursForEmployee = (
+  employee: Pick<DleEmployeeDirectoryRow, 'employeeId' | 'employeeCode' | 'id' | 'fullName'>,
+  timesheetHours: Map<string, { daysWorked: number; bookedHours: number }>,
+) => {
+  const keys = [employee.employeeId, employee.employeeCode, employee.id, employee.fullName, normalizePayrollMatchKey(employee.employeeId), normalizePayrollMatchKey(employee.employeeCode), normalizePayrollMatchKey(employee.fullName)]
+    .map((key) => compact(key))
+    .filter(Boolean);
+  return keys.map((key) => timesheetHours.get(key) || timesheetHours.get(normalizePayrollMatchKey(key))).find(Boolean) || null;
+};
+
 const applyDailyRateFromTimesheets = (
   employee: DleEmployeeDirectoryRow,
   amounts: ReturnType<typeof calculatePayrollEarnings>,
   timesheetHours: Map<string, { daysWorked: number; bookedHours: number }>,
+  period: string,
 ) => {
   const profileId = resolvePayrollEarningProfile(employee);
   if (!isDailyRatePayrollEmployee(employee, profileId)) return amounts;
-  const keys = [employee.employeeId, employee.employeeCode, employee.id, normalizePayrollMatchKey(employee.employeeId), normalizePayrollMatchKey(employee.employeeCode)]
-    .map((key) => compact(key))
-    .filter(Boolean);
-  const timesheet = keys.map((key) => timesheetHours.get(key) || timesheetHours.get(normalizePayrollMatchKey(key))).find(Boolean);
+  const timesheet = resolveTimesheetHoursForEmployee(employee, timesheetHours);
   const rates = dailyRateValues(employee, true);
   if (!timesheet || (timesheet.daysWorked <= 0 && timesheet.bookedHours <= 0)) return amounts;
-  const contractEarnings = calculateContractDayRateEarnings({
-    ratePerDay: rates.ratePerDay || (rates.ratePerHour > 0 ? rates.ratePerHour * rates.hoursPerDay : 0),
-    weekdayDays: timesheet.daysWorked > 0 ? timesheet.daysWorked : (timesheet.bookedHours > 0 ? timesheet.bookedHours / rates.hoursPerDay : 0),
-  });
+  const daysWorked = timesheet.daysWorked > 0
+    ? timesheet.daysWorked
+    : (timesheet.bookedHours > 0 ? timesheet.bookedHours / rates.hoursPerDay : 0);
+  const ratePerDay = rates.ratePerDay || (rates.ratePerHour > 0 ? rates.ratePerHour * rates.hoursPerDay : 0);
+  const merged = mergeTimesheetDayRateEarnings(employee, { ratePerDay, daysWorked, period });
   return {
-    ...amounts,
-    ...contractEarnings,
-    profileName: 'Daily Rate (Timesheet Driven)',
-    earningLines: contractEarnings.earningLines,
-    paidEarningLines: contractEarnings.paidEarningLines || contractEarnings.earningLines,
+    ...merged,
+    profileName: merged.profileName.includes('Sage Aligned')
+      ? 'Daily Rate (Timesheet Driven, Sage Aligned)'
+      : 'Daily Rate (Timesheet Driven)',
   };
 };
 
@@ -323,7 +331,7 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
     const calculationOptions = calculationOptionsForEmployee(employee);
     const calculationEmployee = shouldComparePayrollWithSage(requestedPeriod) ? employee : inputOnlyEmployee(employee);
     const baseAmounts = calculatePayrollEarnings(calculationEmployee, calculationOptions);
-    const amounts = applyDailyRateFromTimesheets(employee, baseAmounts, timesheetHours);
+    const amounts = applyDailyRateFromTimesheets(employee, baseAmounts, timesheetHours, requestedPeriod);
     const tax = calculatePayrollTax(payrollInputFromEmployee(calculationEmployee, calculationOptions, amounts), taxVersion);
     const pension = calculatePension(pensionInputFromEmployee(calculationEmployee, calculationOptions), pensionVersion);
     const funds = calculateStatutoryFunds(statutoryFundInputFromEmployee(calculationEmployee, employeeSource.employees.length, calculationOptions), fundsVersion);
@@ -356,7 +364,7 @@ export const calculatePayrollForPeriod = async (requestedPeriod: string): Promis
     const deductionRatio = amounts.grossPay > 0 ? roundMoney((totalDeductions / amounts.grossPay) * 100) : 0;
     const dailyRateEmployee = isDailyRatePayrollEmployee(employee, amounts.profileId);
     const rates = dailyRateValues(employee, dailyRateEmployee);
-    const timesheet = [employee.employeeId, employee.employeeCode].map((key) => timesheetHours.get(compact(key)) || timesheetHours.get(normalizePayrollMatchKey(key))).find(Boolean) || null;
+    const timesheet = resolveTimesheetHoursForEmployee(employee, timesheetHours);
 
     const issues = [
       ...amounts.grossPay <= 0 ? ['Gross pay is missing'] : [],

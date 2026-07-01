@@ -34,6 +34,15 @@ const isPaidDay = (row) => {
   return hasClock || hasBooked;
 };
 
+const isPayrollPayableDay = (row) => {
+  const dateKey = iso(row.TimesheetDate);
+  const day = new Date(`${dateKey}T12:00:00Z`).getUTCDay();
+  if (day === 0) return false;
+  const hasBooked = Number(row.TotalHours || 0) > 0 || Number(row.UsedHours || 0) > 0;
+  if (hasBooked) return true;
+  return Boolean(String(row.ClockIn || '').trim());
+};
+
 const iso = (d) => {
   const x = new Date(d);
   return Number.isNaN(x.getTime()) ? '' : x.toISOString().slice(0, 10);
@@ -51,6 +60,7 @@ for (const code of codes) {
   const buckets = {
     payrollReadyPaidDays: new Set(),
     activePaidDays: new Set(),
+    payrollPayableDays: new Set(),
     allPaidDays: new Set(),
     payrollReadyBookedOnly: new Set(),
     activeWeekdays: new Set(),
@@ -62,6 +72,7 @@ for (const code of codes) {
     if (!date || !isPaidDay(row)) continue;
     buckets.allPaidDays.add(date);
     if (ACTIVE.has(row.Status)) buckets.activePaidDays.add(date);
+    if (ACTIVE.has(row.Status) && isPayrollPayableDay(row)) buckets.payrollPayableDays.add(date);
     if (PAYROLL_READY.has(row.Status)) buckets.payrollReadyPaidDays.add(date);
     if (ACTIVE.has(row.Status) && Number(row.TotalHours || 0) > 0) buckets.payrollReadyBookedOnly.add(date);
     const wd = new Date(`${date}T12:00:00`).getDay();

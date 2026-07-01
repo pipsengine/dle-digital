@@ -2232,11 +2232,35 @@ const payrollReadyHeaderStatuses = new Set<TimesheetStatus>(['HR_Acknowledged', 
 export const isTimesheetCountableForPayroll = (status: TimesheetStatus | string) =>
   !['Rejected', 'Returned'].includes(normalizeTimesheetStatus(status as TimesheetStatus));
 
+/** Prefer contract employee code (C####) when matching payroll directory rows. */
+export const canonicalTimesheetEmployeeKey = (line: Pick<TimesheetLine, 'employeeId' | 'employeeNo' | 'employeeName'>) => {
+  const compact = (value: unknown) => String(value || '').trim();
+  const candidates = [line.employeeNo, line.employeeId, line.employeeName]
+    .map((value) => normalizePayrollMatchKey(compact(value)))
+    .filter(Boolean);
+  const contractCode = candidates.find((key) => /^C\d+/.test(key));
+  return contractCode || candidates[0] || 'UNKNOWN';
+};
+
 /** A payable day is recorded when attendance exists, hours are booked, or paid leave applies. */
 export const isPaidWorkDay = (line: Pick<TimesheetLine, 'clockIn' | 'totalHours' | 'usedHours' | 'projectAllocations' | 'idleAllocations' | 'remarks'>) => {
   const hasClock = Boolean(String(line.clockIn || '').trim());
   const hasBooked = normalizePaidWorkHours(Number(line.totalHours || 0)) > 0 || normalizePaidWorkHours(Number(line.usedHours || 0)) > 0;
   return hasClock || hasBooked || isTimesheetPaidLeaveLine(line);
+};
+
+/** Payroll day rule aligned with HR master sheets: Mon–Sat count clock/booked/leave; Sunday is never payable. */
+export const isPayrollPayableWorkDay = (
+  line: Pick<TimesheetLine, 'clockIn' | 'totalHours' | 'usedHours' | 'projectAllocations' | 'idleAllocations' | 'remarks'>,
+  timesheetDate: string,
+) => {
+  const dateKey = String(timesheetDate || '').slice(0, 10);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? new Date(`${dateKey}T12:00:00Z`).getUTCDay() : -1;
+  if (day === 0) return false;
+  if (isTimesheetPaidLeaveLine(line)) return true;
+  const hasBooked = normalizePaidWorkHours(Number(line.totalHours || 0)) > 0 || normalizePaidWorkHours(Number(line.usedHours || 0)) > 0;
+  if (hasBooked) return true;
+  return Boolean(String(line.clockIn || '').trim());
 };
 
 /** Canonical payroll attendance totals — one paid day per employee per calendar date across all headers. */
@@ -2259,17 +2283,18 @@ export const aggregateEmployeeAttendanceForHeaders = (
     if (options?.payrollReadyOnly && !payrollReadyHeaderStatuses.has(status)) continue;
 
     const dateKey = header.timesheetDate || '';
-    const paidDay = isPaidWorkDay(line);
-    const employeeDateKey = `${line.employeeId}::${dateKey}`;
+    const paidDay = isPayrollPayableWorkDay(line, dateKey);
+    const employeeKey = canonicalTimesheetEmployeeKey(line);
+    const employeeDateKey = `${employeeKey}::${dateKey}`;
     if (paidDay && dateKey && countedEmployeeDates.has(employeeDateKey)) {
-      const current = totals.get(line.employeeId);
+      const current = totals.get(employeeKey);
       if (current) current.skippedDuplicateDays += 1;
       continue;
     }
     if (paidDay && dateKey) countedEmployeeDates.add(employeeDateKey);
 
-    const current = totals.get(line.employeeId) || {
-      employeeId: line.employeeId,
+    const current = totals.get(employeeKey) || {
+      employeeId: employeeKey,
       employeeName: line.employeeName,
       daysWorked: 0,
       attendanceHours: 0,
@@ -2277,11 +2302,12 @@ export const aggregateEmployeeAttendanceForHeaders = (
       idleHours: 0,
       skippedDuplicateDays: 0,
     };
+    if (!current.employeeName && line.employeeName) current.employeeName = line.employeeName;
     current.daysWorked += paidDay ? 1 : 0;
     current.attendanceHours = Math.round((current.attendanceHours + normalizePaidWorkHours(line.attendanceDuration)) * 10) / 10;
     current.bookedHours = Math.round((current.bookedHours + normalizePaidWorkHours(line.totalHours)) * 10) / 10;
     current.idleHours = Math.round((current.idleHours + line.idleHours) * 10) / 10;
-    totals.set(line.employeeId, current);
+    totals.set(employeeKey, current);
   }
 
   return totals;
@@ -2294,15 +2320,24 @@ const synthesizeTimesheetHoursForPeriod = async (periodId: string) => {
     headerIds: periodHeaders.map((header) => header.id),
     payrollReadyOnly: false,
   });
-  const mapped = new Map<string, { daysWorked: number; bookedHours: number; employeeNo?: string }>();
+  const aliasesByEmployee = new Map<string, { employeeNo?: string; employeeName?: string }>();
   for (const line of lines) {
     if (!periodHeaders.some((header) => header.id === line.headerId)) continue;
-    const aggregate = totals.get(line.employeeId);
-    if (!aggregate || mapped.has(line.employeeId)) continue;
-    mapped.set(line.employeeId, {
+    const key = canonicalTimesheetEmployeeKey(line);
+    const current = aliasesByEmployee.get(key) || {};
+    aliasesByEmployee.set(key, {
+      employeeNo: current.employeeNo || line.employeeNo,
+      employeeName: current.employeeName || line.employeeName,
+    });
+  }
+  const mapped = new Map<string, { daysWorked: number; bookedHours: number; employeeNo?: string; employeeName?: string }>();
+  for (const [employeeKey, aggregate] of totals) {
+    const alias = aliasesByEmployee.get(employeeKey);
+    mapped.set(employeeKey, {
       daysWorked: aggregate.daysWorked,
       bookedHours: aggregate.bookedHours,
-      employeeNo: line.employeeNo,
+      employeeNo: alias?.employeeNo,
+      employeeName: alias?.employeeName || aggregate.employeeName,
     });
   }
   return mapped;
@@ -2312,18 +2347,19 @@ const registerTimesheetHours = (
   map: Map<string, { daysWorked: number; bookedHours: number }>,
   employeeId: string,
   employeeNo: string | undefined,
+  employeeName: string | undefined,
   data: { daysWorked: number; bookedHours: number },
 ) => {
   const compact = (value: unknown) => String(value || '').trim();
-  const keys = [employeeId, employeeNo, normalizePayrollMatchKey(employeeId), normalizePayrollMatchKey(employeeNo)]
+  const keys = [employeeId, employeeNo, employeeName, normalizePayrollMatchKey(employeeId), normalizePayrollMatchKey(employeeNo), normalizePayrollMatchKey(employeeName)]
     .map((key) => compact(key))
     .filter(Boolean);
   keys.forEach((key) => map.set(key, data));
 };
 
-const hasTimesheetHours = (map: Map<string, { daysWorked: number; bookedHours: number }>, employeeId: string, employeeNo?: string) => {
+const hasTimesheetHours = (map: Map<string, { daysWorked: number; bookedHours: number }>, employeeId: string, employeeNo?: string, employeeName?: string) => {
   const compact = (value: unknown) => String(value || '').trim();
-  const keys = [employeeId, employeeNo, normalizePayrollMatchKey(employeeId), normalizePayrollMatchKey(employeeNo)]
+  const keys = [employeeId, employeeNo, employeeName, normalizePayrollMatchKey(employeeId), normalizePayrollMatchKey(employeeNo), normalizePayrollMatchKey(employeeName)]
     .map((key) => compact(key))
     .filter(Boolean);
   return keys.some((key) => {
@@ -2341,7 +2377,7 @@ export async function buildTimesheetHoursMapForPayrollPeriod(period: string) {
   try {
     const synthesized = await synthesizeTimesheetHoursForPeriod(periodId);
     synthesized.forEach((data, employeeId) => {
-      registerTimesheetHours(map, employeeId, data.employeeNo, {
+      registerTimesheetHours(map, employeeId, data.employeeNo, data.employeeName, {
         daysWorked: data.daysWorked,
         bookedHours: data.bookedHours,
       });
@@ -2355,8 +2391,8 @@ export async function buildTimesheetHoursMapForPayrollPeriod(period: string) {
     const update = updates.find((item) => item.periodId === periodId || String(item.periodName || '').includes(periodToken));
     if (update) {
       for (const employee of update.employeeAttendance) {
-        if (hasTimesheetHours(map, employee.employeeId)) continue;
-        registerTimesheetHours(map, employee.employeeId, undefined, {
+        if (hasTimesheetHours(map, employee.employeeId, undefined, employee.employeeName)) continue;
+        registerTimesheetHours(map, employee.employeeId, undefined, employee.employeeName, {
           daysWorked: Number(employee.daysWorked || 0),
           bookedHours: Number(employee.bookedHours || 0),
         });
@@ -2454,8 +2490,11 @@ export async function refreshTimesheetPayrollUpdatesForHeaders(headerIds: string
     const sampleHeader = headers.find((item) => item.id === mergedHeaderIds[0]);
     if (!sampleHeader) continue;
     const existingPeriodUpdate = updates.find((update) => update.periodId === periodId);
+    const allPeriodHeaderIds = headers
+      .filter((item) => item.periodId === periodId && isTimesheetCountableForPayroll(item.status))
+      .map((item) => item.id);
     const totals = aggregateEmployeeAttendanceForHeaders(headers, lines, {
-      headerIds: mergedHeaderIds,
+      headerIds: allPeriodHeaderIds,
       payrollReadyOnly: false,
     });
 
@@ -2471,7 +2510,7 @@ export async function refreshTimesheetPayrollUpdatesForHeaders(headerIds: string
         periodName: period.name,
         acknowledgedAt: new Date().toISOString(),
         acknowledgedBy: actor,
-        headerIds: mergedHeaderIds,
+        headerIds: Array.from(new Set([...(existingPeriodUpdate?.headerIds || []), ...mergedHeaderIds])),
         employeeAttendance: Array.from(totals.values()).map((item) => ({
           employeeId: item.employeeId,
           employeeName: item.employeeName,
@@ -2780,6 +2819,9 @@ export const isTimesheetEditableStatus = (status: TimesheetStatus) =>
 
 export const isTimesheetPayrollReadyStatus = (status: TimesheetStatus) =>
   ['HR_Acknowledged', 'Locked'].includes(normalizeTimesheetStatus(status));
+
+/** Rebuild the payroll attendance snapshot for a full timesheet period from live lines. */
+export const rebuildPayrollSnapshotForPeriod = async (periodId: string, actor: string) => createPayrollUpdateForPeriod(periodId, actor);
 
 const createPayrollUpdateForPeriod = async (periodId: string, actor: string): Promise<TimesheetPayrollUpdate> => {
   const { headers, lines } = await readTimesheetData();
