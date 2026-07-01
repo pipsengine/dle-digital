@@ -5,6 +5,7 @@ import { isDailyRatePayrollEmployee, markInactiveNonDailyContractEmployees, payr
 import { applyPayrollEmployeeOptions } from '@/lib/payroll-employee-options-store';
 import { isGenericPayrollGrade } from '@/lib/payroll-earnings-engine';
 import { payslipIdentityMap } from '@/lib/payroll-payslip-identity-store';
+import { isSagePayrollRuntimeEnabled } from '@/lib/payroll-enterprise-source';
 import { normalizePayrollMatchKey, readActiveSagePayrollEmployeesWithLatestPayslipLines, readSagePayrollEmployeeBankDetails } from '@/lib/sage-people-payroll-store';
 import {
   buildSagePayrollContributionsFromLines,
@@ -288,7 +289,7 @@ const sageStoredLineItems = (lines: Array<{ code: string; name: string; amount: 
   }));
 
 const maybeEnrichEmployeesFromSagePayroll = async (employees: DleEmployeeDirectoryRow[]) => {
-  if (!SAGE_PAYROLL_ENRICH_ENABLED) return employees;
+  if (!SAGE_PAYROLL_ENRICH_ENABLED || !isSagePayrollRuntimeEnabled()) return employees;
   return enrichEmployeesFromSagePayroll(employees);
 };
 

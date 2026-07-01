@@ -2,7 +2,7 @@ import type { DleEmployeeDirectoryRow } from '@/lib/dle-enterprise-db';
 import { payrollDataSourceInfo, readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { mergeTimesheetDayRateEarnings, calculatePayrollEarnings, resolvePayrollEarningProfile } from '@/lib/payroll-earnings-engine';
 import { isNonPermanentPayrollEmployee, permanentStyleSageEarnings } from '@/lib/payroll-employee-classification';
-import { syncSagePeriodEarningAdjustments } from '@/lib/payroll-period-earning-adjustments-store';
+import { registerPayrollAdjustmentsChangeHandler, adjustmentsFileMtime } from '@/lib/payroll-period-earning-adjustments-store';
 import { contractEmployeeCode, isDailyRatePayrollEmployee, isEmployeeExcludedFromPayrollRun, type PayrollRunExclusionEmployee } from '@/lib/payroll-employee-classification';
 import { enterprisePayrollSourceLabel, isEnterprisePayrollPeriod, shouldComparePayrollWithSage } from '@/lib/payroll-enterprise-source';
 import { activeTaxVersion, calculatePayrollTax, payrollInputFromEmployee, readPayrollTaxConfig } from '@/lib/payroll-tax-engine';
@@ -266,14 +266,54 @@ export const groupPayrollCalculationRecords = (records: PayrollCalculationRecord
     .map((item) => ({ ...item, grossPay: roundMoney(item.grossPay), netPay: roundMoney(item.netPay) }))
     .sort((a, b) => b.grossPay - a.grossPay);
 
-export const calculatePayrollForPeriod = async (requestedPeriod: string): Promise<PayrollCalculationResult> => {
+const PAYROLL_CALC_CACHE_TTL_MS = 45_000;
+const payrollCalculationCache = new Map<string, {
+  key: string;
+  expiresAt: number;
+  result?: PayrollCalculationResult;
+  inFlight?: Promise<PayrollCalculationResult>;
+}>();
+
+export const calculatePayrollForPeriod = async (
+  requestedPeriod: string,
+  options?: { forceRefresh?: boolean },
+): Promise<PayrollCalculationResult> => {
+  const cacheKey = `${requestedPeriod}:${adjustmentsFileMtime()}`;
+  const cached = payrollCalculationCache.get(requestedPeriod);
+  if (!options?.forceRefresh && cached?.result && cached.key === cacheKey && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+  if (!options?.forceRefresh && cached?.inFlight && cached.key === cacheKey) {
+    return cached.inFlight;
+  }
+
+  const inFlight = computePayrollForPeriod(requestedPeriod).then((result) => {
+    payrollCalculationCache.set(requestedPeriod, {
+      key: cacheKey,
+      expiresAt: Date.now() + PAYROLL_CALC_CACHE_TTL_MS,
+      result,
+    });
+    return result;
+  });
+
+  payrollCalculationCache.set(requestedPeriod, { key: cacheKey, expiresAt: 0, inFlight });
+  return inFlight;
+};
+
+export const invalidatePayrollCalculationCache = (period?: string) => {
+  if (period) {
+    payrollCalculationCache.delete(period);
+    return;
+  }
+  payrollCalculationCache.clear();
+};
+
+registerPayrollAdjustmentsChangeHandler((period) => invalidatePayrollCalculationCache(period));
+
+const computePayrollForPeriod = async (requestedPeriod: string): Promise<PayrollCalculationResult> => {
   const toleranceMode = payrollToleranceActive(requestedPeriod);
   const enterpriseSourceActive = isEnterprisePayrollPeriod(requestedPeriod);
   const compareWithSage = shouldComparePayrollWithSage(requestedPeriod);
-  await syncSagePeriodEarningAdjustments(requestedPeriod, { contractEmployeesOnly: true }).catch(() => undefined);
-  if (compareWithSage) {
-    await syncSagePeriodEarningAdjustments(requestedPeriod).catch(() => undefined);
-  }
   const [
     employeeSource,
     taxConfig,

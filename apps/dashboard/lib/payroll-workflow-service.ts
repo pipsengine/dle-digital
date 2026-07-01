@@ -75,7 +75,7 @@ const assertNotBlocked = (summary: Awaited<ReturnType<typeof calculatePayrollFor
 export const executePayrollWorkflowAction = async (input: WorkflowInput) => {
   const { action, period, actor, role, reason, comment, ip, paymentDate } = input;
   if (['calculate', 'create-run', 'validate-payroll'].includes(action)) invalidatePayrollEmployeeCache();
-  const calculation = await calculatePayrollForPeriod(period);
+  const calculation = await calculatePayrollForPeriod(period, { forceRefresh: true });
   const periodLabel = payrollPeriodLabel(period);
   let run = await getPayrollRunForPeriod(period);
 

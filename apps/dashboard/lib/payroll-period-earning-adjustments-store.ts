@@ -4,7 +4,7 @@ import path from 'node:path';
 import { isLeaveAllowancePaymentCode } from '@/lib/leave-allowance-policy';
 import { normalizePayrollPeriod } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
-import { isEnterprisePayrollPeriod } from '@/lib/payroll-enterprise-source';
+import { isEnterprisePayrollPeriod, isSagePayrollRuntimeEnabled } from '@/lib/payroll-enterprise-source';
 import { invalidateEssPortalCache } from '@/lib/ess-portal-cache';
 import { readPayrollEmployees } from '@/lib/payroll-employee-source';
 import { isContractStyleEarningLine, isPermanentPayrollEmployee, permanentStyleSageEarnings } from '@/lib/payroll-employee-classification';
@@ -96,14 +96,26 @@ const employeeAdjustmentIdentity = (
   return code || name;
 };
 
-/** Sync every Sage payslip earning line for a payroll period into period adjustments (authoritative for ESS + payroll calc). */
+export type SagePayrollSyncOptions = {
+  contractEmployeesOnly?: boolean;
+  /** Set true only for one-off migration scripts — never from runtime API/page loads. */
+  migration?: boolean;
+};
+
+/** Migration-only: copies Sage payslip earning lines into local period adjustments JSON. */
 export const syncSagePeriodEarningAdjustments = async (
   period?: string,
-  options?: { contractEmployeesOnly?: boolean },
+  options?: SagePayrollSyncOptions,
 ) => {
   const normalizedPeriod = normalizePayrollPeriod(period || activePayrollPeriod());
-  const enterprise = Boolean(normalizedPeriod && isEnterprisePayrollPeriod(normalizedPeriod));
-  if (!normalizedPeriod || (enterprise && !options?.contractEmployeesOnly)) {
+  if (!normalizedPeriod) {
+    return { period: normalizedPeriod, synced: 0, changed: false, employees: 0 };
+  }
+  if (!options?.migration && !isSagePayrollRuntimeEnabled(normalizedPeriod)) {
+    return { period: normalizedPeriod, synced: 0, changed: false, employees: 0 };
+  }
+  const enterprise = isEnterprisePayrollPeriod(normalizedPeriod);
+  if (enterprise && !options?.migration && !options?.contractEmployeesOnly) {
     return { period: normalizedPeriod, synced: 0, changed: false, employees: 0 };
   }
 
@@ -194,23 +206,30 @@ export const syncSagePeriodEarningAdjustments = async (
   if (changed) {
     await writePayrollPeriodEarningAdjustments(merged);
     invalidateEssPortalCache();
+    onAdjustmentsChanged?.(normalizedPeriod);
   }
   return { period: normalizedPeriod, synced, changed, employees: snapshots.length };
 };
 
 const periodSyncInFlight = new Map<string, Promise<{ period: string; synced: number; changed: boolean; employees: number }>>();
 
-/** Idempotent: loads Sage payslip earning lines for a period once per server session wave. */
+let onAdjustmentsChanged: ((period: string) => void) | null = null;
+
+/** Lets payroll calculation invalidate its cache when period adjustments are rewritten. */
+export const registerPayrollAdjustmentsChangeHandler = (handler: (period: string) => void) => {
+  onAdjustmentsChanged = handler;
+};
+
+/** Idempotent migration helper — does not run during normal payroll UI loads. */
 export const ensureSagePeriodEarningAdjustments = async (
   period?: string,
-  options?: { contractEmployeesOnly?: boolean },
+  options?: SagePayrollSyncOptions,
 ) => {
   const normalizedPeriod = normalizePayrollPeriod(period || activePayrollPeriod());
-  const enterprise = Boolean(normalizedPeriod && isEnterprisePayrollPeriod(normalizedPeriod));
-  if (!normalizedPeriod || (enterprise && !options?.contractEmployeesOnly)) {
+  if (!normalizedPeriod || (!options?.migration && !isSagePayrollRuntimeEnabled(normalizedPeriod))) {
     return { period: normalizedPeriod, synced: 0, changed: false, employees: 0 };
   }
-  const cacheKey = `${normalizedPeriod}:${options?.contractEmployeesOnly ? 'contract' : 'all'}`;
+  const cacheKey = `${normalizedPeriod}:${options?.contractEmployeesOnly ? 'contract' : 'all'}:${options?.migration ? 'migration' : 'runtime'}`;
   const existing = periodSyncInFlight.get(cacheKey);
   if (existing) return existing;
   const task = syncSagePeriodEarningAdjustments(normalizedPeriod, options).finally(() => {
@@ -220,10 +239,10 @@ export const ensureSagePeriodEarningAdjustments = async (
   return task;
 };
 
-export const syncSageSupplementalEarningAdjustments = async (period?: string) => {
+export const syncSageSupplementalEarningAdjustments = async (period?: string, options?: SagePayrollSyncOptions) => {
   const normalizedPeriod = normalizePayrollPeriod(period || activePayrollPeriod());
-  if (!normalizedPeriod || isEnterprisePayrollPeriod(normalizedPeriod)) return [];
-  const result = await syncSagePeriodEarningAdjustments(normalizedPeriod);
+  if (!normalizedPeriod || (!options?.migration && !isSagePayrollRuntimeEnabled(normalizedPeriod))) return [];
+  const result = await syncSagePeriodEarningAdjustments(normalizedPeriod, options);
   if (!result.changed) {
     const [current] = await Promise.all([readPayrollPeriodEarningAdjustments()]);
     return current.filter((row) => normalizePayrollPeriod(row.period) === normalizedPeriod && isSupplementalSageEarningCode(row.code));

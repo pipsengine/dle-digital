@@ -12,7 +12,6 @@ import { enterprisePayrollSourceLabel, isEnterprisePayrollPeriod } from '@/lib/p
 import { calculatePayrollForPeriod } from '@/lib/payroll-calculation-service';
 import { invalidateHrisEmployeeCaches } from '@/lib/hris-employee-cache';
 import { capturePayrollSnapshot, ensurePayrollRun, getPayrollRunForPeriod, savePayrollRun } from '@/lib/payroll-run-store';
-import { syncSagePeriodEarningAdjustments } from '@/lib/payroll-period-earning-adjustments-store';
 import { syncLeaveAllowanceEventsForPayroll } from '@/lib/payroll-leave-allowance-store';
 import { activePayrollPeriod } from '@/lib/payroll-periods';
 import { calculateTimesheetPeriod, buildTimesheetHoursMapForPayrollPeriod, readTimesheetPeriods } from '@/lib/timesheet-entry-store';
@@ -200,7 +199,6 @@ const buildPayload = async (request: Request, requestedPeriod = monthPeriod()) =
   const role = getRole(request);
   const perms = permissions(role);
   const enterpriseSourceActive = isEnterprisePayrollPeriod(requestedPeriod);
-  await syncSagePeriodEarningAdjustments(requestedPeriod, { contractEmployeesOnly: true }).catch(() => undefined);
   if (!enterpriseSourceActive) {
     await syncPayslipIdentitiesFromSage({ migratedBy: 'Payslip Generation' }).catch(() => undefined);
   }
@@ -541,9 +539,6 @@ export async function POST(request: Request) {
     await writeBatches([batch, ...batches.filter((item) => item.period !== period)].sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)));
 
     if (action === 'release') {
-      if (!isEnterprisePayrollPeriod(period)) {
-        await syncSagePeriodEarningAdjustments(period).catch(() => undefined);
-      }
       const calculation = await calculatePayrollForPeriod(period);
       const run = (await getPayrollRunForPeriod(period)) || (await ensurePayrollRun(period, payload.periodLabel, role));
       const stamp = now;

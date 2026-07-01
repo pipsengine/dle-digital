@@ -12,7 +12,19 @@ export const isEnterprisePayrollPeriod = (period: string) =>
   periodSortKey(period) >= periodSortKey(ENTERPRISE_PAYROLL_FROM_PERIOD);
 
 /** Sage live comparison is only valid for pre-cutover migration periods. */
-export const shouldComparePayrollWithSage = (period: string) => !isEnterprisePayrollPeriod(period);
+export const shouldComparePayrollWithSage = (period: string) =>
+  isSagePayrollRuntimeEnabled(period) && !isEnterprisePayrollPeriod(period);
+
+/**
+ * Sage payroll DB access is migration-only by default.
+ * Set HRIS_SAGE_PAYROLL_RUNTIME=true only for legacy cutover debugging — never in production load paths.
+ */
+export const isSagePayrollRuntimeEnabled = (period?: string) => {
+  const runtimeFlag = String(process.env.HRIS_SAGE_PAYROLL_RUNTIME ?? 'false').trim().toLowerCase();
+  if (['0', 'false', 'no', 'off', ''].includes(runtimeFlag)) return false;
+  if (period && isEnterprisePayrollPeriod(period)) return false;
+  return true;
+};
 
 export const enterprisePayrollSourceLabel = (period: string) =>
   isEnterprisePayrollPeriod(period) ? 'DLE_Enterprise payroll engine' : 'DLE unified payroll calculation engine';
