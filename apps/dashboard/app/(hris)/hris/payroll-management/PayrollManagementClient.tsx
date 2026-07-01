@@ -3321,7 +3321,7 @@ function SalaryManagementWorkspace({ activeTab, payload, canViewMoney }: { activ
   );
 }
 
-function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction, busyAction, onAudit, exportCsv, exportExcel }: { payload: PayrollPayload | null; canViewMoney: boolean; role: Role; runAction: (action: string, reason?: string) => Promise<void>; busyAction: string; onAudit: () => void; exportCsv: () => void; exportExcel: () => void }) {
+function PayrollComputationWorkflowPage({ payload, canViewMoney, role, runAction, busyAction, onAudit, exportCsv, exportExcel }: { payload: PayrollPayload | null; canViewMoney: boolean; role: Role; runAction: (action: string, reason?: string) => Promise<boolean | void>; busyAction: string; onAudit: () => void; exportCsv: () => void; exportExcel: () => void }) {
   const [activeStage, setActiveStage] = useState<WorkflowStageId>('data');
   const currentRun = payrollRunFor(payload);
   const status = currentRun?.status || payload?.workflow?.currentStatus || 'Draft';
